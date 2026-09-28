@@ -2676,7 +2676,7 @@ impl Element for InputElement {
                 .map(|cursor_position| {
                     fill(
                         Bounds::new(cursor_position, size(px(1.5), layout.line_height())),
-                        theme.accent,
+                        theme.text,
                     )
                 });
             let follow = input.auto_height.then(|| {
