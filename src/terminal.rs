@@ -71,7 +71,7 @@ const TERMINAL_LINK_REGEX: &str = "((ipfs:|ipns:|magnet:|mailto:|gemini://|gophe
 const MAX_TERMINAL_LINK_SEARCH_LINES: i32 = 100;
 
 /// Icon glyphs (nerd-font private-use codepoints) resolve through CoreText's
-/// cascade rather than run splitting: JetBrains Mono itself keeps the
+/// cascade rather than run splitting: Lilex itself keeps the
 /// Powerline range it covers, everything else falls through to the bundled
 /// symbols face registered in [`crate::assets::register_fonts`].
 static TERMINAL_FONT_FALLBACKS: LazyLock<FontFallbacks> = LazyLock::new(|| {
@@ -79,7 +79,7 @@ static TERMINAL_FONT_FALLBACKS: LazyLock<FontFallbacks> = LazyLock::new(|| {
 });
 
 fn terminal_font() -> gpui::Font {
-    let mut terminal_font = font("JetBrains Mono");
+    let mut terminal_font = font("Lilex");
     terminal_font.fallbacks = Some(TERMINAL_FONT_FALLBACKS.clone());
     terminal_font
 }

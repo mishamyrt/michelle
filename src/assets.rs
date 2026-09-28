@@ -212,10 +212,10 @@ const ICONS: &[(&str, &[u8])] = icons![
 ];
 
 const TEXT_FONTS: &[&[u8]] = &[
-    include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
-    include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf"),
-    include_bytes!("../assets/fonts/JetBrainsMono-Italic.ttf"),
-    include_bytes!("../assets/fonts/JetBrainsMono-BoldItalic.ttf"),
+    include_bytes!("../assets/fonts/Lilex-Regular.ttf"),
+    include_bytes!("../assets/fonts/Lilex-Bold.ttf"),
+    include_bytes!("../assets/fonts/Lilex-Italic.ttf"),
+    include_bytes!("../assets/fonts/Lilex-BoldItalic.ttf"),
 ];
 
 /// Symbols-only icon face resolved via CoreText cascade (`FontFallbacks`),
