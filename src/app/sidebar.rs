@@ -1665,6 +1665,7 @@ impl Waku {
         }
         if changed {
             self.sidebar_rows_fingerprint.set(None);
+            self.save_sidebar_collapsed_projects();
             cx.notify();
         }
     }
@@ -1683,7 +1684,23 @@ impl Waku {
         let reveal_reset = collapsed && self.sidebar_project_reveal_counts.remove(&group).is_some();
         if collapse_changed || reveal_reset {
             self.sidebar_rows_fingerprint.set(None);
+            self.save_sidebar_collapsed_projects();
             cx.notify();
+        }
+    }
+
+    fn save_sidebar_collapsed_projects(&mut self) {
+        let collapsed_projects = self
+            .sidebar_collapsed_groups
+            .iter()
+            .filter_map(|group| match group {
+                SidebarGroup::Project(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        if self.state.sidebar_collapsed_projects != collapsed_projects {
+            self.state.sidebar_collapsed_projects = collapsed_projects;
+            self.save();
         }
     }
 

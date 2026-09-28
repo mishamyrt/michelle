@@ -333,6 +333,8 @@ struct AppState {
     sidebar_grouping: SidebarGrouping,
     #[serde(default)]
     sidebar_ordering: SidebarOrdering,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    sidebar_collapsed_projects: HashSet<Uuid>,
     #[serde(default = "default_right_panel_width")]
     right_panel_width: f32,
     /// Whether markdown files in the right panel open as a rendered preview
@@ -393,6 +395,8 @@ pub struct PersistedState {
     pub sidebar_grouping: SidebarGrouping,
     #[serde(default)]
     pub sidebar_ordering: SidebarOrdering,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub sidebar_collapsed_projects: HashSet<Uuid>,
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f32,
     /// Whether markdown files in the right panel open as a rendered preview
@@ -460,6 +464,7 @@ impl PersistedState {
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_grouping: SidebarGrouping::Updated,
             sidebar_ordering: SidebarOrdering::Newest,
+            sidebar_collapsed_projects: HashSet::new(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             markdown_preview: false,
             window_state: None,
@@ -604,6 +609,7 @@ impl PersistedState {
             sidebar_width: self.sidebar_width,
             sidebar_grouping: self.sidebar_grouping,
             sidebar_ordering: self.sidebar_ordering,
+            sidebar_collapsed_projects: self.sidebar_collapsed_projects.clone(),
             right_panel_width: self.right_panel_width,
             markdown_preview: self.markdown_preview,
             window_state: self.window_state,
@@ -638,6 +644,7 @@ impl PersistedState {
         self.sidebar_width = app_state.sidebar_width;
         self.sidebar_grouping = app_state.sidebar_grouping;
         self.sidebar_ordering = app_state.sidebar_ordering;
+        self.sidebar_collapsed_projects = app_state.sidebar_collapsed_projects;
         self.right_panel_width = app_state.right_panel_width;
         self.markdown_preview = app_state.markdown_preview;
         self.window_state = app_state.window_state;
@@ -1190,7 +1197,38 @@ mod tests {
 
         assert_eq!(state.sidebar_grouping, SidebarGrouping::Updated);
         assert_eq!(state.sidebar_ordering, SidebarOrdering::Newest);
+        assert!(state.sidebar_collapsed_projects.is_empty());
         assert_eq!(state.last_runtime_mode, RuntimeMode::FullAccess);
+    }
+
+    #[test]
+    fn collapsed_projects_survive_restart_and_can_be_expanded_again() {
+        let project_id = Uuid::new_v4();
+        let other_project_id = Uuid::new_v4();
+        let mut state = PersistedState::empty();
+        state.sidebar_collapsed_projects = HashSet::from([project_id, other_project_id]);
+
+        let saved = serde_json::to_vec(&state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
+        assert_eq!(
+            restored.sidebar_collapsed_projects,
+            state.sidebar_collapsed_projects
+        );
+
+        restored.sidebar_collapsed_projects.remove(&project_id);
+        let saved = serde_json::to_vec(&restored.app_state()).unwrap();
+        let mut restarted = PersistedState::empty();
+        restarted.apply_app_state(serde_json::from_slice(&saved).unwrap());
+        assert_eq!(
+            restarted.sidebar_collapsed_projects,
+            HashSet::from([other_project_id])
+        );
+
+        restarted.sidebar_collapsed_projects.clear();
+        let saved = serde_json::to_vec(&restarted.app_state()).unwrap();
+        restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
+        assert!(restored.sidebar_collapsed_projects.is_empty());
     }
 
     #[test]
