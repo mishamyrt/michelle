@@ -27,7 +27,11 @@ export async function prepareCuaHost(): Promise<string> {
     join(root, "resources/computer-use/cua-host.h"),
     "utf8",
   );
-  const compiler = await $`rustc -vV`.quiet().text();
+  // Keep the cache key and build on Waku's toolchain, not Cua's older pin.
+  const toolchain = (
+    await $`rustup show active-toolchain`.cwd(root).quiet().text()
+  ).trim().split(/\s+/)[0]!;
+  const compiler = await $`rustc +${toolchain} -vV`.quiet().text();
   const key = createHash("sha256")
     .update(revision + extension + header + compiler)
     .digest("hex");
@@ -70,7 +74,7 @@ export async function prepareCuaHost(): Promise<string> {
     await writeFile(abi, extended);
   const target = join(cache, "target");
   console.error("Building Cua SDK native cursor host...");
-  await $`cargo build --locked --release --manifest-path ${join(source, "libs/cua-driver/rust/Cargo.toml")} --target-dir ${target} --package cua-driver-sdk`.cwd(
+  await $`cargo +${toolchain} build --locked --release --manifest-path ${join(source, "libs/cua-driver/rust/Cargo.toml")} --target-dir ${target} --package cua-driver-sdk`.cwd(
     join(source, "libs/cua-driver/rust"),
   );
   if (existsSync(join(destination, library))) return destination;

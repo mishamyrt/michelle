@@ -4,6 +4,7 @@ version = "0.1.19"
 edition = "2024"
 description = "A fast, native control plane for local coding agents"
 license = "GPL-3.0-only"
+rust-version = "1.98.1"
 
 [workspace]
 members = ["crates/waku-client", "crates/waku-core", "crates/waku-daemon", "crates/waku-protocol", "crates/waku-computer-use"]
