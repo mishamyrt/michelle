@@ -1,28 +1,10 @@
-# Waku
+# Michelle
+
+Michelle is a fork of Waku, to which I’ve added features that I need. You probably don’t need this project; you’re better off installing [Waku](https://waku.sh).
 
 Waku is a fast, native desktop app for working with local coding agents. It is
 built in Rust with [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
 and keeps projects, sessions, transcripts on your machine.
-
-## Install
-
-On macOS, [download the signed `.dmg`](https://waku.sh). It updates itself.
-
-On Linux:
-
-```sh
-curl -fsSL https://waku.sh/install.sh | sh
-```
-
-The script installs into `~/.local` without root. See
-[docs/linux.md](docs/linux.md) for requirements, manual installation, and
-uninstalling.
-
-On Windows, run `Waku-<version>-<arch>-Setup.exe` from the
-[latest release](https://github.com/egoist/waku/releases/latest). It installs
-per-user and updates itself. A portable `.zip` is published alongside it. See
-[docs/windows.md](docs/windows.md) for requirements and what is not available
-there yet.
 
 ## Supported agents
 
