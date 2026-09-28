@@ -976,15 +976,42 @@ impl Waku {
         {
             return;
         }
+        self.toggle_composer_menu(MODEL_PICKER_MENU_ID, window, cx);
+    }
+
+    pub(super) fn toggle_model_traits_action(
+        &mut self,
+        _: &ToggleModelTraits,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() || !self.can_configure_model_traits() {
+            return;
+        }
+        self.toggle_composer_menu("model-traits", window, cx);
+    }
+
+    pub(super) fn can_configure_model_traits(&self) -> bool {
+        self.selected_session()
+            .and_then(|session| self.model_metadata_for_session(session))
+            .is_some_and(|model| {
+                !model.reasoning_efforts.is_empty()
+                    || !model.service_tiers.is_empty()
+                    || !model.context_windows.is_empty()
+            })
+    }
+
+    fn toggle_composer_menu(&self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let is_model_picker = id == MODEL_PICKER_MENU_ID;
         let menus = self.menus.borrow();
-        let Some(handle) = menus.get(MODEL_PICKER_MENU_ID).cloned() else {
+        let Some(handle) = menus.get(id).cloned() else {
             return;
         };
         // A keyboard toggle produces no mouse-down for another open menu's
         // dismiss-on-down-out to see, so close the rest here.
         let other_open: Vec<_> = menus
             .iter()
-            .filter(|(id, other)| id.as_ref() != MODEL_PICKER_MENU_ID && other.is_open())
+            .filter(|(other_id, other)| other_id.as_ref() != id && other.is_open())
             .map(|(_, other)| other.clone())
             .collect();
         drop(menus);
@@ -994,7 +1021,11 @@ impl Waku {
             for menu in other_open {
                 menu.close(window, cx);
             }
-            crate::ui::menu::toggle_popover(&handle, MenuAlign::AboveLeft, window, cx);
+            if is_model_picker {
+                crate::ui::menu::toggle_popover(&handle, MenuAlign::AboveLeft, window, cx);
+            } else {
+                crate::ui::menu::toggle_dropdown(&handle, MenuAlign::AboveLeft, window, cx);
+            }
         });
     }
 

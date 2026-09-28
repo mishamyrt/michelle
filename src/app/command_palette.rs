@@ -155,6 +155,7 @@ enum PaletteAction {
     FocusComposer,
     CopyIdentifier(PaletteIdentifier),
     ChooseModel,
+    ModelTraits,
     ToggleUsage,
     CollapseSidebarGroups,
     ToggleSidebar,
@@ -733,6 +734,18 @@ impl Waku {
                 Some(crate::platform::primary_shortcut("⌘/", "Ctrl+/")),
                 PaletteAction::ChooseModel,
                 "choose change select model provider agent",
+                next(),
+            ));
+        }
+
+        if self.can_configure_model_traits() {
+            commands.push(CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.model_reasoning"),
+                "icons/brain.svg",
+                Some(crate::platform::primary_shortcut("⌥⌘/", "Ctrl+Alt+/")),
+                PaletteAction::ModelTraits,
+                "model reasoning thinking effort settings service tier context window",
                 next(),
             ));
         }
@@ -1596,7 +1609,9 @@ impl Waku {
                 let focus = self.composer_focus(cx);
                 window.focus(&focus, cx);
             }
-            PaletteAction::ChooseModel | PaletteAction::ToggleUsage => {
+            PaletteAction::ChooseModel
+            | PaletteAction::ModelTraits
+            | PaletteAction::ToggleUsage => {
                 // These popovers are rendered by the composer. If the command
                 // came from Settings, reveal one normal app frame first so its
                 // persistent menu handle and anchor bounds are current.
@@ -1604,14 +1619,18 @@ impl Waku {
                 let focus = self.composer_focus(cx);
                 window.focus(&focus, cx);
                 let weak = cx.entity().downgrade();
-                let choose_model = matches!(action, PaletteAction::ChooseModel);
                 window.on_next_frame(move |window, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        if choose_model {
+                    let _ = weak.update(cx, |this, cx| match action {
+                        PaletteAction::ChooseModel => {
                             this.toggle_model_picker_action(&ToggleModelPicker, window, cx)
-                        } else {
+                        }
+                        PaletteAction::ModelTraits => {
+                            this.toggle_model_traits_action(&ToggleModelTraits, window, cx)
+                        }
+                        PaletteAction::ToggleUsage => {
                             this.toggle_usage_panel_action(&ToggleUsagePanel, window, cx)
                         }
+                        _ => unreachable!(),
                     });
                 });
             }

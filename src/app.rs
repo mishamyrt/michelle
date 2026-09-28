@@ -71,7 +71,7 @@ use crate::{
     OpenFind, OpenFindReplace, OpenResumePicker, OpenSettings, ReplaceAllMatches, SaveFile,
     SelectFirstTask, SelectLastTask, SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette,
     ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
-    ToggleModelPicker, ToggleRightPanel, ToggleSidebar, ToggleUsagePanel,
+    ToggleModelPicker, ToggleModelTraits, ToggleRightPanel, ToggleSidebar, ToggleUsagePanel,
 };
 
 #[cfg(target_os = "macos")]

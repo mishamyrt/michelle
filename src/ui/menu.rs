@@ -767,6 +767,26 @@ pub fn toggle_popover(
     window: &mut Window,
     cx: &mut App,
 ) {
+    toggle_menu(handle, align, SurfaceFocus::Content, window, cx);
+}
+
+/// Toggle a dropdown from a shortcut, giving its entries keyboard focus.
+pub fn toggle_dropdown(
+    handle: &ContextMenuHandle,
+    align: MenuAlign,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    toggle_menu(handle, align, SurfaceFocus::Card, window, cx);
+}
+
+fn toggle_menu(
+    handle: &ContextMenuHandle,
+    align: MenuAlign,
+    focus_target: SurfaceFocus,
+    window: &mut Window,
+    cx: &mut App,
+) {
     if handle.is_open() {
         handle.close(window, cx);
         window.refresh();
@@ -779,7 +799,7 @@ pub fn toggle_popover(
     else {
         return;
     };
-    open_menu(handle, anchor, SurfaceFocus::Content, true, window, cx);
+    open_menu(handle, anchor, focus_target, true, window, cx);
 }
 
 /// The shared half of both dropdown surfaces: a trigger that records its bounds
@@ -1703,6 +1723,28 @@ mod tests {
     #[gpui::test]
     fn dropdown_trigger_is_keyboard_operable(cx: &mut TestAppContext) {
         assert_trigger_opens_from_keyboard(Surface::Dropdown, cx);
+    }
+
+    #[gpui::test]
+    fn dropdown_shortcut_takes_focus_and_toggles(cx: &mut TestAppContext) {
+        let handle = cx.update(ContextMenuHandle::new);
+        let harness = Harness {
+            handle: handle.clone(),
+            surface: Surface::Dropdown,
+        };
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+
+        cx.update(|window, cx| toggle_dropdown(&handle, MenuAlign::AboveLeft, window, cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        assert!(handle.is_open());
+        cx.update(|window, _| assert!(handle.focus.is_focused(window)));
+
+        cx.simulate_keystrokes("down");
+        assert_eq!(handle.state.borrow().highlighted, Some(0));
+        cx.update(|window, cx| toggle_dropdown(&handle, MenuAlign::AboveLeft, window, cx));
+        assert!(!handle.is_open());
     }
 
     #[gpui::test]
