@@ -12,6 +12,10 @@ fn should_render_empty_state(session: Option<&AgentSession>) -> bool {
         .unwrap_or(true)
 }
 
+fn can_open_project_picker(session: Option<&AgentSession>, project: Option<&Project>) -> bool {
+    should_render_empty_state(session) && project.is_some_and(|project| !project.is_projectless())
+}
+
 impl Waku {
     pub(super) fn render_panel_resize_handle(
         &self,
@@ -287,6 +291,10 @@ impl Render for Waku {
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
             .on_action(cx.listener(Self::new_session_action))
             .on_action(cx.listener(Self::new_project_action))
+            .when(
+                can_open_project_picker(self.selected_session(), self.selected_project()),
+                |element| element.on_action(cx.listener(Self::open_project_picker_action)),
+            )
             .on_action(cx.listener(Self::open_settings_action))
             .on_action(cx.listener(Self::toggle_sidebar_action))
             .on_action(cx.listener(Self::toggle_right_panel_action))
@@ -425,6 +433,29 @@ impl Render for Waku {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_picker_shortcut_requires_the_project_greeting() {
+        let project = Project::from_path("/work/project".into());
+        let projectless = Project::from_path(dirs::home_dir().unwrap().join(".waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+
+        assert!(can_open_project_picker(None, Some(&project)));
+        assert!(can_open_project_picker(Some(&session), Some(&project)));
+        assert!(!can_open_project_picker(Some(&session), None));
+        assert!(!can_open_project_picker(Some(&session), Some(&projectless)));
+
+        session.detail_loaded = false;
+        assert!(!can_open_project_picker(Some(&session), Some(&project)));
+        session.detail_loaded = true;
+        session.begin_provider_turn();
+        assert!(!can_open_project_picker(Some(&session), Some(&project)));
+        session.turns.clear();
+        session
+            .messages
+            .push(Message::new(MessageRole::User, "Hello"));
+        assert!(!can_open_project_picker(Some(&session), Some(&project)));
+    }
 
     #[test]
     fn unloaded_history_never_renders_the_new_task_prompt() {

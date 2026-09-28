@@ -55,6 +55,33 @@ enum ProjectPickerAction {
 }
 
 impl Waku {
+    pub(super) fn open_project_picker_action(
+        &mut self,
+        _: &crate::OpenProjectPicker,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let site = ProjectPickerSite::EmptyState;
+        let handle = self.project_picker_handle(site, cx);
+        if handle.is_open() {
+            return;
+        }
+        let other_open: Vec<_> = self
+            .menus
+            .borrow()
+            .values()
+            .filter(|menu| menu.is_open())
+            .cloned()
+            .collect();
+        // Toggle observers update Waku, so release this entity's lease first.
+        window.defer(cx, move |window, cx| {
+            for menu in other_open {
+                menu.close(window, cx);
+            }
+            crate::ui::menu::toggle_popover(&handle, site.align(), window, cx);
+        });
+    }
+
     /// The menu handle for `site`'s picker. Opening resets the filter and the
     /// keyboard cursor and hands focus to the field; closing returns focus to
     /// the composer, as the branch picker does.

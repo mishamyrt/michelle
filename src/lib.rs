@@ -65,6 +65,7 @@ actions!(
         CloseWindow,
         NewSession,
         NewProject,
+        OpenProjectPicker,
         OpenSettings,
         CheckForUpdates,
         ToggleSidebar,
@@ -217,10 +218,9 @@ pub fn run() {
             crate::theme::init(cx);
             crate::platform::init_reduce_motion(cx);
 
-            // Platform updaters only run from a supported release layout (or
-            // when explicitly forced for development); everywhere else the
-            // menu item is omitted along with the updater itself.
-            let updater = crate::updater::Updater::init();
+            // Michelle updates through local builds. An absent updater also
+            // hides its menu item, settings, and sidebar prompt.
+            let updater: Option<crate::updater::Updater> = None;
             let updater_available = updater.is_some();
             cx.set_global(crate::updater::UpdaterState(updater));
             cx.on_action(|_: &CheckForUpdates, cx| {
@@ -236,6 +236,7 @@ pub fn run() {
                 KeyBinding::new("secondary-w", CloseWindow, None),
                 KeyBinding::new("secondary-n", NewSession, None),
                 KeyBinding::new("secondary-o", NewProject, None),
+                KeyBinding::new("secondary-alt-p", OpenProjectPicker, Some("Waku")),
                 KeyBinding::new("secondary-,", OpenSettings, None),
                 KeyBinding::new("secondary-b", ToggleSidebar, None),
                 KeyBinding::new("secondary-shift-b", ToggleRightPanel, None),
