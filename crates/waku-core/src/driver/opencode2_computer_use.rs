@@ -93,7 +93,7 @@ impl McpBridge {
             return Ok(());
         }
         opencode2_api::add_mcp(&endpoint, &self.directory, &self.server, &self.config)
-            .context("could not connect OpenCode 2 to Waku Computer Use")?;
+            .context("could not connect OpenCode 2 to Michelle Computer Use")?;
         let deadline = Instant::now() + Duration::from_secs(12);
         loop {
             let status = opencode2_api::list_mcp(&endpoint, &self.directory)?
@@ -105,14 +105,14 @@ impl McpBridge {
             {
                 Some("connected") => return Ok(()),
                 Some("failed" | "disabled" | "needs_auth") => bail!(
-                    "OpenCode 2 could not start Waku Computer Use: {}",
+                    "OpenCode 2 could not start Michelle Computer Use: {}",
                     status
                         .as_ref()
                         .and_then(|server| server["status"]["error"].as_str())
                         .unwrap_or("MCP server unavailable")
                 ),
                 _ if Instant::now() >= deadline => {
-                    bail!("OpenCode 2 timed out connecting Waku Computer Use")
+                    bail!("OpenCode 2 timed out connecting Michelle Computer Use")
                 }
                 _ => std::thread::sleep(Duration::from_millis(100)),
             }
@@ -169,7 +169,7 @@ impl OpenCode2ComputerUse {
         )?;
         fs::rename(&temporary, &path)?;
         let instructions = format!(
-            "Computer Use is enabled for this Waku session. Use the `js` and `js_reset` tools from MCP server `{}`. These are direct MCP tools; call them directly. The host routes calls to this session automatically. Before using Computer Use, read the bundled skill at {} for the complete native API and operating instructions. Initialize with `await setupComputerUseRuntime({{ globals: globalThis }})`, then call methods such as `cua.list_apps()` directly. Use `jsRepl.write(...)` for output and `await jsRepl.emitImage(...)` for images. Bindings persist until `js_reset`. The skill documents all available methods; there is no public tool-discovery or generic dispatch API.",
+            "Computer Use is enabled for this Michelle session. Use the `js` and `js_reset` tools from MCP server `{}`. These are direct MCP tools; call them directly. The host routes calls to this session automatically. Before using Computer Use, read the bundled skill at {} for the complete native API and operating instructions. Initialize with `await setupComputerUseRuntime({{ globals: globalThis }})`, then call methods such as `cua.list_apps()` directly. Use `jsRepl.write(...)` for output and `await jsRepl.emitImage(...)` for images. Bindings persist until `js_reset`. The skill documents all available methods; there is no public tool-discovery or generic dispatch API.",
             this.bridge.server,
             this.runtime.config.skill_path.display(),
         );

@@ -1324,7 +1324,7 @@ fn discover_codex_models(binary: &Path) -> Vec<ProviderModel> {
         "params": {
             "clientInfo": {
                 "name": "waku",
-                "title": "Waku",
+                "title": "Michelle",
                 "version": env!("CARGO_PKG_VERSION")
             },
             "capabilities": {

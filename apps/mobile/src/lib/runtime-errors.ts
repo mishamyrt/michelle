@@ -1,4 +1,7 @@
 const DAEMON_DISCONNECT_MESSAGES = new Set([
+  'Michelle daemon disconnected',
+  'Michelle daemon is disconnected',
+  'Michelle client disconnected',
   'Waku daemon disconnected',
   'Waku daemon is disconnected',
   'Waku client disconnected',

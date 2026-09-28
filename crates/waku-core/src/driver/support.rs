@@ -235,7 +235,7 @@ fn build_grok_computer_use_config(
         });
     let rules = fs::read_to_string(&base.skill_path).with_context(|| {
         format!(
-            "could not read Waku Computer Use skill {}",
+            "could not read Michelle Computer Use skill {}",
             base.skill_path.display()
         )
     })?;

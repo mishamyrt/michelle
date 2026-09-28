@@ -372,7 +372,7 @@ fn fork_boundary(
 ) -> anyhow::Result<ForkRequestBoundary> {
     if retained_turns > message_ids.len() {
         bail!(
-            "OpenCode 2 has only {} native turns, but Waku needs {retained_turns}",
+            "OpenCode 2 has only {} native turns, but Michelle needs {retained_turns}",
             message_ids.len()
         );
     }
@@ -387,7 +387,7 @@ fn fork_boundary(
 fn retained_turn_count(total_turns: usize, turns_to_remove: usize) -> anyhow::Result<usize> {
     total_turns.checked_sub(turns_to_remove).ok_or_else(|| {
         anyhow!(
-            "OpenCode 2 has only {total_turns} native turns, but Waku needs to remove {turns_to_remove}"
+            "OpenCode 2 has only {total_turns} native turns, but Michelle needs to remove {turns_to_remove}"
         )
     })
 }

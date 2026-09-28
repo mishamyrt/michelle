@@ -7,6 +7,9 @@ import {
 
 describe('isDaemonDisconnectError', () => {
   test('recognizes the client transport messages emitted during a dropped link', () => {
+    expect(isDaemonDisconnectError(new Error('Michelle daemon disconnected'))).toBe(true);
+    expect(isDaemonDisconnectError('Michelle daemon is disconnected')).toBe(true);
+    expect(isDaemonDisconnectError('Michelle client disconnected')).toBe(true);
     expect(isDaemonDisconnectError(new Error('Waku daemon disconnected'))).toBe(true);
     expect(isDaemonDisconnectError('Waku daemon is disconnected')).toBe(true);
     expect(isDaemonDisconnectError('Waku client disconnected')).toBe(true);

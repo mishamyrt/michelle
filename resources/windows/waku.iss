@@ -34,20 +34,20 @@
 ; Never change AppId: it is how Windows and every later installer recognize
 ; an existing install, and how the updater replaces rather than duplicates it.
 AppId={{8B6C6E4A-3E0F-4F0B-9C5F-2E0E9C4B7A11}
-AppName=Waku
+AppName=Michelle
 AppVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}
-AppPublisher=Waku
+AppPublisher=Michelle
 AppPublisherURL=https://waku.sh
 AppSupportURL=https://github.com/egoist/waku/issues
 AppUpdatesURL=https://github.com/egoist/waku/releases
-DefaultDirName={autopf}\Waku
-DefaultGroupName=Waku
-UninstallDisplayName=Waku
+DefaultDirName={autopf}\Michelle
+DefaultGroupName=Michelle
+UninstallDisplayName=Michelle
 UninstallDisplayIcon={app}\waku.exe
 LicenseFile={#StageDir}\LICENSE
 OutputDir={#OutputDir}
-OutputBaseFilename=Waku-{#AppVersion}-{#Arch}-Setup
+OutputBaseFilename=Michelle-{#AppVersion}-{#Arch}-Setup
 SetupIconFile=AppIcon.ico
 Compression=lzma2/max
 SolidCompression=yes
@@ -86,12 +86,12 @@ Source: "{#StageDir}\resources\*"; DestDir: "{app}\resources"; Flags: ignorevers
 Source: "{#StageDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Waku"; Filename: "{app}\waku.exe"
-Name: "{userdesktop}\Waku"; Filename: "{app}\waku.exe"; Tasks: desktopicon
+Name: "{group}\Michelle"; Filename: "{app}\waku.exe"
+Name: "{userdesktop}\Michelle"; Filename: "{app}\waku.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [Run]
 ; No skipifsilent: this is also how the updater's silent run brings Waku back.
-Filename: "{app}\waku.exe"; Description: "{cm:LaunchProgram,Waku}"; Flags: nowait postinstall
+Filename: "{app}\waku.exe"; Description: "{cm:LaunchProgram,Michelle}"; Flags: nowait postinstall

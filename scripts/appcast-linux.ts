@@ -50,7 +50,7 @@ export function renderAppcast(
   return `<?xml version="1.0" encoding="utf-8"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
   <channel>
-    <title>Waku (Linux ${arch})</title>
+    <title>Michelle (Linux ${arch})</title>
 ${entries}
   </channel>
 </rss>

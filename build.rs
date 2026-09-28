@@ -84,12 +84,12 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "Waku\0"
+            VALUE "CompanyName", "Michelle\0"
             VALUE "FileDescription", "{description}\0"
             VALUE "FileVersion", "{package_version}\0"
             VALUE "InternalName", "waku\0"
             VALUE "OriginalFilename", "waku.exe\0"
-            VALUE "ProductName", "Waku\0"
+            VALUE "ProductName", "Michelle\0"
             VALUE "ProductVersion", "{package_version}\0"
         END
     END

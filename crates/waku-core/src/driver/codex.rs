@@ -316,7 +316,7 @@ impl CodexDriver {
                     "params": {
                         "clientInfo": {
                             "name": "waku",
-                            "title": "Waku",
+                            "title": "Michelle",
                             "version": env!("CARGO_PKG_VERSION")
                         },
                         "capabilities": {
@@ -1198,7 +1198,7 @@ fn generate_codex_title(binary: &Path, cwd: &Path, prompt: &str) -> anyhow::Resu
                 "params": {
                     "clientInfo": {
                         "name": "waku-title",
-                        "title": "Waku Title",
+                        "title": "Michelle Title",
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "capabilities": {"experimentalApi": true}

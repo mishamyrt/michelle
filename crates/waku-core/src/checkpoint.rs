@@ -53,7 +53,7 @@ pub fn capture_turn_start(cwd: &Path, session_id: Uuid, turn_count: usize) -> an
         refs,
     };
     let message = format!(
-        "Waku turn start snapshot\n\n{TURN_START_METADATA_PREFIX}{}",
+        "Michelle turn start snapshot\n\n{TURN_START_METADATA_PREFIX}{}",
         serde_json::to_string(&metadata)?
     );
     let mut parents = Vec::new();
@@ -95,7 +95,7 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
     let end_branch = symbolic_head(cwd);
     let end_head = resolve_ref(cwd, "HEAD");
     let end_commit =
-        capture_worktree_commit_from(cwd, end_head.as_deref(), "Waku worktree snapshot", &[])?;
+        capture_worktree_commit_from(cwd, end_head.as_deref(), "Michelle worktree snapshot", &[])?;
     git_output(cwd, ["update-ref", &git_ref, &end_commit])?;
     let files = if turn_count == 0 {
         Vec::new()
@@ -154,7 +154,7 @@ pub fn capture_worktree_commit(cwd: &Path) -> anyhow::Result<String> {
     }
 
     let head = resolve_ref(cwd, "HEAD");
-    capture_worktree_commit_from(cwd, head.as_deref(), "Waku worktree snapshot", &[])
+    capture_worktree_commit_from(cwd, head.as_deref(), "Michelle worktree snapshot", &[])
 }
 
 fn capture_worktree_commit_from(
@@ -324,11 +324,11 @@ fn virtual_branch_start(
         .map(str::trim)
         .filter(|tree| !tree.is_empty())
         .ok_or_else(|| anyhow!("git merge-tree returned no tree"))?;
-    commit_tree(cwd, tree, "Waku turn diff base", &[])
+    commit_tree(cwd, tree, "Michelle turn diff base", &[])
 }
 
 fn empty_tree_commit(cwd: &Path) -> anyhow::Result<String> {
-    commit_tree(cwd, EMPTY_TREE, "Waku empty turn diff base", &[])
+    commit_tree(cwd, EMPTY_TREE, "Michelle empty turn diff base", &[])
 }
 
 fn commit_tree(
@@ -747,9 +747,9 @@ where
         .env("GIT_INDEX_FILE", index);
     if identity {
         command
-            .env("GIT_AUTHOR_NAME", "Waku")
+            .env("GIT_AUTHOR_NAME", "Michelle")
             .env("GIT_AUTHOR_EMAIL", "waku@localhost")
-            .env("GIT_COMMITTER_NAME", "Waku")
+            .env("GIT_COMMITTER_NAME", "Michelle")
             .env("GIT_COMMITTER_EMAIL", "waku@localhost");
     }
     let output = command.output().context("failed to execute git")?;

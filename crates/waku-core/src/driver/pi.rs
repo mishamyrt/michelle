@@ -1167,7 +1167,7 @@ fn pi_fork_request(
     let name = flavor.display_name();
     if turns_to_remove > messages.len() {
         return Err(format!(
-            "{name} has only {} native turns, but Waku needs to remove {turns_to_remove}",
+            "{name} has only {} native turns, but Michelle needs to remove {turns_to_remove}",
             messages.len()
         ));
     }

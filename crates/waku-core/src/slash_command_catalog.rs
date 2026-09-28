@@ -90,7 +90,7 @@ fn discover_codex(binary: &Path, project_root: &Path) -> Option<Vec<SlashCommand
         "params": {
             "clientInfo": {
                 "name": "waku",
-                "title": "Waku",
+                "title": "Michelle",
                 "version": env!("CARGO_PKG_VERSION")
             },
             "capabilities": {"experimentalApi": true}
