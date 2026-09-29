@@ -9,7 +9,7 @@
     <key>CFBundleExecutable</key>
     <string>Michelle Computer Use</string>
     <key>CFBundleIdentifier</key>
-    <string>sh.waku.computer-use</string>
+    <string>co.myrt.computer-use</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

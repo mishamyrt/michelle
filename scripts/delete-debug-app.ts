@@ -8,7 +8,7 @@ import { createInterface } from "node:readline/promises";
 const projectRoot = resolve(import.meta.dir, "..");
 const userHome = homedir();
 const library = join(userHome, "Library");
-const debugBundleIdentifiers = ["sh.waku.dev", "codes.waku.dev"];
+const debugBundleIdentifiers = ["co.myrt.michelle.dev", "codes.waku.dev"];
 
 type Target = {
   path: string;
