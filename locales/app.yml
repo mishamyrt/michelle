@@ -492,6 +492,8 @@ sidebar.ordering_newest:
   en: Newest first
 sidebar.ordering_oldest:
   en: Oldest first
+sidebar.ordering_manual:
+  en: Manual
 sidebar.show_more:
   en: Show more
 sidebar.yesterday:

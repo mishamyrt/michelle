@@ -51,6 +51,7 @@ pub enum SidebarOrdering {
     #[default]
     Newest,
     Oldest,
+    Manual,
 }
 
 fn default_sidebar_visibility() -> bool {
@@ -333,6 +334,10 @@ struct AppState {
     sidebar_grouping: SidebarGrouping,
     #[serde(default)]
     sidebar_ordering: SidebarOrdering,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sidebar_session_order: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sidebar_project_order: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     sidebar_collapsed_projects: HashSet<Uuid>,
     #[serde(default = "default_right_panel_width")]
@@ -395,6 +400,10 @@ pub struct PersistedState {
     pub sidebar_grouping: SidebarGrouping,
     #[serde(default)]
     pub sidebar_ordering: SidebarOrdering,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sidebar_session_order: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sidebar_project_order: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub sidebar_collapsed_projects: HashSet<Uuid>,
     #[serde(default = "default_right_panel_width")]
@@ -464,6 +473,8 @@ impl PersistedState {
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_grouping: SidebarGrouping::Updated,
             sidebar_ordering: SidebarOrdering::Newest,
+            sidebar_session_order: Vec::new(),
+            sidebar_project_order: Vec::new(),
             sidebar_collapsed_projects: HashSet::new(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             markdown_preview: false,
@@ -606,6 +617,8 @@ impl PersistedState {
             sidebar_width: self.sidebar_width,
             sidebar_grouping: self.sidebar_grouping,
             sidebar_ordering: self.sidebar_ordering,
+            sidebar_session_order: self.sidebar_session_order.clone(),
+            sidebar_project_order: self.sidebar_project_order.clone(),
             sidebar_collapsed_projects: self.sidebar_collapsed_projects.clone(),
             right_panel_width: self.right_panel_width,
             markdown_preview: self.markdown_preview,
@@ -641,6 +654,8 @@ impl PersistedState {
         self.sidebar_width = app_state.sidebar_width;
         self.sidebar_grouping = app_state.sidebar_grouping;
         self.sidebar_ordering = app_state.sidebar_ordering;
+        self.sidebar_session_order = app_state.sidebar_session_order;
+        self.sidebar_project_order = app_state.sidebar_project_order;
         self.sidebar_collapsed_projects = app_state.sidebar_collapsed_projects;
         self.right_panel_width = app_state.right_panel_width;
         self.markdown_preview = app_state.markdown_preview;
@@ -1194,6 +1209,8 @@ mod tests {
 
         assert_eq!(state.sidebar_grouping, SidebarGrouping::Updated);
         assert_eq!(state.sidebar_ordering, SidebarOrdering::Newest);
+        assert!(state.sidebar_session_order.is_empty());
+        assert!(state.sidebar_project_order.is_empty());
         assert!(state.sidebar_collapsed_projects.is_empty());
         assert_eq!(state.last_runtime_mode, RuntimeMode::FullAccess);
     }
@@ -1226,6 +1243,27 @@ mod tests {
         let saved = serde_json::to_vec(&restarted.app_state()).unwrap();
         restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
         assert!(restored.sidebar_collapsed_projects.is_empty());
+    }
+
+    #[test]
+    fn manual_sidebar_order_survives_restart_and_sort_mode_changes() {
+        let mut state = PersistedState::empty();
+        state.sidebar_ordering = SidebarOrdering::Manual;
+        state.sidebar_session_order = vec![Uuid::from_u128(3), Uuid::from_u128(1)];
+        state.sidebar_project_order = vec![Uuid::from_u128(2), Uuid::from_u128(4)];
+        for ordering in [
+            SidebarOrdering::Manual,
+            SidebarOrdering::Newest,
+            SidebarOrdering::Oldest,
+        ] {
+            state.sidebar_ordering = ordering;
+            let saved = serde_json::to_vec(&state.app_state()).unwrap();
+            let mut restored = PersistedState::empty();
+            restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
+            assert_eq!(restored.sidebar_ordering, ordering);
+            assert_eq!(restored.sidebar_session_order, state.sidebar_session_order);
+            assert_eq!(restored.sidebar_project_order, state.sidebar_project_order);
+        }
     }
 
     #[test]

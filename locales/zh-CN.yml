@@ -237,6 +237,7 @@ sidebar.grouping_updated: 更新时间
 sidebar.ordering: 排序
 sidebar.ordering_newest: 最新优先
 sidebar.ordering_oldest: 最旧优先
+sidebar.ordering_manual: 手动
 sidebar.show_more: 显示更多
 sidebar.yesterday: 昨天
 sidebar.this_week: 本周
