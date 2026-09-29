@@ -3,19 +3,26 @@ use gpui::{KeyBinding, actions};
 
 use super::*;
 
-actions!(waku_sidebar, [CancelSessionRename]);
+actions!(waku_sidebar, [CancelSessionRename, FocusSidebar]);
 
 const SESSION_RENAME_PARENT_CONTEXT: &str = "SessionRename";
 const SESSION_RENAME_FIELD_CONTEXT: &str = "SessionRename > TextInput";
 
-/// Keep Escape inside the focused inline editor so it cancels the rename,
-/// rather than falling through to the window-wide Stop action.
+/// Sidebar shortcuts, including Escape overrides for navigation and renaming.
 pub fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new(
-        "escape",
-        CancelSessionRename,
-        Some(SESSION_RENAME_FIELD_CONTEXT),
-    )]);
+    cx.bind_keys([
+        KeyBinding::new("secondary-shift-e", FocusSidebar, None),
+        KeyBinding::new(
+            "escape",
+            FocusComposer,
+            Some("SidebarNavigation && !TextInput"),
+        ),
+        KeyBinding::new(
+            "escape",
+            CancelSessionRename,
+            Some(SESSION_RENAME_FIELD_CONTEXT),
+        ),
+    ]);
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -137,6 +144,13 @@ fn session_date_group_for_dates(session_date: NaiveDate, today: NaiveDate) -> Se
     }
 
     SessionDateGroup::More
+}
+
+// Paint the focus ring without changing the row's layout or measured height.
+fn focus_ring(color: Hsla) -> gpui::BoxShadow {
+    gpui::BoxShadow::new(px(0.0), px(0.0), color)
+        .spread_radius(px(1.0))
+        .inset()
 }
 
 fn session_group_header(theme: &Theme) -> Div {
@@ -352,6 +366,18 @@ fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<us
         .position(|row| *row == SidebarRow::Session(session_id))
 }
 
+fn sidebar_navigation_target(rows: &[SidebarRow], current: SidebarRow, key: &str) -> Option<usize> {
+    let index = rows.iter().position(|row| *row == current)?;
+    let focusable = |index: &usize| rows[*index] != SidebarRow::GroupSpacer;
+    match key {
+        "up" => (0..index).rev().find(focusable),
+        "down" => (index + 1..rows.len()).find(focusable),
+        "home" => (0..rows.len()).find(focusable),
+        "end" => (0..rows.len()).rev().find(focusable),
+        _ => None,
+    }
+}
+
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
     px(match row {
         SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
@@ -407,6 +433,92 @@ fn reveal_sidebar_list_row(list: &ListState, rows: &[SidebarRow], index: usize) 
 }
 
 impl Waku {
+    pub(super) fn focus_sidebar_action(
+        &mut self,
+        _: &FocusSidebar,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_page = None;
+        self.commit_session_rename(cx);
+        self.set_sidebar_visible(true, cx);
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let index = self
+            .pending_session_activation
+            .map(|pending| pending.session_id)
+            .or(self.state.selected_session)
+            .and_then(|id| sidebar_session_row_index(&rows, id))
+            .or_else(|| {
+                rows.iter()
+                    .position(|row| matches!(row, SidebarRow::Header(_)))
+            })
+            .unwrap_or(0);
+        if let Some(row) = rows.get(index) {
+            self.focus_sidebar_row(*row, window, cx);
+        }
+    }
+
+    fn focus_sidebar_row(&self, row: SidebarRow, window: &mut Window, cx: &mut Context<Self>) {
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let Some(index) = rows.iter().position(|candidate| *candidate == row) else {
+            return;
+        };
+        let focus = match row {
+            SidebarRow::Search => self.sidebar_search_focus.clone(),
+            SidebarRow::Header(group) => self
+                .sidebar_group_header_focuses
+                .borrow_mut()
+                .entry(group)
+                .or_insert_with(|| cx.focus_handle())
+                .clone(),
+            SidebarRow::ShowMore(group) => self
+                .sidebar_show_more_focuses
+                .borrow_mut()
+                .entry(group)
+                .or_insert_with(|| cx.focus_handle())
+                .clone(),
+            SidebarRow::Session(id) => self
+                .menu_handle(format!("session-{id}"), cx)
+                .trigger_focus_handle()
+                .clone(),
+            SidebarRow::GroupSpacer => return,
+        };
+        self.sync_sidebar_rows(&rows);
+        if self.sidebar_list_state.viewport_bounds().size.height <= Pixels::ZERO {
+            self.sidebar_list_state.scroll_to(ListOffset {
+                item_ix: index,
+                offset_in_item: Pixels::ZERO,
+            });
+        } else {
+            reveal_sidebar_list_row(&self.sidebar_list_state, &rows, index);
+        }
+        // Virtualized rows must be painted before their focus joins the dispatch tree.
+        window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        cx.notify();
+    }
+
+    fn sidebar_navigation_key_down(
+        &mut self,
+        row: SidebarRow,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let key = event.keystroke.key.as_str();
+        if self.session_rename.is_some()
+            || event.keystroke.modifiers.modified()
+            || !matches!(key, "up" | "down" | "home" | "end")
+        {
+            return false;
+        }
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        if let Some(index) = sidebar_navigation_target(&rows, row, key) {
+            self.focus_sidebar_row(rows[index], window, cx);
+        }
+        cx.stop_propagation();
+        true
+    }
+
     pub(super) fn window_drag_region(
         &self,
         region: Stateful<Div>,
@@ -608,7 +720,7 @@ impl Waku {
                 .items_center()
                 .justify_center()
                 .cursor_default()
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
                 .when(menu_open, |element| element.bg(theme.overlay_strong))
                 .hover(|element| element.bg(theme.overlay))
                 .active(|element| element.bg(theme.overlay_strong))
@@ -678,7 +790,7 @@ impl Waku {
             .items_center()
             .justify_center()
             .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tr!("project.new_project")))
@@ -723,7 +835,7 @@ impl Waku {
             .items_center()
             .gap(px(10.0))
             .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.overlay_strong))
             .child(
@@ -771,10 +883,15 @@ impl Waku {
                 tr!("sidebar.search"),
                 cx,
             )
+            .track_focus(&self.sidebar_search_focus)
+            .tab_stop(true)
             .on_click(cx.listener(|this, _, window, cx| {
                 this.toggle_command_palette_action(&ToggleCommandPalette, window, cx);
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.sidebar_navigation_key_down(SidebarRow::Search, event, window, cx) {
+                    return;
+                }
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                     this.toggle_command_palette_action(&ToggleCommandPalette, window, cx);
                     cx.stop_propagation();
@@ -829,7 +946,7 @@ impl Waku {
             .when(available, |button| {
                 button
                     .hover(|style| style.opacity(0.92))
-                    .focus_visible(|style| style.border_1().border_color(rgb(0xFFFFFF)))
+                    .focus_visible(|style| style.shadow(vec![focus_ring(rgb(0xFFFFFF).into())]))
                     .active(|style| style.opacity(0.8))
                     .on_hover(cx.listener(|this, hovering: &bool, _, cx| {
                         this.set_updater_button_hovered(*hovering, cx);
@@ -920,7 +1037,7 @@ impl Waku {
                 div()
                     .id("open-settings")
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
                     .w(px(26.0))
                     .h(px(26.0))
                     .flex_none()
@@ -1077,6 +1194,7 @@ impl Waku {
         let entity = cx.entity().downgrade();
 
         div()
+            .key_context("SidebarNavigation")
             .w(px(width))
             .h_full()
             .flex_none()
@@ -1465,8 +1583,7 @@ impl Waku {
                             style
                                 .w(px(20.0))
                                 .opacity(1.0)
-                                .border_1()
-                                .border_color(theme.accent)
+                                .shadow(vec![focus_ring(theme.accent)])
                         })
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.bg(theme.overlay_strong))
@@ -1499,7 +1616,7 @@ impl Waku {
             .w_full()
             .rounded(px(6.0))
             .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
             .hover(|style| style.bg(theme.sidebar_item_background))
             .active(|style| style.bg(theme.overlay_strong))
             .child(
@@ -1542,7 +1659,10 @@ impl Waku {
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.toggle_sidebar_group(group, cx);
             }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if this.sidebar_navigation_key_down(SidebarRow::Header(group), event, window, cx) {
+                    return;
+                }
                 match event.keystroke.key.as_str() {
                     "enter" | "space" => {
                         this.toggle_sidebar_group(group, cx);
@@ -1606,9 +1726,21 @@ impl Waku {
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.show_more_project_sessions(group, cx);
             }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if this.sidebar_navigation_key_down(SidebarRow::ShowMore(group), event, window, cx)
+                {
+                    return;
+                }
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    let rows = this.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+                    let index = rows
+                        .iter()
+                        .position(|row| *row == SidebarRow::ShowMore(group));
                     this.show_more_project_sessions(group, cx);
+                    let rows = this.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+                    if let Some(row) = index.and_then(|index| rows.get(index)) {
+                        this.focus_sidebar_row(*row, window, cx);
+                    }
                     cx.stop_propagation();
                 }
             }));
@@ -1789,13 +1921,18 @@ impl Waku {
         cx.notify();
     }
 
-    fn cancel_session_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.session_rename.take().is_none() {
-            return;
+    pub(super) fn finish_session_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let session_id = self.session_rename;
+        self.commit_session_rename(cx);
+        if let Some(id) = session_id {
+            self.focus_sidebar_row(SidebarRow::Session(id), window, cx);
         }
-        let focus = self.composer_focus(cx);
-        window.focus(&focus, cx);
-        cx.notify();
+    }
+
+    fn cancel_session_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.session_rename.take() {
+            self.focus_sidebar_row(SidebarRow::Session(id), window, cx);
+        }
     }
 
     fn render_sidebar_session_item(&self, session_id: Uuid, cx: &mut Context<Self>) -> AnyElement {
@@ -1993,11 +2130,24 @@ impl Waku {
                 element
                     .track_focus(&row_focus)
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .tab_stop(true)
+                    .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        if this.sidebar_navigation_key_down(
+                            SidebarRow::Session(session_id),
+                            event,
+                            window,
+                            cx,
+                        ) {
+                            return;
+                        }
                         let key = event.keystroke.key.as_str();
-                        if matches!(key, "enter" | "space") {
+                        if key == "enter" {
+                            this.begin_session_rename(session_id, window, cx);
+                            cx.stop_propagation();
+                        } else if key == "space" {
                             this.select_session(session_id, cx);
+                            this.focus_composer_action(&FocusComposer, window, cx);
                             cx.stop_propagation();
                         } else if key == "f10" && event.keystroke.modifiers.shift {
                             keyboard_menu.open_context_menu(window, cx);
@@ -2256,7 +2406,7 @@ impl Waku {
                                 .id("onboarding-add-project")
                                 .track_focus(&self.onboarding_add_project_focus)
                                 .tab_index(0)
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                                .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
                                 .h(px(32.0))
                                 .px(px(14.0))
                                 .rounded_full()
@@ -2283,7 +2433,7 @@ impl Waku {
                                 .id("onboarding-projectless")
                                 .track_focus(&self.onboarding_projectless_focus)
                                 .tab_index(1)
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                                .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
                                 .h(px(30.0))
                                 .px(px(12.0))
                                 .rounded_full()
@@ -2380,6 +2530,43 @@ fn sidebar_session_selected(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyboard_navigation_follows_visible_rows_and_stops_at_edges() {
+        let first = SidebarGroup::Project(Uuid::from_u128(1));
+        let collapsed = SidebarGroup::Project(Uuid::from_u128(2));
+        let rows = [
+            SidebarRow::Search,
+            SidebarRow::Header(first),
+            SidebarRow::Session(Uuid::from_u128(3)),
+            SidebarRow::ShowMore(first),
+            SidebarRow::GroupSpacer,
+            SidebarRow::Header(collapsed),
+            SidebarRow::GroupSpacer,
+        ];
+        for (current, key, expected) in [
+            (0, "up", None),
+            (0, "down", Some(1)),
+            (1, "down", Some(2)),
+            (2, "down", Some(3)),
+            (3, "down", Some(5)),
+            (5, "up", Some(3)),
+            (5, "down", None),
+            (3, "home", Some(0)),
+            (1, "end", Some(5)),
+            (2, "space", None),
+        ] {
+            assert_eq!(
+                sidebar_navigation_target(&rows, rows[current], key),
+                expected
+            );
+        }
+        assert_eq!(sidebar_navigation_target(&[], rows[0], "down"), None);
+        assert_eq!(
+            sidebar_navigation_target(&rows, SidebarRow::Session(Uuid::nil()), "down"),
+            None,
+        );
+    }
 
     #[test]
     fn groups_sessions_by_calendar_period() {

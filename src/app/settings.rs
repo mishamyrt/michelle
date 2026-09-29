@@ -106,6 +106,7 @@ impl Waku {
             .on_action(cx.listener(Self::navigate_back_action))
             .on_action(cx.listener(Self::navigate_forward_action))
             .on_action(cx.listener(Self::focus_composer_action))
+            .on_action(cx.listener(Self::focus_sidebar_action))
             .on_action(cx.listener(Self::cancel_turn_action))
             .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
             .size_full()

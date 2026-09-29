@@ -1342,6 +1342,7 @@ pub struct Waku {
     sidebar_group_compose_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     /// Stable keyboard focus for each virtualized project-history reveal row.
     sidebar_show_more_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
+    sidebar_search_focus: FocusHandle,
     sidebar_visible: bool,
     sidebar_width: f32,
     right_panel_visible: bool,
@@ -2609,10 +2610,11 @@ impl Waku {
                 }
             })
             .detach();
-            cx.subscribe(
+            cx.subscribe_in(
                 &session_rename_input,
-                |this: &mut Self, _, event: &InputEvent, cx| match event {
-                    InputEvent::Submit(_) => this.commit_session_rename(cx),
+                window,
+                |this: &mut Self, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::Submit(_) => this.finish_session_rename(window, cx),
                     InputEvent::Edited if this.session_rename.is_some() => cx.notify(),
                     _ => {}
                 },
@@ -2908,6 +2910,7 @@ impl Waku {
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_compose_focuses: RefCell::new(HashMap::new()),
                 sidebar_show_more_focuses: RefCell::new(HashMap::new()),
+                sidebar_search_focus: cx.focus_handle(),
                 sidebar_visible,
                 sidebar_width,
                 right_panel_visible,
