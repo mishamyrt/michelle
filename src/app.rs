@@ -222,9 +222,7 @@ enum SettingsPage {
 }
 
 impl SettingsPage {
-    /// Computer Use is still experimental, so only development builds expose
-    /// its navigation entry points. Keeping this decision on the page itself
-    /// makes the Settings sidebar and command palette use the same gate.
+    /// Keep the Settings sidebar and command palette visibility in sync.
     fn is_visible_in_navigation(self) -> bool {
         self != Self::ComputerUse || crate::computer_use::is_available()
     }

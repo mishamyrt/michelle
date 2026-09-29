@@ -133,8 +133,6 @@ struct HelperResponse {
 
 #[cfg(target_os = "macos")]
 pub fn probe_permissions(prompt: bool) -> anyhow::Result<ComputerPermissions> {
-    // A release daemon never installs or launches the helper app, not even to
-    // read permission status, so production never opens its TCC prompts.
     if !is_available() {
         bail!("Michelle Computer Use is not available in this build");
     }

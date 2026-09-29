@@ -117,7 +117,7 @@ Differences worth knowing:
 
 ## Computer Use
 
-Debug builds expose Computer Use for supported providers through the bundled
+Computer Use is available for supported providers through the bundled
 Cua Driver SDK. It operates within the current interactive Windows desktop;
 elevated apps and secure desktops retain Windows restrictions. See
 [Computer Use](computer-use.md) for the runtime, packaging, and validation.

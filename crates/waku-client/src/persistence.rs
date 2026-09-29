@@ -566,9 +566,6 @@ impl PersistedState {
     }
 
     pub fn apply_daemon_settings(&mut self, settings: DaemonSettings) {
-        // Computer Use is experimental, so a release build must not let a
-        // setting written by a development build leave this client believing
-        // it is on.
         self.computer_use_enabled =
             crate::computer_use::resolve_enabled(settings.computer_use_enabled);
         self.computer_use_allowed_apps = settings.computer_use_allowed_apps;

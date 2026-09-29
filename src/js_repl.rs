@@ -967,9 +967,6 @@ impl Drop for RequestWatchdog {
 
 impl HelperConnection {
     fn start(deadline: Option<Instant>, config: Option<&SessionConfig>) -> anyhow::Result<Self> {
-        // The SDK host ships in every bundle, but only development builds may
-        // run it. Refusing here means a release build never reaches the SDK
-        // even when WAKU_COMPUTER_USE_SERVER is set by hand.
         if !waku_protocol::computer_use::is_available() {
             bail!("Michelle Computer Use is not available in this build");
         }

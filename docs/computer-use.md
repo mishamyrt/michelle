@@ -9,10 +9,9 @@ Use `jsRepl.write(value)` for output and `await jsRepl.emitImage(image)` for
 images. Tool schemas, capture, accessibility, input, and authorization come
 from Cua.
 The previous `sky` API and custom macOS action engine have been removed.
-Computer Use is a development-only feature. Debug builds expose its settings
-page and honor the enable flag; release builds clamp that flag before any
-driver starts, and the REPL refuses to launch the helper, so no production
-build registers the `cua` bridge, attaches the skill, or reaches the SDK.
+Computer Use is available in development and release builds. Enable it in
+Settings to let supported providers register the `cua` bridge and attach the
+bundled skill. System permissions and app approvals still apply.
 
 ## Processes and lifetime
 

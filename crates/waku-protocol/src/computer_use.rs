@@ -2,14 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-/// Whether this build may run Computer Use.
-///
-/// The feature is experimental, so only development builds expose it. Release
-/// builds refuse it even when a client asks, which keeps a stale setting, a
-/// hand-edited settings file, or a third-party daemon client from turning it on
-/// in production.
+/// Computer Use is available in both development and release builds.
 pub const fn is_available() -> bool {
-    cfg!(debug_assertions)
+    true
 }
 
 /// Clamp a requested Computer Use enablement to what this build ships.
@@ -137,9 +132,9 @@ mod tests {
     use super::{is_available, resolve_enabled};
 
     #[test]
-    fn computer_use_is_development_only() {
-        assert_eq!(is_available(), cfg!(debug_assertions));
+    fn computer_use_is_available_in_all_builds_and_respects_opt_in() {
+        assert!(is_available());
         assert!(!resolve_enabled(false));
-        assert_eq!(resolve_enabled(true), is_available());
+        assert!(resolve_enabled(true));
     }
 }
