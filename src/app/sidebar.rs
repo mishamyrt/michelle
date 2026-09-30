@@ -1,5 +1,5 @@
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc};
-use gpui::{KeyBinding, actions};
+use gpui::{ClickEvent, KeyBinding, KeyboardButton, actions};
 use waku_client::persistence::SidebarProjectGroup;
 
 use super::*;
@@ -164,6 +164,13 @@ fn session_group_header(theme: &Theme) -> Div {
         .text_size(sp(13.0))
         .font_weight(FontWeight::MEDIUM)
         .text_color(theme.text_secondary)
+}
+
+fn sidebar_collection_rename_target(id: Option<Uuid>, event: &ClickEvent) -> Option<Uuid> {
+    match event {
+        ClickEvent::Keyboard(event) if event.button == KeyboardButton::Enter => id,
+        _ => None,
+    }
 }
 
 fn append_sidebar_group_rows(
@@ -2141,10 +2148,6 @@ impl Waku {
                     return;
                 }
                 match event.keystroke.key.as_str() {
-                    "enter" | "space" => {
-                        this.toggle_sidebar_group(group, cx);
-                        cx.stop_propagation();
-                    }
                     "left" if !collapsed => {
                         this.set_sidebar_group_collapsed(group, true, cx);
                         cx.stop_propagation();
@@ -2308,8 +2311,14 @@ impl Waku {
                     .tab_stop(true)
                     .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
                     .hover(|style| style.bg(theme.sidebar_item_background))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_sidebar_collection_collapsed(id, !collapsed, cx)
+                    // GPUI emits a click on Enter/Space release; handle activation only here.
+                    .on_click(cx.listener(move |this, event, window, cx| {
+                        if let Some(id) = sidebar_collection_rename_target(id, event) {
+                            this.begin_sidebar_collection_rename(id, window, cx);
+                        } else {
+                            this.set_sidebar_collection_collapsed(id, !collapsed, cx);
+                        }
+                        cx.stop_propagation();
                     }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         if this.sidebar_navigation_key_down(
@@ -2325,9 +2334,6 @@ impl Waku {
                             || (key == "enter" && event.keystroke.modifiers.control)
                         {
                             keyboard_menu.open_context_menu(window, cx);
-                            cx.stop_propagation();
-                        } else if matches!(key, "enter" | "space") {
-                            this.set_sidebar_collection_collapsed(id, !collapsed, cx);
                             cx.stop_propagation();
                         } else if key == "left" || key == "right" {
                             this.set_sidebar_collection_collapsed(id, key == "left", cx);
@@ -3685,7 +3691,89 @@ fn sidebar_session_selected(
 
 #[cfg(test)]
 mod tests {
+    use gpui::{KeyUpEvent, Keystroke, Modifiers, PlatformInput, TestAppContext};
+
     use super::*;
+
+    struct CollectionActivationHarness {
+        id: Option<Uuid>,
+        focus: FocusHandle,
+        clicks: usize,
+        renamed: Option<Uuid>,
+        collapsed: bool,
+    }
+
+    impl Render for CollectionActivationHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            session_group_header(&Theme::dark())
+                .id("collection")
+                .w(px(120.0))
+                .track_focus(&self.focus)
+                .on_click(cx.listener(|this, event, _, cx| {
+                    this.clicks += 1;
+                    if let Some(id) = sidebar_collection_rename_target(this.id, event) {
+                        this.renamed = Some(id);
+                    } else {
+                        this.collapsed = !this.collapsed;
+                    }
+                    cx.notify();
+                }))
+        }
+    }
+
+    #[gpui::test]
+    fn collection_enter_renames_and_space_toggles_once_on_release(cx: &mut TestAppContext) {
+        let id = Uuid::from_u128(1);
+        let focus = cx.update(|cx| cx.focus_handle());
+        let (view, cx) = cx.add_window_view(|_, _| CollectionActivationHarness {
+            id: Some(id),
+            focus: focus.clone(),
+            clicks: 0,
+            renamed: None,
+            collapsed: false,
+        });
+        cx.update(|window, cx| {
+            window.focus(&focus, cx);
+            window.draw(cx).clear(cx);
+        });
+
+        for (clicks, key, renamed, collapsed) in [
+            (1, "enter", Some(id), false),
+            (2, "space", Some(id), true),
+            (3, "space", Some(id), false),
+        ] {
+            let keystroke = Keystroke::parse(key).unwrap();
+            cx.update(|window, cx| {
+                window.dispatch_event(
+                    PlatformInput::KeyDown(KeyDownEvent {
+                        keystroke: keystroke.clone(),
+                        is_held: false,
+                        prefer_character_input: false,
+                    }),
+                    cx,
+                );
+            });
+            assert_eq!(view.read_with(cx, |view, _| view.clicks), clicks - 1);
+            cx.update(|window, cx| {
+                window.dispatch_event(PlatformInput::KeyUp(KeyUpEvent { keystroke }), cx);
+            });
+            assert_eq!(
+                view.read_with(cx, |view, _| (view.clicks, view.renamed, view.collapsed)),
+                (clicks, renamed, collapsed),
+            );
+        }
+
+        view.update(cx, |view, _| view.renamed = None);
+        cx.simulate_click(point(px(10.0), px(10.0)), Modifiers::none());
+        assert_eq!(
+            view.read_with(cx, |view, _| (view.clicks, view.renamed, view.collapsed)),
+            (4, None, true),
+        );
+        assert_eq!(
+            sidebar_collection_rename_target(None, &ClickEvent::default()),
+            None
+        );
+    }
 
     #[test]
     fn keyboard_navigation_follows_visible_rows_and_stops_at_edges() {
@@ -3951,7 +4039,7 @@ mod tests {
         );
         assert_eq!(
             sidebar_group_drop_offsets(&rows),
-            HashMap::from([(1, px(139.0)), (5, px(87.0))])
+            HashMap::from([(1, px(136.0)), (5, px(84.0))])
         );
         let drag = SidebarDrag {
             row: SidebarRow::Session(first.id),
