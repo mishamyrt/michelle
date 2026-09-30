@@ -293,8 +293,8 @@ fn sort_sidebar_sessions(
                 .collect::<HashMap<_, _>>();
             sessions.sort_by_key(|session| {
                 (
-                    ranks.get(&session.id).copied().unwrap_or(usize::MAX),
-                    session.created_at,
+                    ranks.get(&session.id).copied(),
+                    std::cmp::Reverse(session.created_at),
                     session.id,
                 )
             });
@@ -3966,7 +3966,7 @@ mod tests {
         let mut new = AgentSession::new(other_project, ProviderKind::Codex);
         new.id = Uuid::from_u128(3);
         new.created_at = 3;
-        let mut newer = AgentSession::new(other_project, ProviderKind::Codex);
+        let mut newer = AgentSession::new(project, ProviderKind::Codex);
         newer.id = Uuid::from_u128(4);
         newer.created_at = 4;
         let mut order = vec![Uuid::from_u128(99), second.id, first.id];
@@ -3976,10 +3976,20 @@ mod tests {
                 .map(|session| session.id)
                 .collect::<Vec<_>>()
         };
-        let expected = vec![second.id, first.id, new.id, newer.id];
+        let expected = vec![newer.id, new.id, second.id, first.id];
         let mut sessions = vec![&newer, &first, &new, &second];
         sort_sidebar_sessions(&mut sessions, SidebarOrdering::Manual, &order);
         assert_eq!(ids(&sessions), expected);
+        assert_eq!(
+            project_sidebar_groups(&sessions, &HashSet::new()),
+            vec![
+                (
+                    SidebarGroup::Project(project),
+                    vec![newer.id, second.id, first.id]
+                ),
+                (SidebarGroup::Project(other_project), vec![new.id]),
+            ]
+        );
         drop(sessions);
         first.last_reply_at = Some(10_000);
         second.last_reply_at = Some(20_000);
@@ -3988,7 +3998,7 @@ mod tests {
         assert_eq!(ids(&sessions), expected);
         assert!(move_sidebar_item(&mut order, first.id, second.id, false));
         sort_sidebar_sessions(&mut sessions, SidebarOrdering::Manual, &order);
-        assert_eq!(ids(&sessions), vec![first.id, second.id, new.id, newer.id]);
+        assert_eq!(ids(&sessions), vec![newer.id, new.id, first.id, second.id]);
         assert!(move_sidebar_item(&mut order, first.id, second.id, true));
         assert_eq!(order, vec![Uuid::from_u128(99), second.id, first.id]);
         let unchanged = order.clone();
