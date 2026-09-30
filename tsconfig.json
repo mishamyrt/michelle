@@ -1,12 +1,11 @@
 {
+  "include": ["db/**/*.ts", "scripts/**/*.ts", "drizzle.config.ts"],
   "compilerOptions": {
     // Environment setup & latest features
     "lib": ["ESNext"],
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
-    "jsx": "react-jsx",
-    "allowJs": true,
     "types": ["bun"],
 
     // Bundler mode

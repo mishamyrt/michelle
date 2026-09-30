@@ -21,11 +21,6 @@ identity and Waku's Screen Recording/Accessibility onboarding. The bundled
 library is signed with the same identity as the helper. Permission requests
 remain host-owned: direct SDK permission checks do not open macOS prompts.
 
-On Windows and Linux, `waku_computer_use` loads the packaged SDK library into
-its own process. It communicates with the REPL over inherited stdin/stdout.
-Windows also packages Cua's UIA support executable. No Cua daemon, installation,
-Python runtime, Node runtime, or separately running service is required.
-
 Each helper connection owns one SDK runtime. Native tool refusals preserve the
 connection and the full result, including error codes, snapshot tokens, capture
 metadata, and action outcomes. REPL reset and disconnect close the connection;
@@ -40,8 +35,7 @@ replacement is ready; stale or invalid frames are discarded. There is no
 second capture or continuous accessibility walk to change the agent's snapshot.
 
 The helper initializes Cua's native cursor facility. On macOS, Cua's renderer
-owns the helper's OS main thread while MCP and actions run on workers. Windows
-and Linux use Cua's native overlay thread. Cursor movement, action animations,
+owns the helper's OS main thread while MCP and actions run on workers. Cursor movement, action animations,
 themes, and reduced-motion handling use the same implementation as standalone
 Cua Driver. Headless hosts still report unavailable graphics facilities.
 
@@ -65,39 +59,25 @@ No OpenCode configuration files or service descriptors are written.
 - **macOS:** grant the Waku helper Screen Recording and Accessibility access
   in Settings > Computer Use. Relaunch the permission-owning helper after a
   grant changes; new REPL connections launch a fresh helper.
-- **Windows:** run within the user's interactive desktop. Elevated apps and
-  secure desktops remain subject to Windows restrictions. The SDK's native
-  capability/error results describe supported input routes.
-- **Linux:** X11 uses the active display and AT-SPI accessibility services.
-  In a Wayland session, Waku enables Cua's experimental native Wayland backend
-  unless `CUA_DRIVER_RS_ENABLE_WAYLAND` is already set. Window targeting and
-  input depend on the compositor's supported routes and installed desktop
-  integrations. Cua's GNOME helper files ship under
-  `share/waku/computer-use/wayland-helper`; Waku does not automatically install
-  shell extensions or compositor plugins. `check_permissions` and the native
-  tool catalog describe what is available. Unsupported background delivery
-  remains an explicit refusal.
-
 Native window IDs are preserved as 64-bit values, including in preview events.
 Use IDs and element tokens from fresh observations rather than reconstructing
 them or assuming discovery order implies focus.
 
 ## Packaging and checks
 
-`scripts/cua-driver.ts` pins release support artifacts and SHA-256 checksums
-for macOS, Windows, and Linux on x64 and ARM64. `scripts/cua-host.ts` builds the
-SDK from the same pinned source revision with its native host entrypoints
+`scripts/cua-driver.ts` packages the macOS SDK and REPL.
+`scripts/cua-host.ts` builds the SDK from a pinned source revision with its native host entrypoints
 exposed through `resources/computer-use/cua-host.rs`. This small ABI extension
 enables Cua's existing cursor facility and main loop; it does not implement
 input, capture, or rendering. Authorization still uses Cua's original checks.
 
 The SDK uses its own pinned Rust toolchain and lockfile, isolated from Waku's
 workspace. Sources and builds are cached under `.waku-cache/cua-host` so normal
-dev rebuilds reuse the compiled SDK. The macOS bundle, Windows installer/zip,
-Linux tarball, and dev watcher package the same host-enabled SDK. `scripts/cua-api.ts` reads the native tool
+dev rebuilds reuse the compiled SDK. The macOS bundle and dev watcher
+package the same host-enabled SDK. `scripts/cua-api.ts` reads the native tool
 metadata during packaging and writes the complete API reference into the
-bundled skill. Bump the version, all platform checksums, and
-the ABI bindings together. Include `resources/computer-use/CUA-LICENSE`.
+bundled skill. Bump the source revision, version, and ABI bindings together.
+Include `resources/computer-use/CUA-LICENSE`.
 
 The portable host can run `list-tools` as a diagnostic without capturing or
 operating the desktop. The protocol smoke test uses only tool discovery,
@@ -113,8 +93,7 @@ bun scripts/test-computer-use.ts
 To test the signed macOS host, pass its packaged REPL and helper executable
 paths to `scripts/test-computer-use.ts`. Add `--expect-cursor` to check native
 cursor availability in a graphical session without moving or clicking anything.
-The CI matrix runs the portable SDK
-smoke test on all three operating systems. UI automation tests are separate
+CI runs the SDK smoke test on macOS. UI automation tests are separate
 and should only run when requested.
 
 References: [in-process SDK guide](https://cua.ai/docs/how-to-guides/driver/use-sdk-in-process),

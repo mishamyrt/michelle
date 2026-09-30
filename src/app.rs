@@ -1809,13 +1809,6 @@ impl Waku {
                 self.reset_updater_button_animation();
                 self.show_toast(tr!("updater.failed", error = error));
             }
-            #[cfg(target_os = "linux")]
-            crate::updater::UpdaterEvent::QuitAndInstall => {
-                // The helper has already validated both prefixes and now
-                // waits for GPUI's normal asynchronous quit hooks to finish
-                // saving drafts and window state before it swaps them.
-                cx.quit();
-            }
         }
         cx.notify();
     }

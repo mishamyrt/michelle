@@ -96,23 +96,6 @@ layout to read a row from, so a stale row can never cost more than the line.
 | `ctrl-o`, `ctrl-t`, `ctrl-y`, `ctrl-l` | open-line, transpose, yank, centre; rare, and yank needs a kill ring |
 | `ctrl-j` | AppKit's `insertNewline:`, the same selector as Enter, which would send |
 
-## Windows and Linux
-
-The shared desktop convention: `ctrl` for word motion, Home and End on the
-row, the document ends one modifier up.
-
-| Chord | Does |
-| --- | --- |
-| `home` / `end`, `shift-home` / `shift-end` | row start / end, move or select |
-| `ctrl-home` / `ctrl-end`, `ctrl-shift-home` / `ctrl-shift-end` | document start / end, move or select |
-| `ctrl-left` / `ctrl-right`, `ctrl-shift-left` / `ctrl-shift-right` | one word, move or select |
-| `ctrl-backspace` / `ctrl-delete` | one word back / forward |
-| `ctrl-y` | redo, alongside `ctrl-shift-z` |
-
-Everything in the platform-neutral block above (arrows, shift-arrows, alt word
-motion, the modified deletes, Enter and its variants, the clipboard chords)
-applies here too.
-
 ## Popup contexts
 
 While the composer's autocomplete popup is open (`ComposerAutocomplete >

@@ -1,5 +1,8 @@
 #![recursion_limit = "256"]
 
+#[cfg(not(target_os = "macos"))]
+compile_error!("Michelle supports macOS only.");
+
 rust_i18n::i18n!("locales", fallback = "en");
 
 // rust-i18n expands locale data in a proc macro, which Cargo does not always
@@ -355,11 +358,6 @@ pub fn run() {
                             WindowBackgroundAppearance::Opaque
                         },
                         app_id: Some(APP_ID.to_owned()),
-                        // GPUI defaults to compositor/server decorations. If a
-                        // Wayland compositor declines them, it reports the
-                        // client fallback and Waku renders that frame itself.
-                        #[cfg(target_os = "linux")]
-                        icon: crate::platform::linux_app_icon(),
                         window_bounds: Some(window_bounds),
                         display_id,
                         window_min_size: Some(size(px(MIN_WINDOW_WIDTH), px(MIN_WINDOW_HEIGHT))),
@@ -406,7 +404,6 @@ pub fn run() {
             set_app_menus(cx, updater_available);
             // A Linux handoff retains the previous prefix until this freshly
             // relaunched build has successfully opened its main window.
-            crate::updater::signal_relaunch_ready();
         });
 }
 

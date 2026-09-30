@@ -73,16 +73,10 @@ jobs:
           rclone copy assets "$destination" \
             --s3-no-check-bucket \
             --exclude appcast.xml \
-            --exclude latest-linux.txt \
-            --exclude latest-windows.txt \
-            --exclude 'appcast-linux-*.xml' \
-            --exclude 'appcast-windows-*.xml' \
             --header-upload "$immutable" \
             --progress
 
-          for pointer in appcast.xml appcast-linux-x86_64.xml \
-            appcast-linux-aarch64.xml appcast-windows-x86_64.xml \
-            appcast-windows-aarch64.xml latest-linux.txt latest-windows.txt; do
+          for pointer in appcast.xml; do
             if [ -f "assets/$pointer" ]; then
               rclone copyto "assets/$pointer" "${destination}/${pointer}" \
                 --s3-no-check-bucket \

@@ -369,20 +369,6 @@ pub fn open_with_default_app(path: &std::path::Path, cx: &gpui::App) {
     cx.open_with_system(path);
 }
 
-/// Decode the embedded desktop icon once. X11 consumes the RGBA pixels from
-/// `WindowOptions`; Wayland associates the window through `app_id` and its
-/// installed desktop entry.
-#[cfg(target_os = "linux")]
-pub fn linux_app_icon() -> Option<std::sync::Arc<image::RgbaImage>> {
-    static ICON: std::sync::LazyLock<Option<std::sync::Arc<image::RgbaImage>>> =
-        std::sync::LazyLock::new(|| {
-            image::load_from_memory(include_bytes!("../website/public/app-icon.png"))
-                .ok()
-                .map(|image| std::sync::Arc::new(image.into_rgba8()))
-        });
-    ICON.clone()
-}
-
 /// A compact shortcut label for the platform's primary GUI modifier.
 pub const fn primary_shortcut<'a>(macos: &'a str, other: &'a str) -> &'a str {
     if cfg!(target_os = "macos") {

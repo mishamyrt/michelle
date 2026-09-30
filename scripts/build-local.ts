@@ -24,7 +24,7 @@ const helper = `${contents}/Helpers/Michelle Computer Use.app`;
 const sparkle = `${contents}/Frameworks/Sparkle.framework`;
 const repl = `${contents}/Resources/waku_js_repl`;
 const daemon = `${contents}/MacOS/waku-daemon`;
-const { package: { version } } = Bun.TOML.parse(await Bun.file("Cargo.toml").text());
+const { package: { version } } = Bun.TOML.parse(await Bun.file("Cargo.toml").text()) as { package: { version: string } };
 await $`plutil -replace CFBundleShortVersionString -string ${version} ${contents}/Info.plist`;
 await $`plutil -replace CFBundleVersion -string ${version} ${contents}/Info.plist`;
 

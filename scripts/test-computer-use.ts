@@ -7,17 +7,16 @@ import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { createInterface } from "node:readline";
 
-const suffix = process.platform === "win32" ? ".exe" : "";
 const expectCursor = process.argv.includes("--expect-cursor");
 const [
-  repl = `target/debug/waku_js_repl${suffix}`,
-  helper = `target/debug/waku_computer_use${suffix}`,
+  repl = "target/debug/waku_js_repl",
+  helper = "target/debug/waku_computer_use",
 ] = process.argv.slice(2).filter((argument) => argument !== "--expect-cursor");
 assert(repl && helper, "Pass the REPL executable and native helper executable");
 const nativeTools: string[] = JSON.parse(
   execFileSync(resolve(helper), ["list-tools"], {
     encoding: "utf8",
-    windowsHide: true,
+
     maxBuffer: 8 * 1024 * 1024,
   }),
 )
@@ -31,7 +30,7 @@ const child = spawn(resolve(repl), [], {
     WAKU_COMPUTER_USE_PROCESS_DIRECTORY: directory,
   },
   stdio: ["pipe", "pipe", "pipe"],
-  windowsHide: true,
+
 });
 let nextId = 0;
 const pending = new Map<

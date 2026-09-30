@@ -138,7 +138,7 @@ export function renderCuaApi(
     "};",
     "",
     "declare const cua: {",
-    `  readonly platform: ${JSON.stringify(platform === "darwin" ? "macos" : platform === "win32" ? "windows" : platform)};`,
+    `  readonly platform: ${JSON.stringify(platform === "darwin" ? "macos" : platform)};`,
   ];
   for (const tool of catalog.tools) {
     if (tool.name === "bring_to_front") continue;

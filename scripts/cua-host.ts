@@ -19,6 +19,9 @@ const revision = "1b50c02e2d34734f64d2d22f54eb76cc97b4a663";
 const version = "0.28.0";
 
 export async function prepareCuaHost(): Promise<string> {
+  if (process.platform !== "darwin") {
+    throw new Error("Computer Use builds require macOS.");
+  }
   const extension = await readFile(
     join(root, "resources/computer-use/cua-host.rs"),
     "utf8",
@@ -37,12 +40,7 @@ export async function prepareCuaHost(): Promise<string> {
     .digest("hex");
   const cache = join(root, ".waku-cache/cua-host");
   const destination = join(cache, key);
-  const library =
-    process.platform === "darwin"
-      ? "libcua_driver_sdk.dylib"
-      : process.platform === "win32"
-        ? "cua_driver_sdk.dll"
-        : "libcua_driver_sdk.so";
+  const library = "libcua_driver_sdk.dylib";
   if (existsSync(join(destination, library))) return destination;
   await mkdir(cache, { recursive: true });
   const source = join(cache, revision);

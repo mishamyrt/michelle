@@ -4,10 +4,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use uuid::Uuid;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
     Amp,
@@ -166,7 +165,7 @@ impl ProviderKind {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -294,7 +293,7 @@ impl ProviderResumeCursor {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeMode {
     /// Older state files used `plan` as a combined read-only mode. Keep those
@@ -360,7 +359,7 @@ impl RuntimeMode {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProviderModelOption {
     pub id: String,
     pub label: String,
@@ -386,7 +385,7 @@ impl ProviderModelOption {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProviderModel {
     pub id: String,
     pub name: String,
@@ -411,7 +410,7 @@ pub struct ProviderModel {
     pub default_context_window: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FavoriteModel {
     pub provider: ProviderKind,
     pub model: String,
@@ -421,7 +420,7 @@ pub struct FavoriteModel {
 ///
 /// DeepSeek Harness calls these agent presets. A preset chooses the tools and
 /// prompt composition for a session.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProviderAgentPreset {
     pub id: String,
     pub name: String,
@@ -544,7 +543,7 @@ impl ProviderModel {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ProviderProbe {
     pub provider: ProviderKind,
     pub installed: bool,
@@ -601,7 +600,7 @@ pub fn parse_cli_version(output: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Project {
     pub id: Uuid,
     pub name: String,
@@ -616,7 +615,7 @@ pub struct Project {
 /// Drafts may carry [`Self::NewWorktree`] until their first prompt. Waku then
 /// creates the Git worktree and replaces it with [`Self::Worktree`] before any
 /// checkpoint or provider process can observe the task.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -686,7 +685,7 @@ impl Project {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SessionStatus {
     #[default]
@@ -715,7 +714,7 @@ impl SessionStatus {
 
 /// A follow-up message queued while the agent is busy. It becomes its own
 /// turn once the current turn settles successfully.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct QueuedMessage {
     pub id: Uuid,
     pub content: String,
@@ -756,7 +755,7 @@ impl QueuedMessage {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TurnStatus {
     Running,
@@ -765,7 +764,7 @@ pub enum TurnStatus {
     Interrupted,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CheckpointStatus {
     Ready,
@@ -773,14 +772,14 @@ pub enum CheckpointStatus {
     Error,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CheckpointFile {
     pub path: String,
     pub additions: u64,
     pub deletions: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Checkpoint {
     pub turn_count: usize,
     pub git_ref: String,
@@ -808,7 +807,7 @@ impl Checkpoint {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AgentTurn {
     pub id: Uuid,
     pub turn_count: usize,
@@ -828,7 +827,7 @@ pub struct AgentTurn {
 /// the model's context size, which the provider only reports once a turn
 /// settles — `None` means "not known yet", and the meter degrades to a bare
 /// token count.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct ContextUsage {
     pub tokens: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -838,7 +837,7 @@ pub struct ContextUsage {
 /// Where Codex stands on a thread goal. Mirrors the app-server's
 /// `ThreadGoalStatus` vocabulary; the serialized names are Codex's own so a
 /// status can round-trip through `thread/goal/set` unchanged.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ThreadGoalStatus {
     Active,
@@ -863,7 +862,7 @@ impl ThreadGoalStatus {
 /// This is deliberately lightweight: the command palette can list hundreds of
 /// native sessions without moving their transcripts over the daemon protocol.
 /// [`ProviderSessionHistory`] is fetched only after the user chooses one.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProviderSessionSummary {
     pub cursor: ProviderResumeCursor,
     pub title: String,
@@ -882,7 +881,7 @@ impl ProviderSessionSummary {
 /// Waku task. Provider history remains authoritative; unsupported native
 /// items such as private reasoning or provider-only control records are
 /// intentionally absent.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ProviderSessionHistory {
     #[serde(default)]
     pub messages: Vec<Message>,
@@ -893,7 +892,7 @@ pub struct ProviderSessionHistory {
 /// A provider-persisted objective the agent keeps pursuing across turns.
 /// Field names follow the Codex app-server payload so its `goal` objects
 /// deserialize directly.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadGoal {
     pub objective: String,
@@ -909,7 +908,7 @@ pub struct ThreadGoal {
 /// A goal mutation the client asks the provider runtime to perform. Results
 /// come back asynchronously as [`DriverEvent::GoalUpdated`]; failures surface
 /// through [`DriverEvent::Error`].
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -935,14 +934,14 @@ pub enum GoalOperation {
 /// desktop or browser connection. Persisting this cursor with the transcript
 /// lets a newly attached client replay only the events the stored projection
 /// has not already applied.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RuntimeEventCursor {
     pub runtime_id: Uuid,
     pub epoch: Uuid,
     pub sequence: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AgentSession {
     pub id: Uuid,
     /// A title explicitly chosen by the user. [`Self::DEFAULT_TITLE`] means
@@ -1652,7 +1651,7 @@ fn strip_legacy_codex_citations(text: &str) -> String {
     output
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MessageRole {
     User,
@@ -1663,7 +1662,7 @@ pub enum MessageRole {
 /// A file represented by a composer chip and retained with the sent message.
 ///
 /// Render paths consume only this cached metadata; they never stat the file.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MessageAttachment {
     /// Absolute path on the daemon host, handed to the provider. Clients must
     /// use `blob_reference` rather than opening this path themselves.
@@ -1679,7 +1678,7 @@ pub struct MessageAttachment {
     pub blob_reference: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Message {
     pub id: Uuid,
     #[serde(default)]
@@ -1732,7 +1731,7 @@ impl Message {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ActivityKind {
     Reasoning,
@@ -1941,7 +1940,7 @@ pub enum DriverEvent {
     ProcessExited,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BackgroundWorkKind {
     Process,
@@ -1949,7 +1948,7 @@ pub enum BackgroundWorkKind {
     Subagent,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BackgroundWorkStatus {
     Starting,
@@ -1975,7 +1974,7 @@ impl BackgroundWorkStatus {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackgroundWorkKey {
     pub kind: BackgroundWorkKind,
@@ -1991,7 +1990,7 @@ impl BackgroundWorkKey {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackgroundWorkItem {
     pub key: BackgroundWorkKey,
@@ -2050,7 +2049,7 @@ impl BackgroundWorkItem {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum BackgroundWorkEvent {
     Upsert(BackgroundWorkItem),
@@ -2079,7 +2078,7 @@ pub enum BackgroundWorkEvent {
 /// Claude's init handshake reports bare names; ACP agents report names with
 /// descriptions. Sessions persisted by earlier builds stored plain strings,
 /// which the untagged repr still accepts.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ReportedCommand {
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -2118,7 +2117,7 @@ impl<'de> Deserialize<'de> for ReportedCommand {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionOption {
     pub id: String,
@@ -2126,7 +2125,7 @@ pub struct PermissionOption {
     pub allow: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserInputOption {
     pub label: String,
@@ -2134,7 +2133,7 @@ pub struct UserInputOption {
     pub description: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserInputQuestion {
     pub id: String,
@@ -2146,7 +2145,7 @@ pub struct UserInputQuestion {
     pub multi_select: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserInputAnswer {
     pub question_id: String,
@@ -2154,7 +2153,7 @@ pub struct UserInputAnswer {
 }
 
 /// What a provider says happened to a file, when it says anything at all.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ActivityFileChangeStatus {
     Added,
@@ -2162,7 +2161,7 @@ pub enum ActivityFileChangeStatus {
     Deleted,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActivityFileChange {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2193,7 +2192,7 @@ impl ActivityFileChange {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActivityItem {
     pub id: Uuid,
     #[serde(default)]
@@ -3401,14 +3400,14 @@ fn merge_file_change(changes: &mut Vec<ActivityFileChange>, change: ActivityFile
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ReasoningBlock {
     pub content: String,
     pub started_at_ms: u64,
     pub finished_at_ms: u64,
 }
 
-#[derive(Clone, Debug, TS)]
+#[derive(Clone, Debug)]
 pub struct TranscriptBlock {
     /// Render this block immediately after this many persisted messages.
     pub after_message: usize,
@@ -3416,7 +3415,6 @@ pub struct TranscriptBlock {
     /// Ordered non-message work emitted at this point in the transcript.
     /// The persisted field keeps its historical tagged shape so existing
     /// sessions remain readable while the runtime model stays activity-only.
-    #[ts(rename = "content", as = "StoredTranscriptBlockContent")]
     pub activities: Vec<ActivityItem>,
 }
 
@@ -3426,7 +3424,7 @@ enum StoredTranscriptBlockContentRef<'a> {
     Activities(&'a [ActivityItem]),
 }
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "data")]
 pub enum StoredTranscriptBlockContent {
     Reasoning(ReasoningBlock),
