@@ -675,20 +675,12 @@ impl Waku {
                             }),
                         );
                     }
-                }
-                self.finish_active_turn_with_analytics(
-                    session_id,
-                    if success {
+                    session.finish_active_turn(if success {
                         TurnStatus::Completed
                     } else {
                         TurnStatus::Failed
-                    },
-                    if success {
-                        crate::analytics::TurnOutcome::Completed
-                    } else {
-                        crate::analytics::TurnOutcome::Failed
-                    },
-                );
+                    });
+                }
                 runtime.pending_permission = None;
                 runtime.pending_user_input = None;
                 runtime.pending_computer_approval = None;
@@ -772,7 +764,7 @@ impl Waku {
                     .last_driver_error
                     .take()
                     .unwrap_or_else(|| tr!("session.codex_exited_before_response"));
-                let should_finish_turn = if let Some(session) = self.state.session_mut(session_id)
+                let finished_turn = if let Some(session) = self.state.session_mut(session_id)
                     && session.status.is_busy()
                 {
                     session.status = SessionStatus::Failed;
@@ -780,18 +772,10 @@ impl Waku {
                     if needs_fallback {
                         session.push_message(MessageRole::Assistant, failure_message);
                     }
-                    true
+                    session.finish_active_turn(TurnStatus::Failed).is_some()
                 } else {
                     false
                 };
-                let finished_turn = should_finish_turn
-                    && self
-                        .finish_active_turn_with_analytics(
-                            session_id,
-                            TurnStatus::Failed,
-                            crate::analytics::TurnOutcome::ProcessExited,
-                        )
-                        .is_some();
                 if finished_turn {
                     self.capture_latest_turn_checkpoint_for(session_id);
                 }

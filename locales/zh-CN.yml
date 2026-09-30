@@ -185,8 +185,6 @@ settings.local_by_default_description: 项目、对话和设置均存储在这�
 settings.local_by_default_web_description: 项目、对话和附件保留在所连接的守护进程主机上。Michelle Web 的偏好设置保留在此浏览器中。
 settings.automatic_updates: 自动更新
 settings.automatic_updates_description: 在后台检查新版本，并在发现更新时提示安装
-settings.share_anonymous_usage_data: 分享匿名使用数据
-settings.share_anonymous_usage_data_description: 分享功能使用情况和可靠性数据，帮助改进 Michelle。不会包含提示词、回复、项目名称、文件路径等个人信息
 providers.coding_agents: 编程智能体
 providers.description: Michelle 调用安装在这台电脑上的智能体命令行工具。请先安装相应工具或完成登录，然后刷新
 providers.web_description: Michelle 调用安装在守护进程主机上的智能体命令行工具。请先安装相应工具或完成登录，然后刷新
