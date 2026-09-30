@@ -127,7 +127,7 @@ impl Theme {
             text_tertiary: rgb(0x7D7D7D).into(),
             text_ghost: rgb(0x575757).into(),
 
-            accent: rgb(0x5BE262).into(),
+            accent: rgb(0x0091FF).into(),
             resize_handle: rgb(0x3B82F6).into(),
             gauge: rgb(0x3B82F6).into(),
 
@@ -174,7 +174,7 @@ impl Theme {
             text_tertiary: rgb(0x858585).into(),
             text_ghost: rgb(0xA4A4A4).into(),
 
-            accent: rgb(0x44C84B).into(),
+            accent: rgb(0x0088FF).into(),
             resize_handle: rgb(0x2563EB).into(),
             gauge: rgb(0x2563EB).into(),
 

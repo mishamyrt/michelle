@@ -241,7 +241,7 @@ impl Palette {
             border: theme.border,
             inset: theme.inset,
             overlay: theme.overlay,
-            code_text: theme.code_text,
+            code_text: theme.text,
             code_wash: theme.code_wash,
             selection: theme.selection,
             search_match: search_yellow.opacity(if theme.is_dark { 0.18 } else { 0.20 }),
