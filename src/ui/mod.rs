@@ -237,7 +237,7 @@ pub fn provider_mark(theme: &Theme, provider: ProviderKind, size: f32, color: Hs
 pub fn status_color(theme: &Theme, status: SessionStatus) -> Hsla {
     match status {
         SessionStatus::Idle => theme.text_ghost,
-        SessionStatus::Connecting | SessionStatus::Working => theme.accent,
+        SessionStatus::Connecting | SessionStatus::Working => theme.text,
         SessionStatus::Background => theme.text_secondary,
         SessionStatus::Waiting => theme.warning,
         SessionStatus::Failed => theme.danger,
