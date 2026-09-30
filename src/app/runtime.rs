@@ -1,25 +1,25 @@
 use super::*;
 
 fn workspace_ack(
-    workspace: &waku_client::WorkspaceClient,
-    operation: waku_client::WorkspaceOperation,
+    workspace: &michelle_client::WorkspaceClient,
+    operation: michelle_client::WorkspaceOperation,
 ) -> anyhow::Result<()> {
     match workspace.request(operation)? {
-        waku_client::WorkspaceResult::Ack => Ok(()),
+        michelle_client::WorkspaceResult::Ack => Ok(()),
         _ => anyhow::bail!("the daemon returned an invalid workspace response"),
     }
 }
 
 fn workspace_has_ref(
-    workspace: &waku_client::WorkspaceClient,
+    workspace: &michelle_client::WorkspaceClient,
     cwd: &Path,
     git_ref: &str,
 ) -> anyhow::Result<bool> {
-    match workspace.request(waku_client::WorkspaceOperation::HasRef {
+    match workspace.request(michelle_client::WorkspaceOperation::HasRef {
         cwd: cwd.to_path_buf(),
         git_ref: git_ref.to_owned(),
     })? {
-        waku_client::WorkspaceResult::Bool { value } => Ok(value),
+        michelle_client::WorkspaceResult::Bool { value } => Ok(value),
         _ => anyhow::bail!("the daemon returned an invalid checkpoint response"),
     }
 }
@@ -38,16 +38,20 @@ fn start_driver(mut request: DriverStartRequest, cwd: PathBuf) -> anyhow::Result
 }
 
 fn attach_driver(
-    daemon: waku_client::DaemonSupervisor,
+    daemon: michelle_client::DaemonSupervisor,
     session_id: Uuid,
     event_wake: smol::channel::Sender<()>,
 ) -> anyhow::Result<Option<(AgentSession, PreparedDriver)>> {
-    let Some(session) = waku_client::persistence::hydrate_session(&daemon, session_id)? else {
+    let Some(session) = michelle_client::persistence::hydrate_session(&daemon, session_id)? else {
         return Ok(None);
     };
     let client = daemon.client();
-    let response = client.request(session_id, Uuid::nil(), waku_client::Command::AttachSession)?;
-    let waku_client::ResponsePayload::SessionRuntime {
+    let response = client.request(
+        session_id,
+        Uuid::nil(),
+        michelle_client::Command::AttachSession,
+    )?;
+    let michelle_client::ResponsePayload::SessionRuntime {
         runtime_id,
         supports_steer,
     } = response
@@ -71,14 +75,14 @@ fn attach_driver(
 }
 
 fn load_remote_task_state(
-    client: &waku_client::DaemonClient,
+    client: &michelle_client::DaemonClient,
 ) -> anyhow::Result<RemoteTaskStateSnapshot> {
     let response = client.request(
         Uuid::nil(),
         Uuid::nil(),
-        waku_client::Command::LoadTaskState,
+        michelle_client::Command::LoadTaskState,
     )?;
-    let waku_client::ResponsePayload::TaskState {
+    let michelle_client::ResponsePayload::TaskState {
         projects,
         mut sessions,
         ..
@@ -161,7 +165,7 @@ pub(super) fn merge_remote_session_catalog(
 /// starting its provider. This function is called only from the background
 /// executor; the UI thread owns applying the returned workspace afterward.
 fn prepare_submission(
-    workspace_client: waku_client::WorkspaceClient,
+    workspace_client: michelle_client::WorkspaceClient,
     project: Project,
     workspace: SessionWorkspace,
     driver_start: Option<anyhow::Result<DriverStartRequest>>,
@@ -174,17 +178,18 @@ fn prepare_submission(
             if project.is_projectless() {
                 anyhow::bail!("a projectless task cannot create a Git worktree");
             }
-            let created =
-                match workspace_client.request(waku_client::WorkspaceOperation::CreateWorktree {
+            let created = match workspace_client.request(
+                michelle_client::WorkspaceOperation::CreateWorktree {
                     project_path: project.path.clone(),
                     project_id: project.id,
                     session_id,
                     prompt: prompt.to_owned(),
                     base_branch,
-                })? {
-                    waku_client::WorkspaceResult::WorktreeCreated { worktree } => worktree,
-                    _ => anyhow::bail!("the daemon returned an invalid worktree response"),
-                };
+                },
+            )? {
+                michelle_client::WorkspaceResult::WorktreeCreated { worktree } => worktree,
+                _ => anyhow::bail!("the daemon returned an invalid worktree response"),
+            };
             SessionWorkspace::Worktree {
                 path: created.path,
                 branch: created.branch,
@@ -199,7 +204,7 @@ fn prepare_submission(
     // made between turns to the next response.
     let checkpoint_warning = workspace_ack(
         &workspace_client,
-        waku_client::WorkspaceOperation::CaptureTurnStart {
+        michelle_client::WorkspaceOperation::CaptureTurnStart {
             cwd: project_path.to_path_buf(),
             session_id,
             turn_count,
@@ -229,7 +234,7 @@ fn prepare_submission(
 /// startup, and native transcript reads all happen in
 /// [`perform_message_rewind`] on the background executor.
 struct MessageRewindRequest {
-    workspace_client: waku_client::WorkspaceClient,
+    workspace_client: michelle_client::WorkspaceClient,
     session_id: Uuid,
     provider: ProviderKind,
     provider_cursor: Option<ProviderResumeCursor>,
@@ -251,7 +256,7 @@ struct MessageRewindRequest {
 
 struct PreparedMessageRewind {
     provider_rewind_cursor: Option<ProviderResumeCursor>,
-    claude_fork: Option<waku_client::provider_session::ProviderSessionFork>,
+    claude_fork: Option<michelle_client::provider_session::ProviderSessionFork>,
     prepared_driver: Option<PreparedDriver>,
     reset_native_session: bool,
     cleanup_error: Option<String>,
@@ -285,10 +290,13 @@ fn perform_message_rewind(
         return Err(tr!("session.pre_turn_checkpoint_missing"));
     }
 
-    let safety_ref = format!("refs/waku/revert-backup-{session_id}-{}", Uuid::new_v4());
+    let safety_ref = format!(
+        "refs/michelle/revert-backup-{session_id}-{}",
+        Uuid::new_v4()
+    );
     workspace_ack(
         &request.workspace_client,
-        waku_client::WorkspaceOperation::CaptureRef {
+        michelle_client::WorkspaceOperation::CaptureRef {
             cwd: request.project_path.clone(),
             git_ref: safety_ref.clone(),
         },
@@ -296,7 +304,7 @@ fn perform_message_rewind(
     .map_err(|error| tr!("errors.create_rewind_snapshot", error = error))?;
     if let Err(error) = workspace_ack(
         &request.workspace_client,
-        waku_client::WorkspaceOperation::RestoreRef {
+        michelle_client::WorkspaceOperation::RestoreRef {
             cwd: request.project_path.clone(),
             git_ref: restore_ref.clone(),
         },
@@ -304,7 +312,7 @@ fn perform_message_rewind(
         return Err(
             match workspace_ack(
                 &request.workspace_client,
-                waku_client::WorkspaceOperation::RestoreRef {
+                michelle_client::WorkspaceOperation::RestoreRef {
                     cwd: request.project_path.clone(),
                     git_ref: safety_ref.clone(),
                 },
@@ -312,7 +320,7 @@ fn perform_message_rewind(
                 Ok(()) => {
                     let _ = workspace_ack(
                         &request.workspace_client,
-                        waku_client::WorkspaceOperation::DeleteRef {
+                        michelle_client::WorkspaceOperation::DeleteRef {
                             cwd: request.project_path.clone(),
                             git_ref: safety_ref.clone(),
                         },
@@ -336,7 +344,7 @@ fn perform_message_rewind(
             return Err(
                 match workspace_ack(
                     &request.workspace_client,
-                    waku_client::WorkspaceOperation::RestoreRef {
+                    michelle_client::WorkspaceOperation::RestoreRef {
                         cwd: request.project_path.clone(),
                         git_ref: safety_ref.clone(),
                     },
@@ -344,7 +352,7 @@ fn perform_message_rewind(
                     Ok(()) => {
                         let _ = workspace_ack(
                             &request.workspace_client,
-                            waku_client::WorkspaceOperation::DeleteRef {
+                            michelle_client::WorkspaceOperation::DeleteRef {
                                 cwd: request.project_path.clone(),
                                 git_ref: safety_ref.clone(),
                             },
@@ -364,14 +372,14 @@ fn perform_message_rewind(
 
     let _ = workspace_ack(
         &request.workspace_client,
-        waku_client::WorkspaceOperation::DeleteRef {
+        michelle_client::WorkspaceOperation::DeleteRef {
             cwd: request.project_path.clone(),
             git_ref: safety_ref,
         },
     );
     let cleanup_error = workspace_ack(
         &request.workspace_client,
-        waku_client::WorkspaceOperation::DeleteTurnRefsAfter {
+        michelle_client::WorkspaceOperation::DeleteTurnRefsAfter {
             cwd: request.project_path.clone(),
             session_id,
             retained_turn_count: request.retained_turn_count,
@@ -397,7 +405,7 @@ fn perform_message_rewind(
 
 type ProviderRewindResult = (
     Option<ProviderResumeCursor>,
-    Option<waku_client::provider_session::ProviderSessionFork>,
+    Option<michelle_client::provider_session::ProviderSessionFork>,
     Option<PreparedDriver>,
 );
 
@@ -428,7 +436,7 @@ fn perform_provider_rewind(
                 ));
             };
             let fork = request.workspace_client.fork_provider_session(
-                waku_client::provider_session::ProviderSessionForkRequest::Claude {
+                michelle_client::provider_session::ProviderSessionForkRequest::Claude {
                     session_id: native_session_id.clone(),
                     resume_at: request.provider_resume_at.clone(),
                     turn_count: request.provider_turn_count,
@@ -461,7 +469,7 @@ fn perform_provider_rewind(
                 request
                     .workspace_client
                     .fork_provider_session(
-                        waku_client::provider_session::ProviderSessionForkRequest::OpenCode {
+                        michelle_client::provider_session::ProviderSessionForkRequest::OpenCode {
                             binary: binary.to_owned(),
                             cwd: request.project_path.clone(),
                             session_id: native_session_id.clone(),
@@ -494,7 +502,7 @@ fn perform_provider_rewind(
                 request
                     .workspace_client
                     .fork_provider_session(
-                        waku_client::provider_session::ProviderSessionForkRequest::OpenCode2 {
+                        michelle_client::provider_session::ProviderSessionForkRequest::OpenCode2 {
                             binary: binary.to_owned(),
                             session_id: native_session_id.clone(),
                             turn_count: request.provider_turn_count,
@@ -521,7 +529,7 @@ fn perform_provider_rewind(
             let cursor = request
                 .workspace_client
                 .fork_provider_session(
-                    waku_client::provider_session::ProviderSessionForkRequest::Amp {
+                    michelle_client::provider_session::ProviderSessionForkRequest::Amp {
                         binary: binary.to_owned(),
                         cwd: request.project_path.clone(),
                         thread_id: native_thread_id.clone(),
@@ -535,7 +543,7 @@ fn perform_provider_rewind(
         ProviderKind::Cursor => {
             let source = request.cursor_source.as_ref().ok_or_else(|| {
                 anyhow::anyhow!(tr!(
-                    "errors.provider_waku_task_unavailable",
+                    "errors.provider_michelle_task_unavailable",
                     provider = "Cursor"
                 ))
             })?;
@@ -544,7 +552,7 @@ fn perform_provider_rewind(
                     request
                         .workspace_client
                         .fork_provider_session(
-                            waku_client::provider_session::ProviderSessionForkRequest::Cursor {
+                            michelle_client::provider_session::ProviderSessionForkRequest::Cursor {
                                 source: source.clone(),
                                 turn_count: request.retained_turn_count,
                             },
@@ -571,7 +579,7 @@ fn perform_provider_rewind(
             let cursor = request
                 .workspace_client
                 .fork_provider_session(
-                    waku_client::provider_session::ProviderSessionForkRequest::Grok {
+                    michelle_client::provider_session::ProviderSessionForkRequest::Grok {
                         binary: binary.to_owned(),
                         cwd: request.project_path.clone(),
                         session_id: native_session_id.clone(),
@@ -617,7 +625,7 @@ fn perform_provider_rewind(
 /// native transcript I/O, and Git ref copying are all performed by
 /// [`perform_response_fork`] on the background executor.
 struct ResponseForkRequest {
-    workspace_client: waku_client::WorkspaceClient,
+    workspace_client: michelle_client::WorkspaceClient,
     source: AgentSession,
     source_workspace_path: PathBuf,
     fork_title: String,
@@ -719,7 +727,7 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                     .get(request.turn_count.saturating_sub(1))
                     .and_then(|turn| turn.provider_resume_at.clone());
                 let fork = request.workspace_client.fork_provider_session(
-                    waku_client::provider_session::ProviderSessionForkRequest::Claude {
+                    michelle_client::provider_session::ProviderSessionForkRequest::Claude {
                         session_id: native_session_id.clone(),
                         resume_at,
                         turn_count: request.provider_turn_count,
@@ -758,7 +766,7 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                 request
                     .workspace_client
                     .fork_provider_session(
-                        waku_client::provider_session::ProviderSessionForkRequest::Cursor {
+                        michelle_client::provider_session::ProviderSessionForkRequest::Cursor {
                             source: request.source.clone(),
                             turn_count: request.turn_count,
                         },
@@ -785,7 +793,7 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                     request
                         .workspace_client
                         .fork_provider_session(
-                            waku_client::provider_session::ProviderSessionForkRequest::Amp {
+                            michelle_client::provider_session::ProviderSessionForkRequest::Amp {
                                 binary: binary.to_owned(),
                                 cwd: request.source_workspace_path.clone(),
                                 thread_id: native_thread_id.clone(),
@@ -815,7 +823,7 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                     request
                         .workspace_client
                         .fork_provider_session(
-                            waku_client::provider_session::ProviderSessionForkRequest::OpenCode {
+                            michelle_client::provider_session::ProviderSessionForkRequest::OpenCode {
                                 binary: binary.to_owned(),
                                 cwd: request.source_workspace_path.clone(),
                                 session_id: native_session_id.clone(),
@@ -848,7 +856,7 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                     request
                         .workspace_client
                         .fork_provider_session(
-                            waku_client::provider_session::ProviderSessionForkRequest::OpenCode2 {
+                            michelle_client::provider_session::ProviderSessionForkRequest::OpenCode2 {
                                 binary: binary.to_owned(),
                                 session_id: native_session_id.clone(),
                                 turn_count: request.provider_turn_count,
@@ -879,7 +887,7 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                     request
                         .workspace_client
                         .fork_provider_session(
-                            waku_client::provider_session::ProviderSessionForkRequest::Grok {
+                            michelle_client::provider_session::ProviderSessionForkRequest::Grok {
                                 binary: binary.to_owned(),
                                 cwd: request.source_workspace_path.clone(),
                                 session_id: native_session_id.clone(),
@@ -959,7 +967,7 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
     }
     let checkpoint_warning = workspace_ack(
         &request.workspace_client,
-        waku_client::WorkspaceOperation::CopySessionRefs {
+        michelle_client::WorkspaceOperation::CopySessionRefs {
             cwd: request.source_workspace_path.clone(),
             source_session_id: request.source.id,
             target_session_id: fork_id,
@@ -976,13 +984,13 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
     })
 }
 
-impl Waku {
+impl Michelle {
     pub(super) fn restart_task_state_sync(&self) {
         let clients = self.daemon.subscribe_clients();
         let results = self.task_state_sync_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         std::thread::Builder::new()
-            .name("waku-task-state-sync".into())
+            .name("michelle-task-state-sync".into())
             .spawn(move || {
                 let Ok(mut client) = clients.recv() else {
                     return;
@@ -1141,13 +1149,13 @@ impl Waku {
         }
         let daemon = self.daemon.clone();
         let event_wake = self.event_wake_tx.clone();
-        cx.spawn(async move |waku, cx| {
+        cx.spawn(async move |michelle, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move { attach_driver(daemon, session_id, event_wake) })
                 .await;
-            let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_runtime_attachment(session_id, result, cx);
+            let _ = michelle.update(cx, move |michelle, cx| {
+                michelle.finish_runtime_attachment(session_id, result, cx);
             });
         })
         .detach();
@@ -1197,12 +1205,12 @@ impl Waku {
                 let misses = self.runtime_attach_misses.entry(session_id).or_default();
                 *misses = misses.saturating_add(1);
                 if *misses < 4 {
-                    cx.spawn(async move |waku, cx| {
+                    cx.spawn(async move |michelle, cx| {
                         cx.background_executor()
                             .timer(Duration::from_millis(250))
                             .await;
-                        let _ = waku.update(cx, |waku, cx| {
-                            waku.start_runtime_attachment(session_id, cx);
+                        let _ = michelle.update(cx, |michelle, cx| {
+                            michelle.start_runtime_attachment(session_id, cx);
                         });
                     })
                     .detach();
@@ -1349,19 +1357,19 @@ impl Waku {
         let daemon = self.daemon.client();
         let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
         if std::thread::Builder::new()
-            .name(format!("waku-{}-model-discovery", provider.id()))
+            .name(format!("michelle-{}-model-discovery", provider.id()))
             .spawn(move || {
                 let discovered = match daemon.request(
                     Uuid::nil(),
                     Uuid::nil(),
-                    waku_client::Command::ProbeProvider {
+                    michelle_client::Command::ProbeProvider {
                         provider,
                         binary_override,
                         discover_models: true,
                         probe_version: false,
                     },
                 ) {
-                    Ok(waku_client::ResponsePayload::ProviderProbe { probe, .. }) => probe,
+                    Ok(michelle_client::ResponsePayload::ProviderProbe { probe, .. }) => probe,
                     _ => probe,
                 };
                 if provider_probe_tx.send(discovered).is_ok() {
@@ -1376,7 +1384,7 @@ impl Waku {
     }
 
     /// Re-run one provider's model-owned catalog discovery, for selectors whose
-    /// contents can change while Waku stays open — models the user just
+    /// contents can change while Michelle stays open — models the user just
     /// authored in a provider's config, or DeepSeek's custom agent presets.
     /// The stale catalog stays on screen until the fresh probe lands, so an
     /// open menu never blanks into a loading state while it refreshes.
@@ -1407,19 +1415,21 @@ impl Waku {
             let daemon = self.daemon.client();
             let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
             if std::thread::Builder::new()
-                .name(format!("waku-{}-version-probe", provider.id()))
+                .name(format!("michelle-{}-version-probe", provider.id()))
                 .spawn(move || {
                     let version = match daemon.request(
                         Uuid::nil(),
                         Uuid::nil(),
-                        waku_client::Command::ProbeProvider {
+                        michelle_client::Command::ProbeProvider {
                             provider,
                             binary_override,
                             discover_models: false,
                             probe_version: true,
                         },
                     ) {
-                        Ok(waku_client::ResponsePayload::ProviderProbe { version, .. }) => version,
+                        Ok(michelle_client::ResponsePayload::ProviderProbe { version, .. }) => {
+                            version
+                        }
                         _ => None,
                     };
                     if provider_version_tx.send((provider, version)).is_ok() {
@@ -1462,13 +1472,13 @@ impl Waku {
         let detect_providers = providers.clone();
         let daemon = self.daemon.client();
         if std::thread::Builder::new()
-            .name("waku-provider-detection".into())
+            .name("michelle-provider-detection".into())
             .spawn(move || {
                 for provider in detect_providers {
                     let response = daemon.request(
                         Uuid::nil(),
                         Uuid::nil(),
-                        waku_client::Command::ProbeProvider {
+                        michelle_client::Command::ProbeProvider {
                             provider,
                             binary_override: overrides.get(&provider).cloned(),
                             discover_models: false,
@@ -1476,7 +1486,7 @@ impl Waku {
                         },
                     );
                     let probe = match response {
-                        Ok(waku_client::ResponsePayload::ProviderProbe { probe, .. }) => probe,
+                        Ok(michelle_client::ResponsePayload::ProviderProbe { probe, .. }) => probe,
                         _ => ProviderProbe {
                             provider,
                             installed: false,
@@ -1718,21 +1728,21 @@ impl Waku {
             {
                 continue;
             }
-            let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
-            cx.spawn(async move |waku, cx| {
+            let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
+            cx.spawn(async move |michelle, cx| {
                 let captured = cx
                     .background_executor()
                     .spawn({
                         let project_path = project_path.clone();
                         async move {
                             match workspace.request(
-                                waku_client::WorkspaceOperation::CaptureTurn {
+                                michelle_client::WorkspaceOperation::CaptureTurn {
                                     cwd: project_path,
                                     session_id,
                                     turn_count,
                                 },
                             )? {
-                                waku_client::WorkspaceResult::Checkpoint { checkpoint } => {
+                                michelle_client::WorkspaceResult::Checkpoint { checkpoint } => {
                                     Ok(checkpoint)
                                 }
                                 _ => anyhow::bail!(
@@ -1742,71 +1752,77 @@ impl Waku {
                         }
                     })
                     .await;
-                waku.update(cx, |waku, cx| {
-                    waku.checkpoint_captures_in_flight
-                        .remove(&(session_id, turn_count));
-                    let selected = waku.state.selected_session == Some(session_id);
-                    if selected {
-                        waku.sync_transcript_rows();
-                    }
-                    let previous_kinds = if selected {
-                        waku.transcript_row_kinds.borrow().clone()
-                    } else {
-                        Vec::new()
-                    };
-                    let checkpoint = match captured {
-                        Ok(checkpoint) => checkpoint,
-                        Err(error) => {
-                            waku.show_toast(tr!("errors.capture_turn_checkpoint", error = error));
-                            Checkpoint {
-                                turn_count,
-                                git_ref: checkpoint::checkpoint_ref(session_id, turn_count),
-                                status: CheckpointStatus::Error,
-                                files: Vec::new(),
-                                additions: 0,
-                                deletions: 0,
-                                created_at: unix_time(),
-                            }
+                michelle
+                    .update(cx, |michelle, cx| {
+                        michelle
+                            .checkpoint_captures_in_flight
+                            .remove(&(session_id, turn_count));
+                        let selected = michelle.state.selected_session == Some(session_id);
+                        if selected {
+                            michelle.sync_transcript_rows();
                         }
-                    };
-                    waku.invalidate_checkpoint_refs();
-                    let mut attached_turn_id = None;
-                    if let Some(session) = waku.state.session_mut(session_id)
-                        && let Some(turn) = session
-                            .turns
-                            .iter_mut()
-                            .find(|turn| turn.turn_count == turn_count)
-                    {
-                        turn.checkpoint = Some(checkpoint);
-                        attached_turn_id = Some(turn.id);
-                    }
-                    if let Some(turn_id) = attached_turn_id
-                        && selected
-                    {
-                        // Reconcile a standalone card by row identity, then
-                        // remeasure the terminal response when the card is
-                        // hosted inline before its footer.
-                        waku.splice_transcript_rows_after_visibility_change(&previous_kinds);
-                        waku.remeasure_changed_files(turn_id);
-                    }
-                    let resume_queue = waku.pending_queue_drains.contains(&session_id);
-                    if resume_queue {
-                        waku.pending_queue_drains.retain(|id| *id != session_id);
-                        waku.drain_queued_message(session_id, cx);
-                    }
-                    cx.notify();
-                    if attached_turn_id.is_some() {
-                        // Let the new transcript row paint before SQLite work.
-                        // Without this save, a checkpoint that lands after the
-                        // turn's final stream save can disappear on relaunch.
-                        cx.spawn(async move |waku, cx| {
-                            cx.background_executor().timer(STREAM_FRAME_INTERVAL).await;
-                            let _ = waku.update(cx, |waku, _| waku.save());
-                        })
-                        .detach();
-                    }
-                })
-                .ok();
+                        let previous_kinds = if selected {
+                            michelle.transcript_row_kinds.borrow().clone()
+                        } else {
+                            Vec::new()
+                        };
+                        let checkpoint = match captured {
+                            Ok(checkpoint) => checkpoint,
+                            Err(error) => {
+                                michelle.show_toast(tr!(
+                                    "errors.capture_turn_checkpoint",
+                                    error = error
+                                ));
+                                Checkpoint {
+                                    turn_count,
+                                    git_ref: checkpoint::checkpoint_ref(session_id, turn_count),
+                                    status: CheckpointStatus::Error,
+                                    files: Vec::new(),
+                                    additions: 0,
+                                    deletions: 0,
+                                    created_at: unix_time(),
+                                }
+                            }
+                        };
+                        michelle.invalidate_checkpoint_refs();
+                        let mut attached_turn_id = None;
+                        if let Some(session) = michelle.state.session_mut(session_id)
+                            && let Some(turn) = session
+                                .turns
+                                .iter_mut()
+                                .find(|turn| turn.turn_count == turn_count)
+                        {
+                            turn.checkpoint = Some(checkpoint);
+                            attached_turn_id = Some(turn.id);
+                        }
+                        if let Some(turn_id) = attached_turn_id
+                            && selected
+                        {
+                            // Reconcile a standalone card by row identity, then
+                            // remeasure the terminal response when the card is
+                            // hosted inline before its footer.
+                            michelle
+                                .splice_transcript_rows_after_visibility_change(&previous_kinds);
+                            michelle.remeasure_changed_files(turn_id);
+                        }
+                        let resume_queue = michelle.pending_queue_drains.contains(&session_id);
+                        if resume_queue {
+                            michelle.pending_queue_drains.retain(|id| *id != session_id);
+                            michelle.drain_queued_message(session_id, cx);
+                        }
+                        cx.notify();
+                        if attached_turn_id.is_some() {
+                            // Let the new transcript row paint before SQLite work.
+                            // Without this save, a checkpoint that lands after the
+                            // turn's final stream save can disappear on relaunch.
+                            cx.spawn(async move |michelle, cx| {
+                                cx.background_executor().timer(STREAM_FRAME_INTERVAL).await;
+                                let _ = michelle.update(cx, |michelle, _| michelle.save());
+                            })
+                            .detach();
+                        }
+                    })
+                    .ok();
             })
             .detach();
         }
@@ -1918,7 +1934,7 @@ impl Waku {
             None
         };
         let request = ResponseForkRequest {
-            workspace_client: waku_client::WorkspaceClient::new(self.daemon.client()),
+            workspace_client: michelle_client::WorkspaceClient::new(self.daemon.client()),
             source,
             source_workspace_path,
             fork_title,
@@ -1935,13 +1951,13 @@ impl Waku {
         self.hide_toast();
         cx.notify();
 
-        cx.spawn(async move |waku, cx| {
+        cx.spawn(async move |michelle, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move { perform_response_fork(request) })
                 .await;
-            let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_response_fork(session_id, turn_count, provider, result, cx);
+            let _ = michelle.update(cx, move |michelle, cx| {
+                michelle.finish_response_fork(session_id, turn_count, provider, result, cx);
             });
         })
         .detach();
@@ -2012,12 +2028,12 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let composer = self.composer.clone();
-        cx.spawn(async move |waku, cx| {
+        cx.spawn(async move |michelle, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(1))
                 .await;
-            let _ = waku.update(cx, |waku, cx| {
-                if waku.state.selected_session == Some(session_id) {
+            let _ = michelle.update(cx, |michelle, cx| {
+                if michelle.state.selected_session == Some(session_id) {
                     composer.update(cx, |input, cx| {
                         if input.content(cx).is_empty() {
                             input.set_content(prompt, cx);
@@ -2314,7 +2330,7 @@ impl Waku {
             return;
         };
         let request = MessageRewindRequest {
-            workspace_client: waku_client::WorkspaceClient::new(self.daemon.client()),
+            workspace_client: michelle_client::WorkspaceClient::new(self.daemon.client()),
             session_id,
             provider,
             provider_cursor,
@@ -2360,13 +2376,13 @@ impl Waku {
         self.remeasure_transcript_message(edited_message_index);
         cx.notify();
 
-        cx.spawn(async move |waku, cx| {
+        cx.spawn(async move |michelle, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move { perform_message_rewind(request) })
                 .await;
-            let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_message_rewind(
+            let _ = michelle.update(cx, move |michelle, cx| {
+                michelle.finish_message_rewind(
                     edit,
                     submission,
                     edited_message_id,
@@ -2578,16 +2594,16 @@ impl Waku {
             && let Some(requested) = model.as_deref()
             && let Some(probe) = self.provider_probe(session.provider)
             && let Some(matched) =
-                waku_protocol::model_catalog::cursor_catalog_model(&probe.models, requested)
+                michelle_protocol::model_catalog::cursor_catalog_model(&probe.models, requested)
         {
             if reasoning_effort.is_none() {
-                reasoning_effort = waku_protocol::model_catalog::cursor_suffix_reasoning_effort(
+                reasoning_effort = michelle_protocol::model_catalog::cursor_suffix_reasoning_effort(
                     &matched.suffix,
                     &matched.model.reasoning_efforts,
                 );
             }
             if service_tier.is_none() {
-                service_tier = waku_protocol::model_catalog::cursor_suffix_service_tier(
+                service_tier = michelle_protocol::model_catalog::cursor_suffix_service_tier(
                     &matched.suffix,
                     &matched.model.service_tiers,
                 );
@@ -2681,18 +2697,18 @@ impl Waku {
         runtime.options_generation = runtime.options_generation.wrapping_add(1);
         let generation = runtime.options_generation;
         let driver = runtime.driver.clone();
-        cx.spawn(async move |waku, cx| {
+        cx.spawn(async move |michelle, cx| {
             let applied = cx
                 .background_executor()
                 .spawn(async move { driver.apply_options(options) })
                 .await;
-            let _ = waku.update(cx, |waku, cx| {
-                let is_current = waku
+            let _ = michelle.update(cx, |michelle, cx| {
+                let is_current = michelle
                     .runtimes
                     .get(&session_id)
                     .is_some_and(|runtime| runtime.options_generation == generation);
                 if is_current && !applied {
-                    waku.reset_session_runtime(session_id);
+                    michelle.reset_session_runtime(session_id);
                     cx.notify();
                 }
             });
@@ -2806,8 +2822,8 @@ impl Waku {
             .unwrap_or_else(|| tr!("goal.title"));
         self.goal_runtime_starts.insert(session_id);
         cx.notify();
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |waku, cx| {
+        let workspace_client = michelle_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |michelle, cx| {
             let prepared = cx
                 .background_executor()
                 .spawn(async move {
@@ -2822,8 +2838,8 @@ impl Waku {
                     )
                 })
                 .await;
-            let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_goal_runtime_start(session_id, prepared, cx);
+            let _ = michelle.update(cx, move |michelle, cx| {
+                michelle.finish_goal_runtime_start(session_id, prepared, cx);
             });
         })
         .detach();
@@ -3289,8 +3305,8 @@ impl Waku {
         cx.notify();
 
         let preparation_prompt = human_prompt;
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |waku, cx| {
+        let workspace_client = michelle_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |michelle, cx| {
             let prepared = cx
                 .background_executor()
                 .spawn(async move {
@@ -3305,8 +3321,8 @@ impl Waku {
                     )
                 })
                 .await;
-            let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_submission_preparation(session_id, submission, prepared, cx);
+            let _ = michelle.update(cx, move |michelle, cx| {
+                michelle.finish_submission_preparation(session_id, submission, prepared, cx);
             });
         })
         .detach();
@@ -3475,9 +3491,9 @@ impl Waku {
         // Persist on the next frame boundary. Saving is intentionally after
         // the spinner-to-Stop paint: SQLite or blob externalization must not
         // hold the final preparation frame motionless.
-        cx.spawn(async move |waku, cx| {
+        cx.spawn(async move |michelle, cx| {
             cx.background_executor().timer(STREAM_FRAME_INTERVAL).await;
-            let _ = waku.update(cx, |waku, _| waku.save());
+            let _ = michelle.update(cx, |michelle, _| michelle.save());
         })
         .detach();
     }

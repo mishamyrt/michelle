@@ -1,11 +1,11 @@
-//! Native presentation helpers layered over Waku's headless Computer Use core.
+//! Native presentation helpers layered over Michelle's headless Computer Use core.
 
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, bail};
 use base64::Engine as _;
 
-pub use waku_client::computer_use::*;
+pub use michelle_client::computer_use::*;
 
 pub(crate) fn decode_preview_image_url(
     image_url: &str,

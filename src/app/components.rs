@@ -150,7 +150,7 @@ fn format_message_time_at(created_at: u64, now: DateTime<Local>) -> String {
         .unwrap_or_default()
 }
 
-impl Waku {
+impl Michelle {
     pub(super) fn control_was_copied(&self, control_id: &str) -> bool {
         self.copied_control_feedback.contains_key(control_id)
     }
@@ -208,11 +208,11 @@ pub(super) fn render_message_footer(
     align_right: bool,
     assistant_message_action: Option<AssistantMessageAction>,
     user_message_action: Option<UserMessageAction>,
-    waku: gpui::WeakEntity<Waku>,
+    michelle: gpui::WeakEntity<Michelle>,
 ) -> AnyElement {
     let theme = *theme;
     let message_id = message.id;
-    let copy_waku = waku.clone();
+    let copy_michelle = michelle.clone();
     let footer_color = if theme.is_dark {
         gpui::hsla(126.93 / 360.0, 0.000_000_1, 0.543_95, 1.0)
     } else {
@@ -253,7 +253,7 @@ pub(super) fn render_message_footer(
         }))
         .on_click(move |_, _, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(copy_content.to_string()));
-            let _ = copy_waku.update(cx, |this, cx| {
+            let _ = copy_michelle.update(cx, |this, cx| {
                 this.show_message_copied(message_id, cx);
             });
         });
@@ -276,7 +276,7 @@ pub(super) fn render_message_footer(
     } else {
         footer = footer.child(copy_button);
         if let Some(action) = assistant_message_action {
-            let fork_waku = waku.clone();
+            let fork_michelle = michelle.clone();
             let fork_icon = if action.preparing {
                 motion::spin(icon("icons/loader-circle.svg", 14.0, footer_color))
             } else {
@@ -304,7 +304,7 @@ pub(super) fn render_message_footer(
                 fork_button
                     .hover(|element| element.bg(theme.overlay_strong))
                     .on_click(move |_, _, cx| {
-                        let _ = fork_waku.update(cx, |this, cx| {
+                        let _ = fork_michelle.update(cx, |this, cx| {
                             this.fork_session_from_response(
                                 action.session_id,
                                 action.turn_count,
@@ -320,7 +320,7 @@ pub(super) fn render_message_footer(
     }
 
     if let Some(action) = user_message_action {
-        let edit_waku = waku;
+        let edit_michelle = michelle;
         footer = footer.child(
             div()
                 .id(SharedString::from(format!(
@@ -337,7 +337,7 @@ pub(super) fn render_message_footer(
                 .child(icon("icons/rewind.svg", 14.0, footer_color))
                 .tooltip(Tooltip::text(tr_cow!("session.revert_to_here")))
                 .on_click(move |_, window, cx| {
-                    let _ = edit_waku.update(cx, |this, cx| {
+                    let _ = edit_michelle.update(cx, |this, cx| {
                         this.begin_message_edit(action, window, cx);
                     });
                 }),
@@ -362,7 +362,7 @@ pub(super) struct MessageRender<'a> {
     pub(super) attachment_menus: Vec<ContextMenuHandle>,
     pub(super) attachment_images: Vec<Option<Arc<gpui::Image>>>,
     /// Captured from the selected daemon before the virtualized row is built.
-    /// A row is laid out while the root `Waku` entity is already updating, so
+    /// A row is laid out while the root `Michelle` entity is already updating, so
     /// it must not read that entity again just to decide whether Finder reveal
     /// is available.
     pub(super) attachments_can_reveal: bool,
@@ -370,7 +370,7 @@ pub(super) struct MessageRender<'a> {
     pub(super) markdown: Option<&'a MarkdownView>,
     pub(super) ctx: &'a MarkdownCtx<'a>,
     pub(super) menu: ContextMenuHandle,
-    pub(super) waku: gpui::WeakEntity<Waku>,
+    pub(super) michelle: gpui::WeakEntity<Michelle>,
     pub(super) composer: Entity<ComposerInput>,
 }
 
@@ -380,7 +380,7 @@ fn render_sent_message_attachments(
     attachment_menus: &[ContextMenuHandle],
     attachment_images: &[Option<Arc<gpui::Image>>],
     can_reveal: bool,
-    waku: &gpui::WeakEntity<Waku>,
+    michelle: &gpui::WeakEntity<Michelle>,
     theme: &Theme,
 ) -> Option<AnyElement> {
     if attachments.is_empty() {
@@ -420,8 +420,8 @@ fn render_sent_message_attachments(
         if attachment.is_image {
             let key_menu = menu.clone();
             if let Some(attachment_image) = attachment_image.as_ref() {
-                let preview_waku = waku.clone();
-                let key_waku = waku.clone();
+                let preview_michelle = michelle.clone();
+                let key_michelle = michelle.clone();
                 let preview_image = attachment_image.clone();
                 let key_image = attachment_image.clone();
                 let preview_name = SharedString::from(attachment.name.clone());
@@ -434,7 +434,7 @@ fn render_sent_message_attachments(
                         .size_full()
                         .cursor_default()
                         .on_click(move |_, window, cx| {
-                            let _ = preview_waku.update(cx, |this, cx| {
+                            let _ = preview_michelle.update(cx, |this, cx| {
                                 this.open_image_preview(
                                     preview_image.clone(),
                                     preview_name.clone(),
@@ -453,7 +453,7 @@ fn render_sent_message_attachments(
                 tile = tile.on_key_down(move |event: &KeyDownEvent, window, cx| {
                     let key = event.keystroke.key.as_str();
                     if matches!(key, "enter" | "space") {
-                        let _ = key_waku.update(cx, |this, cx| {
+                        let _ = key_michelle.update(cx, |this, cx| {
                             this.open_image_preview(
                                 key_image.clone(),
                                 key_name.clone(),
@@ -561,7 +561,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         markdown,
         ctx,
         menu,
-        waku,
+        michelle,
         composer,
     } = params;
 
@@ -591,7 +591,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 &attachment_menus,
                 &attachment_images,
                 attachments_can_reveal,
-                &waku,
+                &michelle,
                 theme,
             ) {
                 column = column.child(attachments);
@@ -599,8 +599,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             if let Some(edit_input) = message_edit_input {
                 let can_submit = !edit_input.read(cx).content(cx).trim().is_empty()
                     || !message.attachments.is_empty();
-                let cancel_waku = waku.clone();
-                let submit_waku = waku.clone();
+                let cancel_michelle = michelle.clone();
+                let submit_michelle = michelle.clone();
                 column = column.child(
                     div()
                         .w_full()
@@ -636,7 +636,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                         .hover(|element| element.bg(theme.overlay_strong))
                                         .child(tr_cow!("common.cancel"))
                                         .on_click(move |_, window, cx| {
-                                            let _ = cancel_waku.update(cx, |this, cx| {
+                                            let _ = cancel_michelle.update(cx, |this, cx| {
                                                 this.cancel_message_edit(window, cx);
                                             });
                                         }),
@@ -671,7 +671,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                         .child(tr_cow!("common.send"))
                                         .on_click(move |_, _, cx| {
                                             if can_submit {
-                                                let _ = submit_waku.update(cx, |this, cx| {
+                                                let _ = submit_michelle.update(cx, |this, cx| {
                                                     this.submit_message_edit(cx);
                                                 });
                                             }
@@ -743,7 +743,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                             .when_some(user_message_viewport, |bubble, viewport| {
                                 let key_scroll = viewport.scroll_handle.clone();
                                 let key_menu = menu.clone();
-                                let key_owner = waku.entity_id();
+                                let key_owner = michelle.entity_id();
                                 bubble
                                     .track_focus(menu.trigger_focus_handle())
                                     .tab_group()
@@ -811,7 +811,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     true,
                     None,
                     user_message_action,
-                    waku.clone(),
+                    michelle.clone(),
                 ));
             }
             column
@@ -845,7 +845,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     false,
                     assistant_message_action,
                     None,
-                    waku.clone(),
+                    michelle.clone(),
                 ));
             }
             column
@@ -881,7 +881,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 assistant_message_action,
                 &selection,
                 &composer,
-                &waku,
+                &michelle,
                 cx,
             )
         },
@@ -898,7 +898,7 @@ fn message_menu_items(
     assistant_message_action: Option<AssistantMessageAction>,
     selection: &TranscriptSelection,
     composer: &Entity<ComposerInput>,
-    waku: &gpui::WeakEntity<Waku>,
+    michelle: &gpui::WeakEntity<Michelle>,
     _cx: &mut App,
 ) -> Vec<MenuItem> {
     let mut items = Vec::new();
@@ -939,11 +939,11 @@ fn message_menu_items(
     }
 
     if let Some(action) = user_message_action {
-        let waku = waku.clone();
+        let michelle = michelle.clone();
         items.push(MenuItem::Separator);
         items.push(
             MenuItem::new(tr!("session.revert_to_here_title"), move |window, cx| {
-                let _ = waku.update(cx, |this, cx| {
+                let _ = michelle.update(cx, |this, cx| {
                     this.begin_message_edit(action, window, cx);
                 });
             })
@@ -952,7 +952,7 @@ fn message_menu_items(
     }
 
     if let Some(action) = assistant_message_action {
-        let waku = waku.clone();
+        let michelle = michelle.clone();
         items.push(MenuItem::Separator);
         items.push(
             MenuItem::new(
@@ -962,7 +962,7 @@ fn message_menu_items(
                     tr!("session.forking_task_title")
                 },
                 move |_, cx| {
-                    let _ = waku.update(cx, |this, cx| {
+                    let _ = michelle.update(cx, |this, cx| {
                         this.fork_session_from_response(action.session_id, action.turn_count, cx);
                     });
                 },
@@ -1643,7 +1643,7 @@ mod message_time_tests {
             true,
         )
         .with_tool_name(Some("js"))
-        .with_mcp_server(Some("waku_js_repl"))
+        .with_mcp_server(Some("michelle_js_repl"))
         .with_arguments(Some("{}".into()));
         assert_eq!(
             activity_display_title(&activity),
@@ -1654,7 +1654,7 @@ mod message_time_tests {
             vec![
                 ActivityDisclosureSection {
                     kind: ActivityDisclosureSectionKind::McpServer,
-                    content: "waku_js_repl".into()
+                    content: "michelle_js_repl".into()
                 },
                 ActivityDisclosureSection {
                     kind: ActivityDisclosureSectionKind::ToolName,
@@ -1897,7 +1897,7 @@ mod message_time_tests {
         )
         .with_arguments(Some(
             serde_json::json!({
-                "patch": "*** Begin Patch\n*** Update File: /tmp/waku/src/app.rs\n@@\n-old\n+new\n+more\n*** End Patch"
+                "patch": "*** Begin Patch\n*** Update File: /tmp/michelle/src/app.rs\n@@\n-old\n+new\n+more\n*** End Patch"
             })
             .to_string(),
         ));
@@ -1944,7 +1944,7 @@ mod message_time_tests {
             false,
         )
         .with_arguments(Some(
-            serde_json::json!({"filePath": "/tmp/waku/src/model.rs"}).to_string(),
+            serde_json::json!({"filePath": "/tmp/michelle/src/model.rs"}).to_string(),
         ));
         assert_eq!(activity_display_title(&read), "Reading model.rs");
         read.complete = true;
@@ -1975,7 +1975,7 @@ mod message_time_tests {
             false,
         )
         .with_arguments(Some(
-            serde_json::json!({"path": "/tmp/waku/src"}).to_string(),
+            serde_json::json!({"path": "/tmp/michelle/src"}).to_string(),
         ));
         assert_eq!(activity_display_title(&list), "Listing files in src");
 
@@ -2025,10 +2025,12 @@ mod message_time_tests {
             None,
             true,
         )
-        .with_arguments(Some(serde_json::json!({"query": "Waku GPUI"}).to_string()));
+        .with_arguments(Some(
+            serde_json::json!({"query": "Michelle GPUI"}).to_string(),
+        ));
         assert_eq!(
             activity_display_title(&web_search),
-            "Searched the web for Waku GPUI"
+            "Searched the web for Michelle GPUI"
         );
 
         let plan = ActivityItem::new(

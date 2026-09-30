@@ -1,5 +1,5 @@
 {
-  "name": "waku-workspace",
+  "name": "michelle-workspace",
   "type": "module",
   "scripts": {
     "dev": "bun ./scripts/dev.ts",

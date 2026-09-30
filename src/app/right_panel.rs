@@ -42,7 +42,7 @@ fn line_fragment(fragment: &str) -> bool {
 
 /// Removes the `:line`, `:line:column`, or `#LlineCcolumn` suffixes Codex uses
 /// in clickable local-file references. The location is not yet consumed by
-/// Waku's compact editor, but it must not become part of the filesystem path.
+/// Michelle's compact editor, but it must not become part of the filesystem path.
 fn strip_file_location(target: &str) -> &str {
     if let Some((path, fragment)) = target.rsplit_once('#')
         && line_fragment(fragment)
@@ -180,7 +180,7 @@ pub(super) fn file_icon_for_path(path: &str) -> &'static str {
 fn review_diff_gap_icon_path(direction: crate::review_diff::ExpansionDirection) -> &'static str {
     match direction {
         // Pierre's direction attributes and rendered chevrons are inverted by
-        // CSS. Waku names the data operation directly, so encode the resulting
+        // CSS. Michelle names the data operation directly, so encode the resulting
         // visual here: reveal-from-start points down; reveal-from-end points up.
         crate::review_diff::ExpansionDirection::Start => "icons/chevron-down.svg",
         crate::review_diff::ExpansionDirection::End => "icons/chevron-up.svg",
@@ -834,17 +834,17 @@ fn file_highlighter_language(relative_path: &str) -> &'static str {
 /// Reads a file for the editor, returning its text and whether it can be saved.
 ///
 /// One unbounded `read_to_string`, so callers keep it off the UI thread; the
-/// only caller is [`Waku::read_right_panel_file_into_editor`].
+/// only caller is [`Michelle::read_right_panel_file_into_editor`].
 fn read_right_panel_file(
-    workspace: &waku_client::WorkspaceClient,
+    workspace: &michelle_client::WorkspaceClient,
     project_path: &Path,
     relative_path: &str,
 ) -> (String, bool) {
-    match workspace.request(waku_client::WorkspaceOperation::ReadTextFile {
+    match workspace.request(michelle_client::WorkspaceOperation::ReadTextFile {
         root: project_path.to_path_buf(),
         relative_path: PathBuf::from(relative_path),
     }) {
-        Ok(waku_client::WorkspaceResult::TextFile { content }) => (content, true),
+        Ok(michelle_client::WorkspaceResult::TextFile { content }) => (content, true),
         Ok(_) => (
             tr!(
                 "files.unable_to_edit",
@@ -990,7 +990,7 @@ fn fade_safe_tab_offset(
 fn tab_scroll_reveal_guard(
     scroll_handle: ScrollHandle,
     tab_index: usize,
-    waku: WeakEntity<Waku>,
+    michelle: WeakEntity<Michelle>,
 ) -> impl IntoElement {
     canvas(
         move |_, window, _| {
@@ -1011,7 +1011,7 @@ fn tab_scroll_reveal_guard(
             }
 
             window.on_next_frame(move |_, cx| {
-                let _ = waku.update(cx, |this, cx| {
+                let _ = michelle.update(cx, |this, cx| {
                     if this.right_panel_pending_tab_reveal == Some(tab_index) {
                         this.right_panel_pending_tab_reveal = None;
                         cx.notify();
@@ -1431,11 +1431,11 @@ mod tests {
 
     #[test]
     fn working_tree_only_descends_into_expanded_directories() {
-        let root = std::env::temp_dir().join(format!("waku-working-tree-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("michelle-working-tree-{}", Uuid::new_v4()));
         std::fs::create_dir_all(root.join("src/nested")).unwrap();
         std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
-        std::fs::write(root.join("README.md"), "# Waku\n").unwrap();
+        std::fs::write(root.join("README.md"), "# Michelle\n").unwrap();
 
         let collapsed = visible_working_tree_entries(&root, &HashSet::new());
         assert_eq!(
@@ -1738,7 +1738,7 @@ mod tests {
     }
 }
 
-impl Waku {
+impl Michelle {
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
         match transcript_link_route(target, self.selected_workspace_path()) {
             TranscriptLinkRoute::ProjectFile(relative_path) => {
@@ -3073,9 +3073,9 @@ impl Waku {
         editor.reading = true;
         editor.read_epoch += 1;
         let epoch = editor.read_epoch;
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
 
-        cx.spawn(async move |waku, cx| {
+        cx.spawn(async move |michelle, cx| {
             let read = cx
                 .background_executor()
                 .spawn({
@@ -3084,49 +3084,53 @@ impl Waku {
                     async move { read_right_panel_file(&workspace, &project_path, &relative_path) }
                 })
                 .await;
-            waku.update(cx, |waku, cx| {
-                if waku.state.selected_session != Some(session_id)
-                    || waku
-                        .selected_workspace_path()
-                        .is_none_or(|path| path != project_path)
-                {
-                    // The editor moved into another session's stored state, or
-                    // the project changed. Clear the flag so a later reload can
-                    // ask again, and drop the text.
-                    if let Some(editor) = waku.right_panel_file_editors.get_mut(&relative_path) {
-                        editor.reading = false;
+            michelle
+                .update(cx, |michelle, cx| {
+                    if michelle.state.selected_session != Some(session_id)
+                        || michelle
+                            .selected_workspace_path()
+                            .is_none_or(|path| path != project_path)
+                    {
+                        // The editor moved into another session's stored state, or
+                        // the project changed. Clear the flag so a later reload can
+                        // ask again, and drop the text.
+                        if let Some(editor) =
+                            michelle.right_panel_file_editors.get_mut(&relative_path)
+                        {
+                            editor.reading = false;
+                        }
+                        return;
                     }
-                    return;
-                }
-                let (content, writable) = read;
-                let Some(editor) = waku.right_panel_file_editors.get_mut(&relative_path) else {
-                    return;
-                };
-                // A save landed while the read was in flight, so this text
-                // describes the file as it was before that save.
-                if editor.read_epoch != epoch {
-                    return;
-                }
-                editor.reading = false;
-                // An edit landed while the read was in flight; the user's text
-                // wins over the copy on disk.
-                if editor.dirty {
-                    return;
-                }
-                if editor.disk_content == content && editor.writable == writable {
-                    return;
-                }
-                editor.disk_content = content.clone();
-                editor.writable = writable;
-                editor.dirty = false;
-                let state = editor.state.clone();
-                state.update(cx, |state, cx| {
-                    state.set_read_only(!writable);
-                    state.set_content(content, cx);
-                });
-                cx.notify();
-            })
-            .ok();
+                    let (content, writable) = read;
+                    let Some(editor) = michelle.right_panel_file_editors.get_mut(&relative_path)
+                    else {
+                        return;
+                    };
+                    // A save landed while the read was in flight, so this text
+                    // describes the file as it was before that save.
+                    if editor.read_epoch != epoch {
+                        return;
+                    }
+                    editor.reading = false;
+                    // An edit landed while the read was in flight; the user's text
+                    // wins over the copy on disk.
+                    if editor.dirty {
+                        return;
+                    }
+                    if editor.disk_content == content && editor.writable == writable {
+                        return;
+                    }
+                    editor.disk_content = content.clone();
+                    editor.writable = writable;
+                    editor.dirty = false;
+                    let state = editor.state.clone();
+                    state.update(cx, |state, cx| {
+                        state.set_read_only(!writable);
+                        state.set_content(content, cx);
+                    });
+                    cx.notify();
+                })
+                .ok();
         })
         .detach();
     }
@@ -3417,8 +3421,8 @@ impl Waku {
         } else {
             return;
         };
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |waku, cx| {
+        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |michelle, cx| {
             let result = cx
                 .background_executor()
                 .spawn({
@@ -3426,20 +3430,22 @@ impl Waku {
                     let relative_path = relative_path.clone();
                     let content = content.clone();
                     async move {
-                        match workspace.request(waku_client::WorkspaceOperation::WriteTextFile {
-                            root: project_path,
-                            relative_path: PathBuf::from(relative_path),
-                            content,
-                        })? {
-                            waku_client::WorkspaceResult::Ack => Ok(()),
+                        match workspace.request(
+                            michelle_client::WorkspaceOperation::WriteTextFile {
+                                root: project_path,
+                                relative_path: PathBuf::from(relative_path),
+                                content,
+                            },
+                        )? {
+                            michelle_client::WorkspaceResult::Ack => Ok(()),
                             _ => anyhow::bail!("the daemon returned an invalid file response"),
                         }
                     }
                 })
                 .await;
-            let _ = waku.update(cx, |waku, cx| {
-                if waku.state.selected_session != Some(session_id)
-                    || waku
+            let _ = michelle.update(cx, |michelle, cx| {
+                if michelle.state.selected_session != Some(session_id)
+                    || michelle
                         .selected_workspace_path()
                         .is_none_or(|path| path != project_path)
                 {
@@ -3447,7 +3453,8 @@ impl Waku {
                 }
                 match result {
                     Ok(()) => {
-                        if let Some(editor) = waku.right_panel_file_editors.get_mut(&relative_path)
+                        if let Some(editor) =
+                            michelle.right_panel_file_editors.get_mut(&relative_path)
                             && editor.read_epoch == epoch
                         {
                             let current = editor.state.read(cx).content();
@@ -3455,7 +3462,7 @@ impl Waku {
                             editor.dirty = current != content;
                         }
                     }
-                    Err(error) => waku.show_toast(tr!(
+                    Err(error) => michelle.show_toast(tr!(
                         "files.could_not_save",
                         path = relative_path,
                         error = error.to_string()
@@ -4393,48 +4400,51 @@ impl Waku {
             Query::Pending => {}
             Query::Missing(token) => {
                 let expanded = self.right_panel_expanded_paths.clone();
-                let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
-                cx.spawn(async move |waku, cx| {
+                let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
+                cx.spawn(async move |michelle, cx| {
                     let entries = cx
                         .background_executor()
                         .spawn({
                             let path = project_path.clone();
                             async move {
-                                match workspace.request(waku_client::WorkspaceOperation::ListTree {
-                                    root: path,
-                                    expanded_paths: expanded.into_iter().collect(),
-                                }) {
-                                    Ok(waku_client::WorkspaceResult::WorkingTree { entries }) => {
-                                        entries
-                                            .into_iter()
-                                            .map(|entry| WorkingTreeEntry {
-                                                file_icon: (!entry.is_dir)
-                                                    .then(|| file_icon_for_name(&entry.name)),
-                                                relative_path: entry.relative_path,
-                                                absolute_path: entry.absolute_path,
-                                                name: entry.name,
-                                                is_dir: entry.is_dir,
-                                                expanded: entry.expanded,
-                                                depth: entry.depth,
-                                            })
-                                            .collect()
-                                    }
+                                match workspace.request(
+                                    michelle_client::WorkspaceOperation::ListTree {
+                                        root: path,
+                                        expanded_paths: expanded.into_iter().collect(),
+                                    },
+                                ) {
+                                    Ok(michelle_client::WorkspaceResult::WorkingTree {
+                                        entries,
+                                    }) => entries
+                                        .into_iter()
+                                        .map(|entry| WorkingTreeEntry {
+                                            file_icon: (!entry.is_dir)
+                                                .then(|| file_icon_for_name(&entry.name)),
+                                            relative_path: entry.relative_path,
+                                            absolute_path: entry.absolute_path,
+                                            name: entry.name,
+                                            is_dir: entry.is_dir,
+                                            expanded: entry.expanded,
+                                            depth: entry.depth,
+                                        })
+                                        .collect(),
                                     Ok(_) | Err(_) => Vec::new(),
                                 }
                             }
                         })
                         .await;
-                    waku.update(cx, |waku, cx| {
-                        if waku.working_trees.fulfill(token, entries.clone())
-                            && waku
-                                .selected_workspace_path()
-                                .is_some_and(|path| path == project_path)
-                        {
-                            waku.right_panel_working_tree = entries;
-                            cx.notify();
-                        }
-                    })
-                    .ok();
+                    michelle
+                        .update(cx, |michelle, cx| {
+                            if michelle.working_trees.fulfill(token, entries.clone())
+                                && michelle
+                                    .selected_workspace_path()
+                                    .is_some_and(|path| path == project_path)
+                            {
+                                michelle.right_panel_working_tree = entries;
+                                cx.notify();
+                            }
+                        })
+                        .ok();
                 })
                 .detach();
             }
@@ -4541,20 +4551,20 @@ impl Waku {
         self.right_panel_diff_error = None;
         cx.notify();
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |waku, cx| {
+        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |michelle, cx| {
             let result = cx
                 .background_executor()
                 .spawn({
                     let project_path = project_path.clone();
                     async move {
                         match workspace.request(
-                            waku_client::WorkspaceOperation::CollectReviewDiff {
+                            michelle_client::WorkspaceOperation::CollectReviewDiff {
                                 cwd: project_path,
                                 source: crate::review_diff::wire_source(source),
                             },
                         )? {
-                            waku_client::WorkspaceResult::ReviewDiff { data } => {
+                            michelle_client::WorkspaceResult::ReviewDiff { data } => {
                                 Ok(crate::review_diff::parse_collected(
                                     source,
                                     &data.numstat,
@@ -4567,54 +4577,57 @@ impl Waku {
                     }
                 })
                 .await;
-            waku.update(cx, |waku, cx| {
-                let still_current = waku.state.selected_session == Some(session_id)
-                    && waku.right_panel_diff_generation == generation
-                    && waku.right_panel_diff_source == source
-                    && waku
-                        .selected_workspace_path()
-                        .is_some_and(|path| path == project_path);
-                if !still_current {
-                    return;
-                }
+            michelle
+                .update(cx, |michelle, cx| {
+                    let still_current = michelle.state.selected_session == Some(session_id)
+                        && michelle.right_panel_diff_generation == generation
+                        && michelle.right_panel_diff_source == source
+                        && michelle
+                            .selected_workspace_path()
+                            .is_some_and(|path| path == project_path);
+                    if !still_current {
+                        return;
+                    }
 
-                waku.right_panel_diff_loading = false;
-                match result {
-                    Ok(snapshot) => {
-                        waku.right_panel_diff_selection.clear();
-                        let directories = review_diff_directory_paths(&snapshot.files);
-                        if had_snapshot {
-                            waku.right_panel_diff_expanded_paths
-                                .retain(|path| directories.contains(path));
-                            waku.right_panel_diff_expanded_paths
-                                .extend(directories.difference(&previous_directories).cloned());
-                        } else {
-                            waku.right_panel_diff_expanded_paths = directories;
+                    michelle.right_panel_diff_loading = false;
+                    match result {
+                        Ok(snapshot) => {
+                            michelle.right_panel_diff_selection.clear();
+                            let directories = review_diff_directory_paths(&snapshot.files);
+                            if had_snapshot {
+                                michelle
+                                    .right_panel_diff_expanded_paths
+                                    .retain(|path| directories.contains(path));
+                                michelle
+                                    .right_panel_diff_expanded_paths
+                                    .extend(directories.difference(&previous_directories).cloned());
+                            } else {
+                                michelle.right_panel_diff_expanded_paths = directories;
+                            }
+                            michelle.right_panel_diff_selected_file = selected_path
+                                .as_deref()
+                                .and_then(|path| {
+                                    snapshot.files.iter().position(|file| file.path == path)
+                                })
+                                .or_else(|| (!snapshot.files.is_empty()).then_some(0));
+                            let line_count = snapshot.lines.len();
+                            michelle.right_panel_diff_snapshot = Some(Arc::new(snapshot));
+                            michelle.right_panel_diff_error = None;
+                            michelle.right_panel_diff_list_state.reset(line_count);
+                            michelle.sync_right_panel_diff_tree_rows(cx);
                         }
-                        waku.right_panel_diff_selected_file = selected_path
-                            .as_deref()
-                            .and_then(|path| {
-                                snapshot.files.iter().position(|file| file.path == path)
-                            })
-                            .or_else(|| (!snapshot.files.is_empty()).then_some(0));
-                        let line_count = snapshot.lines.len();
-                        waku.right_panel_diff_snapshot = Some(Arc::new(snapshot));
-                        waku.right_panel_diff_error = None;
-                        waku.right_panel_diff_list_state.reset(line_count);
-                        waku.sync_right_panel_diff_tree_rows(cx);
-                    }
-                    Err(error) => {
-                        let message = error.to_string();
-                        if waku.right_panel_diff_snapshot.is_some() {
-                            waku.show_toast(tr!("diff.refresh_failed", error = message));
-                        } else {
-                            waku.right_panel_diff_error = Some(message);
+                        Err(error) => {
+                            let message = error.to_string();
+                            if michelle.right_panel_diff_snapshot.is_some() {
+                                michelle.show_toast(tr!("diff.refresh_failed", error = message));
+                            } else {
+                                michelle.right_panel_diff_error = Some(message);
+                            }
                         }
                     }
-                }
-                cx.notify();
-            })
-            .ok();
+                    cx.notify();
+                })
+                .ok();
         })
         .detach();
     }

@@ -54,7 +54,7 @@ enum ProjectPickerAction {
     NoProject,
 }
 
-impl Waku {
+impl Michelle {
     pub(super) fn open_project_picker_action(
         &mut self,
         _: &crate::OpenProjectPicker,
@@ -73,7 +73,7 @@ impl Waku {
             .filter(|menu| menu.is_open())
             .cloned()
             .collect();
-        // Toggle observers update Waku, so release this entity's lease first.
+        // Toggle observers update Michelle, so release this entity's lease first.
         window.defer(cx, move |window, cx| {
             for menu in other_open {
                 menu.close(window, cx);
@@ -333,7 +333,7 @@ impl Waku {
                             return;
                         };
                         // Close before applying: the toggle observer updates
-                        // `Waku`, so it cannot run inside the update below.
+                        // `Michelle`, so it cannot run inside the update below.
                         confirm_popover.close(window, cx);
                         window.refresh();
                         let _ = confirm_weak.update(cx, |this, cx| {
@@ -552,7 +552,7 @@ mod tests {
             project("crow-companion"),
             project("speech-to-subtitle"),
             project("crow"),
-            project("waku-crow-sync"),
+            project("michelle-crow-sync"),
         ];
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
         let entries = visible_project_entries(&projects, None, "  CROW ", &mut matcher);
@@ -560,7 +560,7 @@ mod tests {
         // namesakes, and the non-matching project is gone.
         assert_eq!(
             names(&entries),
-            vec!["crow", "crow-companion", "waku-crow-sync"]
+            vec!["crow", "crow-companion", "michelle-crow-sync"]
         );
 
         let entries = visible_project_entries(&projects, None, "sts", &mut matcher);

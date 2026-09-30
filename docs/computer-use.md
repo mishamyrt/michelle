@@ -1,6 +1,6 @@
 # Computer Use
 
-Waku embeds **Cua Driver 0.28.0** through its native SDK ABI (1.1). The
+Michelle embeds **Cua Driver 0.28.0** through its native SDK ABI (1.1). The
 JavaScript REPL exposes every native tool directly, such as `cua.list_apps()`,
 `cua.get_window_state(args)`, and `cua.click(args)`. Setup binds the native methods internally. The bundled skill contains the
 host-specific method signatures and direct-call examples; agent code does
@@ -15,9 +15,9 @@ bundled skill. System permissions and app approvals still apply.
 
 ## Processes and lifetime
 
-On macOS, the signed `Waku Computer Use.app` hosts the SDK library directly.
+On macOS, the signed `Michelle Computer Use.app` hosts the SDK library directly.
 Its Launch Services bridge preserves the helper's existing independent TCC
-identity and Waku's Screen Recording/Accessibility onboarding. The bundled
+identity and Michelle's Screen Recording/Accessibility onboarding. The bundled
 library is signed with the same identity as the helper. Permission requests
 remain host-owned: direct SDK permission checks do not open macOS prompts.
 
@@ -29,7 +29,7 @@ automatically retried. The `bring_to_front` tool is omitted from the exposed
 API. Other tool arguments pass through to Cua unchanged. All SDK and IPC work
 occurs outside the GUI process.
 
-Waku's preview decodes each PNG from the agent's `get_window_state` result on
+Michelle's preview decodes each PNG from the agent's `get_window_state` result on
 a background worker. The previous decoded frame stays visible until the latest
 replacement is ready; stale or invalid frames are discarded. There is no
 second capture or continuous accessibility walk to change the agent's snapshot.
@@ -41,12 +41,12 @@ Cua Driver. Headless hosts still report unavailable graphics facilities.
 
 ## OpenCode 2
 
-OpenCode 2 uses the existing shared service. Waku registers one temporary MCP
+OpenCode 2 uses the existing shared service. Michelle registers one temporary MCP
 connection per workspace through `/api/mcp` and attaches a session instruction
 pointing to the bundled skill (OpenCode limits each entry to 8 KB). `js` and `js_reset` remain direct tools, with
 OpenCode's additional codemode wrapper disabled for this server.
 
-OpenCode's `_meta.sessionID` selects a Waku-owned registration, so each task
+OpenCode's `_meta.sessionID` selects a Michelle-owned registration, so each task
 has independent JavaScript bindings, native helper processes, cancellation,
 and PiP frames. Unregistered sessions cannot execute calls through the bridge.
 Detaching a task revokes its registration and removes its instructions; the
@@ -56,7 +56,7 @@ No OpenCode configuration files or service descriptors are written.
 
 ## Platform requirements
 
-- **macOS:** grant the Waku helper Screen Recording and Accessibility access
+- **macOS:** grant the Michelle helper Screen Recording and Accessibility access
   in Settings > Computer Use. Relaunch the permission-owning helper after a
   grant changes; new REPL connections launch a fresh helper.
 Native window IDs are preserved as 64-bit values, including in preview events.
@@ -71,8 +71,8 @@ exposed through `resources/computer-use/cua-host.rs`. This small ABI extension
 enables Cua's existing cursor facility and main loop; it does not implement
 input, capture, or rendering. Authorization still uses Cua's original checks.
 
-The SDK uses its own pinned Rust toolchain and lockfile, isolated from Waku's
-workspace. Sources and builds are cached under `.waku-cache/cua-host` so normal
+The SDK uses its own pinned Rust toolchain and lockfile, isolated from Michelle's
+workspace. Sources and builds are cached under `.michelle-cache/cua-host` so normal
 dev rebuilds reuse the compiled SDK. The macOS bundle and dev watcher
 package the same host-enabled SDK. `scripts/cua-api.ts` reads the native tool
 metadata during packaging and writes the complete API reference into the
@@ -85,7 +85,7 @@ configuration reads, a request missing required arguments, a synthetic image,
 and REPL reset/reconnect:
 
 ```sh
-cargo build -p waku --bin waku_js_repl -p waku-computer-use --bin waku_computer_use
+cargo build -p michelle --bin michelle_js_repl -p michelle-computer-use --bin michelle_computer_use
 bun scripts/cua-driver.ts bundle target/debug target/debug/resources debug
 bun scripts/test-computer-use.ts
 ```

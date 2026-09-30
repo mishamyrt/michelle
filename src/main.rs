@@ -1,3 +1,3 @@
 fn main() {
-    waku::run();
+    michelle::run();
 }

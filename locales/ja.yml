@@ -520,7 +520,7 @@ command_scope.project: プロジェクト
 command_scope.user: ユーザー
 command_scope.skill: スキル
 command_scope.builtin: 組み込み
-command_scope.waku: Michelle
+command_scope.michelle: Michelle
 
 skills.search: スキルを検索…
 skills.count_one: 1 個のスキル
@@ -655,9 +655,9 @@ session.agent_declined_turn: エージェントはこのターンを辞退しま
 session.agent_stopped_reason: "エージェントが停止しました：%{reason}"
 
 errors.open_session: "そのタスクを開けませんでした：%{error}"
-errors.create_projectless_task: "~/.waku/projects 内にタスクを作成できませんでした：%{error}"
+errors.create_projectless_task: "~/.michelle/projects 内にタスクを作成できませんでした：%{error}"
 errors.save_projectless_migration: "プロジェクトなしタスクの移行を保存できませんでした：%{error}"
-errors.move_projectless_task: "以前のルート直下のプロジェクトなしタスクを ~/.waku/projects 内に移動できませんでした：%{error}"
+errors.move_projectless_task: "以前のルート直下のプロジェクトなしタスクを ~/.michelle/projects 内に移動できませんでした：%{error}"
 errors.remote_host_path: このパスはデーモンホスト上にあるため、デスクトップアプリでは開けません
 errors.change_branch: "ブランチを変更できませんでした：%{error}"
 errors.capture_pre_turn_checkpoint: "ターン開始前のチェックポイントを取得できませんでした：%{error}"
@@ -668,7 +668,7 @@ errors.provider_native_session_unavailable: "%{provider} のネイティブセ�
 errors.provider_native_thread_unavailable: "%{provider} のネイティブスレッドは利用できません"
 errors.provider_native_cursor_unavailable: "%{provider} のネイティブセッションカーソルは利用できません"
 errors.provider_native_thread_cursor_unavailable: "%{provider} のネイティブスレッドカーソルは利用できません"
-errors.provider_waku_task_unavailable: "%{provider} の Michelle タスクは利用できません"
+errors.provider_michelle_task_unavailable: "%{provider} の Michelle タスクは利用できません"
 errors.provider_not_installed: "%{provider} はインストールされていません"
 errors.provider_not_found: "%{provider} はインストールされていないか、見つかりませんでした"
 errors.claude_fork_checkpoint_missing: Claude からフォーク用チェックポイントが返されませんでした

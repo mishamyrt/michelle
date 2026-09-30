@@ -47,7 +47,7 @@ mod theme;
 mod ui;
 mod updater;
 
-pub use waku_client::{
+pub use michelle_client::{
     checkpoint, command_env, composer_complete, git_branch, git_commit, i18n, identity, model,
     model_catalog, persistence, projectless, skills, usage, usage_history, worktree,
 };
@@ -57,10 +57,10 @@ use gpui::{
     WindowBackgroundAppearance, WindowBounds, WindowOptions, actions, point, px, size,
 };
 
-use crate::app::Waku;
+use crate::app::Michelle;
 use crate::identity::{APP_ID, APP_NAME};
 actions!(
-    waku,
+    michelle,
     [
         Quit,
         About,
@@ -177,11 +177,11 @@ fn restored_window_placement(cx: &App) -> (WindowBounds, Option<gpui::DisplayId>
     (window_bounds, display_id)
 }
 
-trait WakuApplicationExt {
+trait MichelleApplicationExt {
     fn with_main_window_reopen(self) -> Self;
 }
 
-impl WakuApplicationExt for Application {
+impl MichelleApplicationExt for Application {
     fn with_main_window_reopen(self) -> Self {
         self.on_reopen(|cx| {
             if let Some(window) = cx.windows().into_iter().next() {
@@ -238,18 +238,18 @@ pub fn run() {
                 KeyBinding::new("secondary-w", CloseWindow, None),
                 KeyBinding::new("secondary-n", NewSession, None),
                 KeyBinding::new("secondary-o", NewProject, None),
-                KeyBinding::new("secondary-alt-p", OpenProjectPicker, Some("Waku")),
+                KeyBinding::new("secondary-alt-p", OpenProjectPicker, Some("Michelle")),
                 KeyBinding::new("secondary-,", OpenSettings, None),
                 KeyBinding::new("secondary-b", ToggleSidebar, None),
                 KeyBinding::new("secondary-shift-b", ToggleRightPanel, None),
                 KeyBinding::new("secondary-k", ToggleCommandPalette, None),
                 KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
-                KeyBinding::new("secondary-[", NavigateBack, Some("Waku")),
-                KeyBinding::new("secondary-]", NavigateForward, Some("Waku")),
-                KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Waku")),
-                KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Waku")),
-                KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Waku")),
-                KeyBinding::new("ctrl-shift-escape", CancelTaskSwitch, Some("Waku")),
+                KeyBinding::new("secondary-[", NavigateBack, Some("Michelle")),
+                KeyBinding::new("secondary-]", NavigateForward, Some("Michelle")),
+                KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Michelle")),
+                KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Michelle")),
+                KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Michelle")),
+                KeyBinding::new("ctrl-shift-escape", CancelTaskSwitch, Some("Michelle")),
                 KeyBinding::new("down", SwitchTaskForward, Some("TaskSwitcher")),
                 KeyBinding::new("right", SwitchTaskForward, Some("TaskSwitcher")),
                 KeyBinding::new("up", SwitchTaskBackward, Some("TaskSwitcher")),
@@ -263,21 +263,21 @@ pub fn run() {
                 KeyBinding::new("secondary-alt-/", ToggleModelTraits, None),
                 KeyBinding::new("secondary-u", ToggleUsagePanel, None),
                 KeyBinding::new("secondary-s", SaveFile, None),
-                KeyBinding::new("escape", CancelTurn, Some("Waku")),
-                KeyBinding::new("secondary-c", CopySelection, Some("Waku")),
+                KeyBinding::new("escape", CancelTurn, Some("Michelle")),
+                KeyBinding::new("secondary-c", CopySelection, Some("Michelle")),
                 // Find and replace in the right panel's file editor, on the
                 // conventional VS Code bindings. The primary shortcut + G cycles matches from
                 // the editor without moving focus to the bar.
-                KeyBinding::new("secondary-f", OpenFind, Some("Waku")),
+                KeyBinding::new("secondary-f", OpenFind, Some("Michelle")),
                 // The text input's macOS-style Ctrl-F caret binding is more
-                // specific than Waku's root context. Reassert the platform
+                // specific than Michelle's root context. Reassert the platform
                 // primary shortcut for inputs inside this window so Ctrl-F
                 // remains find-in-page on Linux/Windows while Cmd-F keeps the
                 // native behavior on macOS.
-                KeyBinding::new("secondary-f", OpenFind, Some("Waku > TextInput")),
-                KeyBinding::new("secondary-alt-f", OpenFindReplace, Some("Waku")),
-                KeyBinding::new("secondary-g", FindNext, Some("Waku")),
-                KeyBinding::new("secondary-shift-g", FindPrevious, Some("Waku")),
+                KeyBinding::new("secondary-f", OpenFind, Some("Michelle > TextInput")),
+                KeyBinding::new("secondary-alt-f", OpenFindReplace, Some("Michelle")),
+                KeyBinding::new("secondary-g", FindNext, Some("Michelle")),
+                KeyBinding::new("secondary-shift-g", FindPrevious, Some("Michelle")),
                 // Scoped to the editor pane: escape closes the bar there and
                 // falls through to CancelTurn anywhere else.
                 KeyBinding::new("escape", CloseFind, Some("FileEditorPane")),
@@ -295,7 +295,7 @@ pub fn run() {
                 KeyBinding::new("secondary-alt-r", ToggleFindRegex, Some("FileEditorPane")),
                 KeyBinding::new("shift-enter", FindPrevious, Some("FindBar")),
                 KeyBinding::new("secondary-alt-enter", ReplaceAllMatches, Some("FindBar")),
-                // Browser surface. Deeper than "Waku", so while focus is on the
+                // Browser surface. Deeper than "Michelle", so while focus is on the
                 // page or its address bar the browser reads the platform's
                 // conventional navigation shortcuts; the same keys elsewhere
                 // keep their app meanings. The clipboard trio is rebound
@@ -337,7 +337,7 @@ pub fn run() {
                             // Windows creates the window without `WS_CAPTION`
                             // either way; asking for the transparent titlebar
                             // is what extends the client area over the frame
-                            // so Waku's own header can host the caption
+                            // so Michelle's own header can host the caption
                             // buttons and drag region.
                             appears_transparent: cfg!(any(
                                 target_os = "macos",
@@ -346,7 +346,7 @@ pub fn run() {
                             traffic_light_position: cfg!(target_os = "macos")
                                 .then(|| point(px(16.0), px(17.0))),
                         }),
-                        // Waku moves its custom macOS titlebar explicitly. Keep
+                        // Michelle moves its custom macOS titlebar explicitly. Keep
                         // the NSWindow movable so native controls and Window-menu
                         // tiling remain enabled.
                         is_movable: true,
@@ -364,10 +364,10 @@ pub fn run() {
                     },
                     move |window, cx| {
                         crate::platform::configure_main_window_close_behavior(window, cx);
-                        let waku = Waku::new(window, cx, daemon);
-                        let composer_focus = waku.read(cx).composer_focus(cx);
+                        let michelle = Michelle::new(window, cx, daemon);
+                        let composer_focus = michelle.read(cx).composer_focus(cx);
                         window.focus(&composer_focus, cx);
-                        waku
+                        michelle
                     },
                 )
                 .expect("failed to open Michelle window");
@@ -380,8 +380,8 @@ pub fn run() {
                         return;
                     };
                     window
-                        .update(cx, |waku, window, cx| {
-                            waku.open_task_from_notification(session_id, cx);
+                        .update(cx, |michelle, window, cx| {
+                            michelle.open_task_from_notification(session_id, cx);
                             window.activate_window();
                             cx.activate(true);
                         })

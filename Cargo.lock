@@ -1166,7 +1166,7 @@ dependencies = [
 [[package]]
 name = "collections"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "gpui_util",
  "indexmap 2.14.0",
@@ -1665,7 +1665,7 @@ dependencies = [
 [[package]]
 name = "derive_refineable"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2678,7 +2678,7 @@ dependencies = [
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2764,7 +2764,7 @@ dependencies = [
 [[package]]
 name = "gpui_linux"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -2798,7 +2798,7 @@ dependencies = [
 [[package]]
 name = "gpui_macos"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -2847,7 +2847,7 @@ dependencies = [
 [[package]]
 name = "gpui_macros"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2858,7 +2858,7 @@ dependencies = [
 [[package]]
 name = "gpui_platform"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "console_error_panic_hook",
  "gpui",
@@ -2871,7 +2871,7 @@ dependencies = [
 [[package]]
 name = "gpui_shared_string"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "schemars 1.2.2",
  "serde",
@@ -2881,7 +2881,7 @@ dependencies = [
 [[package]]
 name = "gpui_util"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "anyhow",
  "log",
@@ -2891,7 +2891,7 @@ dependencies = [
 [[package]]
 name = "gpui_web"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -2914,7 +2914,7 @@ dependencies = [
 [[package]]
 name = "gpui_wgpu"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2943,7 +2943,7 @@ dependencies = [
 [[package]]
 name = "gpui_windows"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -3216,7 +3216,7 @@ dependencies = [
 [[package]]
 name = "http_client"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -3984,7 +3984,7 @@ dependencies = [
 [[package]]
 name = "media"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "anyhow",
  "bindgen",
@@ -4033,6 +4033,142 @@ dependencies = [
  "log",
  "objc",
  "paste",
+]
+
+[[package]]
+name = "michelle"
+version = "0.1.19"
+dependencies = [
+ "alacritty_terminal",
+ "anyhow",
+ "base64",
+ "block2 0.6.2",
+ "chrono",
+ "crossbeam-channel",
+ "dirs",
+ "futures",
+ "futures-lite",
+ "gpui",
+ "gpui_platform",
+ "image",
+ "libc",
+ "michelle-client",
+ "michelle-protocol",
+ "nucleo-matcher",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "objc2-user-notifications",
+ "objc2-web-kit",
+ "parking_lot",
+ "pulldown-cmark",
+ "ratex-layout",
+ "ratex-parser",
+ "ratex-svg",
+ "ratex-types",
+ "raw-window-handle",
+ "regex",
+ "ropey",
+ "rquickjs",
+ "rust-i18n",
+ "serde",
+ "serde_json",
+ "smol",
+ "unicode-linebreak",
+ "unicode-segmentation",
+ "url",
+ "uuid",
+ "wry",
+]
+
+[[package]]
+name = "michelle-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossbeam-channel",
+ "dirs",
+ "libc",
+ "michelle-protocol",
+ "nucleo-matcher",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "smol",
+ "tungstenite",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "michelle-computer-use"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libloading",
+ "serde_json",
+]
+
+[[package]]
+name = "michelle-core"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "alacritty_terminal",
+ "anyhow",
+ "base64",
+ "chrono",
+ "crossbeam-channel",
+ "dirs",
+ "libc",
+ "michelle-client",
+ "michelle-protocol",
+ "nucleo-matcher",
+ "objc2-foundation 0.3.2",
+ "parking_lot",
+ "rusqlite",
+ "rust-i18n",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "smol",
+ "subtle",
+ "toml 0.8.23",
+ "trash",
+ "tungstenite",
+ "url",
+ "uuid",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "michelle-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "michelle-core",
+ "michelle-protocol",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "michelle-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "dirs",
+ "objc2-foundation 0.3.2",
+ "rust-i18n",
+ "serde",
+ "serde_json",
+ "similar",
+ "uuid",
 ]
 
 [[package]]
@@ -4862,7 +4998,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "perf"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "collections",
  "serde",
@@ -5766,7 +5902,7 @@ dependencies = [
 [[package]]
 name = "refineable"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "derive_refineable",
 ]
@@ -6182,7 +6318,7 @@ dependencies = [
 [[package]]
 name = "scheduler"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "async-task",
  "backtrace",
@@ -6889,7 +7025,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sum_tree"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "heapless",
  "log",
@@ -7720,7 +7856,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 [[package]]
 name = "util_macros"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "perf",
  "quote",
@@ -7858,142 +7994,6 @@ name = "waker-fn"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "317211a0dc0ceedd78fb2ca9a44aed3d7b9b26f81870d485c07122b4350673b7"
-
-[[package]]
-name = "waku"
-version = "0.1.19"
-dependencies = [
- "alacritty_terminal",
- "anyhow",
- "base64",
- "block2 0.6.2",
- "chrono",
- "crossbeam-channel",
- "dirs",
- "futures",
- "futures-lite",
- "gpui",
- "gpui_platform",
- "image",
- "libc",
- "nucleo-matcher",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-core-graphics",
- "objc2-foundation 0.3.2",
- "objc2-quartz-core 0.3.2",
- "objc2-user-notifications",
- "objc2-web-kit",
- "parking_lot",
- "pulldown-cmark",
- "ratex-layout",
- "ratex-parser",
- "ratex-svg",
- "ratex-types",
- "raw-window-handle",
- "regex",
- "ropey",
- "rquickjs",
- "rust-i18n",
- "serde",
- "serde_json",
- "smol",
- "unicode-linebreak",
- "unicode-segmentation",
- "url",
- "uuid",
- "waku-client",
- "waku-protocol",
- "wry",
-]
-
-[[package]]
-name = "waku-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "crossbeam-channel",
- "dirs",
- "libc",
- "nucleo-matcher",
- "parking_lot",
- "serde",
- "serde_json",
- "smol",
- "tungstenite",
- "url",
- "uuid",
- "waku-protocol",
-]
-
-[[package]]
-name = "waku-computer-use"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "libloading",
- "serde_json",
-]
-
-[[package]]
-name = "waku-core"
-version = "0.1.0"
-dependencies = [
- "agent-client-protocol",
- "alacritty_terminal",
- "anyhow",
- "base64",
- "chrono",
- "crossbeam-channel",
- "dirs",
- "libc",
- "nucleo-matcher",
- "objc2-foundation 0.3.2",
- "parking_lot",
- "rusqlite",
- "rust-i18n",
- "serde",
- "serde-saphyr",
- "serde_json",
- "smol",
- "subtle",
- "toml 0.8.23",
- "trash",
- "tungstenite",
- "url",
- "uuid",
- "waku-client",
- "waku-protocol",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "waku-daemon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "libc",
- "serde_json",
- "waku-core",
- "waku-protocol",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "waku-protocol"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "chrono",
- "dirs",
- "objc2-foundation 0.3.2",
- "rust-i18n",
- "serde",
- "serde_json",
- "similar",
- "uuid",
-]
 
 [[package]]
 name = "walkdir"
@@ -9367,7 +9367,7 @@ dependencies = [
 [[package]]
 name = "zlog"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -9384,7 +9384,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 [[package]]
 name = "ztracing"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 dependencies = [
  "tracing",
  "tracing-subscriber",
@@ -9395,7 +9395,7 @@ dependencies = [
 [[package]]
 name = "ztracing_macro"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/egoist/zed?rev=f9bad8941ea813982d6dfb10c0377ebf7716b3e7#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
 
 [[package]]
 name = "zune-core"

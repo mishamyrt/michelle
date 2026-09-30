@@ -16,7 +16,7 @@ fn can_open_project_picker(session: Option<&AgentSession>, project: Option<&Proj
     should_render_empty_state(session) && project.is_some_and(|project| !project.is_projectless())
 }
 
-impl Waku {
+impl Michelle {
     pub(super) fn render_panel_resize_handle(
         &self,
         id: &'static str,
@@ -103,10 +103,10 @@ fn slide_width(slide: &mut Option<motion::WidthTween>, target: f32) -> f32 {
     }
 }
 
-impl Waku {
+impl Michelle {
     /// An edge is currently animating. While this holds, the pane islands'
     /// root observer stops fanning root notifies out to every island (see
-    /// [`WakuPane::bind`]) and lets the cached-view geometry checks decide
+    /// [`MichellePane::bind`]) and lets the cached-view geometry checks decide
     /// which islands a slide tick actually rebuilds.
     pub(super) fn panels_sliding(&self) -> bool {
         self.sidebar_slide.is_some() || self.right_panel_slide.is_some()
@@ -171,7 +171,7 @@ impl Waku {
             - self.right_panel_rendered_width
     }
 
-    /// [`WakuPane`] delegate for the sidebar island.
+    /// [`MichellePane`] delegate for the sidebar island.
     pub(super) fn sidebar_pane_content(
         &mut self,
         window: &mut Window,
@@ -182,7 +182,7 @@ impl Waku {
             .into_any_element()
     }
 
-    /// [`WakuPane`] delegate for the transcript island.
+    /// [`MichellePane`] delegate for the transcript island.
     pub(super) fn transcript_pane_content(
         &mut self,
         window: &mut Window,
@@ -202,7 +202,7 @@ impl Waku {
             .into_any_element()
     }
 
-    /// [`WakuPane`] delegate for the right-panel island.
+    /// [`MichellePane`] delegate for the right-panel island.
     pub(super) fn right_panel_pane_content(
         &mut self,
         window: &mut Window,
@@ -227,7 +227,7 @@ impl Waku {
     }
 }
 
-impl Render for Waku {
+impl Render for Michelle {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Panel geometry first: the browser sync right below reads whether a
         // panel is mid-slide, and settling here rather than at the point of
@@ -287,7 +287,7 @@ impl Render for Waku {
         let goal_dialog = self.render_goal_dialog(window, cx);
         let toast = self.render_active_toast(cx);
         let content = div()
-            .key_context("Waku")
+            .key_context("Michelle")
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
             .on_action(cx.listener(Self::new_session_action))
             .on_action(cx.listener(Self::new_project_action))
@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn project_picker_shortcut_requires_the_project_greeting() {
         let project = Project::from_path("/work/project".into());
-        let projectless = Project::from_path(dirs::home_dir().unwrap().join(".waku"));
+        let projectless = Project::from_path(dirs::home_dir().unwrap().join(".michelle"));
         let mut session = AgentSession::new(project.id, ProviderKind::Codex);
 
         assert!(can_open_project_picker(None, Some(&project)));
@@ -471,7 +471,7 @@ mod tests {
     }
 }
 
-impl Waku {
+impl Michelle {
     /// Arm the dismiss timer and build the floating toast layer, if a toast
     /// is active. Every full-window surface (workspace and settings alike)
     /// must include this, or a toast raised there stays invisible until the
@@ -580,7 +580,7 @@ impl Waku {
                     .child(dismiss)
                     .child(self.toast_selection_input()),
             )
-            // Keep the toast top-centered just beneath Waku's 48px header.
+            // Keep the toast top-centered just beneath Michelle's 48px header.
             // GPUI's animation path honors the system reduce-motion preference
             // and resolves immediately.
             .with_animation(

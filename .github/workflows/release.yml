@@ -126,7 +126,7 @@ jobs:
 
       - name: Release
         env:
-          WAKU_SIGNING_IDENTITY: ${{ secrets.WAKU_SIGNING_IDENTITY }}
+          MICHELLE_SIGNING_IDENTITY: ${{ secrets.MICHELLE_SIGNING_IDENTITY }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: bun run release --local
 

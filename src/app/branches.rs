@@ -5,7 +5,7 @@ enum BranchOperation {
     Create(String),
 }
 
-impl Waku {
+impl Michelle {
     pub(super) fn sync_branch_picker_rows(&self, rows: &[crate::git_branch::BranchEntry]) {
         let mut cached = self.branch_picker_row_cache.borrow_mut();
         if cached.as_slice() == rows {
@@ -55,19 +55,19 @@ impl Waku {
             Query::Pending => fallback,
             Query::Missing(token) => {
                 let fetch_path = workspace_path.clone();
-                let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
-                cx.spawn(async move |waku, cx| {
+                let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
+                cx.spawn(async move |michelle, cx| {
                     let result = cx
                         .background_executor()
                         .spawn({
                             let fetch_path = fetch_path.clone();
                             async move {
                                 match workspace.request(
-                                    waku_client::WorkspaceOperation::InspectBranches {
+                                    michelle_client::WorkspaceOperation::InspectBranches {
                                         cwd: fetch_path.clone(),
                                     },
                                 ) {
-                                    Ok(waku_client::WorkspaceResult::Branches { snapshot }) => {
+                                    Ok(michelle_client::WorkspaceResult::Branches { snapshot }) => {
                                         Ok(snapshot)
                                     }
                                     Ok(_) => {
@@ -79,17 +79,17 @@ impl Waku {
                             }
                         })
                         .await;
-                    let _ = waku.update(cx, |waku, cx| {
-                        if !waku.branch_snapshots.fulfill(token, result.clone()) {
+                    let _ = michelle.update(cx, |michelle, cx| {
+                        if !michelle.branch_snapshots.fulfill(token, result.clone()) {
                             return;
                         }
                         match &result {
-                            Ok(Some(snapshot)) => waku
+                            Ok(Some(snapshot)) => michelle
                                 .cache_sidebar_branch_label(&fetch_path, snapshot.display_branch()),
-                            Ok(None) => waku.cache_sidebar_branch_label(&fetch_path, None),
+                            Ok(None) => michelle.cache_sidebar_branch_label(&fetch_path, None),
                             Err(_) => {}
                         }
-                        let selected = waku
+                        let selected = michelle
                             .selected_workspace_path()
                             .is_some_and(|path| path == fetch_path);
                         if selected {
@@ -97,7 +97,7 @@ impl Waku {
                                 Ok(Some(snapshot)) => {
                                     let mut persisted_branch_changed = false;
                                     if let Some(current) = snapshot.current.as_deref()
-                                        && let Some(session) = waku.selected_session_mut()
+                                        && let Some(session) = michelle.selected_session_mut()
                                         && let SessionWorkspace::Worktree { branch, .. } =
                                             &mut session.workspace
                                         && branch != current
@@ -105,12 +105,12 @@ impl Waku {
                                         *branch = current.to_owned();
                                         persisted_branch_changed = true;
                                     }
-                                    waku.visible_branch_snapshot = Some((fetch_path, snapshot));
+                                    michelle.visible_branch_snapshot = Some((fetch_path, snapshot));
                                     if persisted_branch_changed {
-                                        waku.save();
+                                        michelle.save();
                                     }
                                 }
-                                Ok(None) => waku.visible_branch_snapshot = None,
+                                Ok(None) => michelle.visible_branch_snapshot = None,
                                 Err(_) => {}
                             }
                             cx.notify();
@@ -140,7 +140,7 @@ impl Waku {
     /// real `git switch` on the background executor.
     ///
     /// `true` asks the caller to dismiss the picker after this entity update
-    /// ends. Closing sooner runs the toggle observer, which re-enters `Waku`
+    /// ends. Closing sooner runs the toggle observer, which re-enters `Michelle`
     /// and double-leases the entity.
     pub(super) fn choose_workspace_branch(
         &mut self,
@@ -282,7 +282,7 @@ impl Waku {
     }
 
     /// Apply the keyboard-selected action, returning whether the caller should
-    /// dismiss the picker after releasing its `Waku` update lease.
+    /// dismiss the picker after releasing its `Michelle` update lease.
     pub(super) fn confirm_branch_picker_action(
         &mut self,
         actions: &[BranchPickerAction],
@@ -317,8 +317,8 @@ impl Waku {
         }
         self.branch_operation_pending = true;
         cx.notify();
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |waku, cx| {
+        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |michelle, cx| {
             let result = cx
                 .background_executor()
                 .spawn({
@@ -329,13 +329,13 @@ impl Waku {
                             BranchOperation::Create(branch) => (branch, true),
                         };
                         match workspace.request(
-                            waku_client::WorkspaceOperation::CheckoutBranch {
+                            michelle_client::WorkspaceOperation::CheckoutBranch {
                                 cwd: path,
                                 branch,
                                 create,
                             },
                         )? {
-                            waku_client::WorkspaceResult::BranchChanged { snapshot } => {
+                            michelle_client::WorkspaceResult::BranchChanged { snapshot } => {
                                 Ok(snapshot)
                             }
                             _ => anyhow::bail!("the daemon returned an invalid branch response"),
@@ -343,32 +343,32 @@ impl Waku {
                     }
                 })
                 .await;
-            let _ = waku.update(cx, |waku, cx| {
-                waku.branch_operation_pending = false;
+            let _ = michelle.update(cx, |michelle, cx| {
+                michelle.branch_operation_pending = false;
                 match result {
                     Ok(snapshot) => {
                         let current = snapshot.current.clone();
-                        waku.cache_sidebar_branch_label(&path, snapshot.display_branch());
-                        waku.visible_branch_snapshot = Some((path.clone(), snapshot));
-                        waku.branch_snapshots.invalidate(&path);
-                        let selected_path = waku
+                        michelle.cache_sidebar_branch_label(&path, snapshot.display_branch());
+                        michelle.visible_branch_snapshot = Some((path.clone(), snapshot));
+                        michelle.branch_snapshots.invalidate(&path);
+                        let selected_path = michelle
                             .selected_workspace_path()
                             .map(std::path::Path::to_path_buf);
                         if selected_path.as_ref() == Some(&path) {
                             if let Some(current) = current
-                                && let Some(session) = waku.selected_session_mut()
+                                && let Some(session) = michelle.selected_session_mut()
                                 && let SessionWorkspace::Worktree { branch, .. } =
                                     &mut session.workspace
                             {
                                 *branch = current;
                             }
-                            waku.invalidate_workspace_queries(cx);
-                            waku.reload_clean_right_panel_file_editors(cx);
-                            waku.save();
+                            michelle.invalidate_workspace_queries(cx);
+                            michelle.reload_clean_right_panel_file_editors(cx);
+                            michelle.save();
                         }
                     }
                     Err(error) => {
-                        waku.show_toast(tr!("errors.change_branch", error = error));
+                        michelle.show_toast(tr!("errors.change_branch", error = error));
                     }
                 }
                 cx.notify();

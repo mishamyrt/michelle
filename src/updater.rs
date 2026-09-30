@@ -3,9 +3,9 @@
 //! macOS delegates to the Sparkle framework embedded by `scripts/bundle.sh`.
 //!
 //! Debug builds stay dormant so the dev watcher's app never offers to replace
-//! itself with a production build. `WAKU_PREVIEW_UPDATE=1` fakes only the
+//! itself with a production build. `MICHELLE_PREVIEW_UPDATE=1` fakes only the
 //! automatic sidebar result while retaining the real Sparkle flow for the
-//! Check for Updates menu; `WAKU_FORCE_UPDATER=1` exercises everything for
+//! Check for Updates menu; `MICHELLE_FORCE_UPDATER=1` exercises everything for
 //! real from a debug bundle.
 
 use gpui::Global;
@@ -15,7 +15,7 @@ pub struct UpdaterState(pub Option<Updater>);
 
 impl Global for UpdaterState {}
 
-/// The compact state rendered by Waku. Update details remain owned by
+/// The compact state rendered by Michelle. Update details remain owned by
 /// Sparkle and never enter a frame path.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum UpdateStatus {
@@ -70,7 +70,7 @@ mod macos {
 
     struct UserDriverIvars {
         /// Explicit checks and the one-time automatic-check permission prompt
-        /// use Sparkle's own windows. Scheduled checks stay inside Waku.
+        /// use Sparkle's own windows. Scheduled checks stay inside Michelle.
         standard_driver: Retained<AnyObject>,
         standard_presentation: Cell<bool>,
         standard_update_check: Cell<Option<isize>>,
@@ -83,7 +83,7 @@ mod macos {
 
     define_class!(
         #[unsafe(super(NSObject))]
-        #[name = "WakuSparkleUserDriver"]
+        #[name = "MichelleSparkleUserDriver"]
         #[thread_kind = MainThreadOnly]
         #[ivars = UserDriverIvars]
         struct UserDriver;
@@ -573,8 +573,9 @@ mod macos {
         /// running outside a bundle with an embedded framework.
         pub fn init() -> Option<Self> {
             let preview = cfg!(debug_assertions)
-                && std::env::var_os("WAKU_PREVIEW_UPDATE").is_some_and(|value| value == "1");
-            let forced = std::env::var_os("WAKU_FORCE_UPDATER").is_some_and(|value| value == "1");
+                && std::env::var_os("MICHELLE_PREVIEW_UPDATE").is_some_and(|value| value == "1");
+            let forced =
+                std::env::var_os("MICHELLE_FORCE_UPDATER").is_some_and(|value| value == "1");
             if cfg!(debug_assertions) && !forced && !preview {
                 return None;
             }
@@ -754,7 +755,7 @@ mod macos {
     }
 
     /// The embedded framework's dylib next to the running executable
-    /// (Contents/MacOS/Waku → Contents/Frameworks/Sparkle.framework/Sparkle).
+    /// (Contents/MacOS/Michelle → Contents/Frameworks/Sparkle.framework/Sparkle).
     fn sparkle_library_path() -> Option<std::path::PathBuf> {
         let executable = std::env::current_exe().ok()?;
         let contents = executable.parent()?.parent()?;

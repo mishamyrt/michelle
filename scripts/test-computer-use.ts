@@ -1,5 +1,5 @@
 // Protocol/SDK smoke test. No app discovery, screenshots, input, or TCC prompts.
-// Usage: bun scripts/test-computer-use.ts <waku_js_repl> <computer-use-helper>
+// Usage: bun scripts/test-computer-use.ts <michelle_js_repl> <computer-use-helper>
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -9,10 +9,20 @@ import { createInterface } from "node:readline";
 
 const expectCursor = process.argv.includes("--expect-cursor");
 const [
-  repl = "target/debug/waku_js_repl",
-  helper = "target/debug/waku_computer_use",
+  repl = "target/debug/michelle_js_repl",
+  helper = "target/debug/michelle_computer_use",
 ] = process.argv.slice(2).filter((argument) => argument !== "--expect-cursor");
 assert(repl && helper, "Pass the REPL executable and native helper executable");
+if (helper.includes(".app/Contents/MacOS/")) {
+  const status = JSON.parse(execFileSync(resolve(helper), ["status"], {
+    input: "{}",
+    encoding: "utf8",
+    timeout: 20_000,
+  }));
+  assert.equal(status.success, true);
+  assert.equal(typeof status.permissions.screenRecording, "boolean");
+  assert.equal(typeof status.permissions.accessibility, "boolean");
+}
 const nativeTools: string[] = JSON.parse(
   execFileSync(resolve(helper), ["list-tools"], {
     encoding: "utf8",
@@ -22,12 +32,12 @@ const nativeTools: string[] = JSON.parse(
 )
   .tools.map((tool: { name: string }) => tool.name)
   .filter((name: string) => name !== "bring_to_front");
-const directory = await mkdtemp(join(tmpdir(), "waku-cua-test-"));
+const directory = await mkdtemp(join(tmpdir(), "michelle-cua-test-"));
 const child = spawn(resolve(repl), [], {
   env: {
     ...process.env,
-    WAKU_COMPUTER_USE_SERVER: resolve(helper),
-    WAKU_COMPUTER_USE_PROCESS_DIRECTORY: directory,
+    MICHELLE_COMPUTER_USE_SERVER: resolve(helper),
+    MICHELLE_COMPUTER_USE_PROCESS_DIRECTORY: directory,
   },
   stdio: ["pipe", "pipe", "pipe"],
 
@@ -87,7 +97,7 @@ try {
   await request("initialize", {
     protocolVersion: "2025-06-18",
     capabilities: {},
-    clientInfo: { name: "waku-cua-test", version: "1" },
+    clientInfo: { name: "michelle-cua-test", version: "1" },
   });
   const initial = await js("jsRepl.write(typeof cua)");
   assert.equal(initial.content[0].text, "undefined");
@@ -103,9 +113,9 @@ try {
     var hasBringToFront = "bring_to_front" in cua;
     var cursor = null;
     if (${expectCursor}) {
-      await cua.start_session({ session: "waku-cursor-smoke" });
-      cursor = await cua.get_agent_cursor_state({ session: "waku-cursor-smoke" });
-      await cua.end_session({ session: "waku-cursor-smoke" });
+      await cua.start_session({ session: "michelle-cursor-smoke" });
+      cursor = await cua.get_agent_cursor_state({ session: "michelle-cursor-smoke" });
+      await cua.end_session({ session: "michelle-cursor-smoke" });
     }
     var savedGetConfig = cua.get_config;
     var nextConfig = await savedGetConfig({});

@@ -1026,7 +1026,7 @@ command_scope.skill:
   en: skill
 command_scope.builtin:
   en: built-in
-command_scope.waku:
+command_scope.michelle:
   en: Michelle
 
 skills.search:
@@ -1290,11 +1290,11 @@ session.agent_stopped_reason:
 errors.open_session:
   en: "Could not open that session: %{error}"
 errors.create_projectless_task:
-  en: "Could not create a task beneath ~/.waku/projects: %{error}"
+  en: "Could not create a task beneath ~/.michelle/projects: %{error}"
 errors.save_projectless_migration:
   en: "Could not save the projectless task migration: %{error}"
 errors.move_projectless_task:
-  en: "Could not move the old projectless task beneath ~/.waku/projects: %{error}"
+  en: "Could not move the old projectless task beneath ~/.michelle/projects: %{error}"
 errors.remote_host_path:
   en: This path belongs to the daemon host and cannot be opened by the desktop
 errors.change_branch:
@@ -1315,7 +1315,7 @@ errors.provider_native_cursor_unavailable:
   en: "%{provider}'s native session cursor is unavailable"
 errors.provider_native_thread_cursor_unavailable:
   en: "%{provider}'s native thread cursor is unavailable"
-errors.provider_waku_task_unavailable:
+errors.provider_michelle_task_unavailable:
   en: "%{provider}'s Michelle task is unavailable"
 errors.provider_not_installed:
   en: "%{provider} is not installed"

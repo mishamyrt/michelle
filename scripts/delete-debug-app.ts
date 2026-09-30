@@ -8,7 +8,7 @@ import { createInterface } from "node:readline/promises";
 const projectRoot = resolve(import.meta.dir, "..");
 const userHome = homedir();
 const library = join(userHome, "Library");
-const debugBundleIdentifiers = ["co.myrt.michelle.dev", "codes.waku.dev"];
+const debugBundleIdentifiers = ["co.myrt.michelle.dev"];
 
 type Target = {
   path: string;
@@ -64,7 +64,7 @@ async function existingTargets(): Promise<Target[]> {
 
 // Checkout-local state and build artifacts. Keep the release cache intact.
 addCandidate(join(projectRoot, "temp"));
-addCandidate(join(projectRoot, ".waku-cache", "computer-use", "debug"));
+addCandidate(join(projectRoot, ".michelle-cache", "computer-use", "debug"));
 addCandidate(join(projectRoot, "target", "debug", "Michelle Debug.app"));
 
 if (process.env.CARGO_TARGET_DIR) {
@@ -81,21 +81,20 @@ if (process.env.CARGO_TARGET_DIR) {
 addCandidate(join(userHome, "Applications", "Michelle Debug.app"));
 addCandidate("/Applications/Michelle Debug.app");
 
-// Debug-only app data. The release app uses Waku/sh.waku and is not included.
-addCandidate(join(library, "Application Support", "Waku Debug"));
+// Debug-only app data. The release app uses Michelle/co.myrt.michelle and is not included.
+addCandidate(join(library, "Application Support", "Michelle Debug"));
 addCandidate(
   join(
     library,
     "Application Support",
-    "Waku",
+    "Michelle",
     "Computer Use",
     "Michelle Debug Computer Use.app",
   ),
 );
-addCandidate(join(library, "Caches", "Waku Debug"));
-addCandidate(join(library, "Logs", "Waku Debug"));
+addCandidate(join(library, "Caches", "Michelle Debug"));
+addCandidate(join(library, "Logs", "Michelle Debug"));
 
-// codes.waku.dev was Waku Debug's bundle ID before sh.waku.dev.
 for (const bundleIdentifier of debugBundleIdentifiers) {
   for (const path of [
     join(library, "Application Support", bundleIdentifier),

@@ -17,19 +17,19 @@ if (!certificate) {
 }
 
 // Reuse upstream packaging unchanged, then replace its ad-hoc signatures.
-await $`env WAKU_CODESIGN_IDENTITY=- sh scripts/bundle.sh release`;
+await $`env MICHELLE_CODESIGN_IDENTITY=- sh scripts/bundle.sh release`;
 const app = resolve(process.env.CARGO_TARGET_DIR ?? "target", "release/Michelle.app");
 const contents = `${app}/Contents`;
 const helper = `${contents}/Helpers/Michelle Computer Use.app`;
 const sparkle = `${contents}/Frameworks/Sparkle.framework`;
-const repl = `${contents}/Resources/waku_js_repl`;
-const daemon = `${contents}/MacOS/waku-daemon`;
+const repl = `${contents}/Resources/michelle_js_repl`;
+const daemon = `${contents}/MacOS/michelle-daemon`;
 const { package: { version } } = Bun.TOML.parse(await Bun.file("Cargo.toml").text()) as { package: { version: string } };
 await $`plutil -replace CFBundleShortVersionString -string ${version} ${contents}/Info.plist`;
 await $`plutil -replace CFBundleVersion -string ${version} ${contents}/Info.plist`;
 
 // Refresh the installed helper when switching from ad-hoc signing or changing certificates.
-const fingerprint = Bun.file(`${helper}/Contents/Resources/.waku-helper-fingerprint`);
+const fingerprint = Bun.file(`${helper}/Contents/Resources/.michelle-helper-fingerprint`);
 await Bun.write(fingerprint, `${(await fingerprint.text()).trim()}\n${certificate}\n`);
 
 // Sign inside out. A self-signed certificate has no Team ID, so hardened

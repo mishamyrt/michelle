@@ -1,7 +1,7 @@
 import Foundation
 
 // The released C ABI is Cua's native SDK boundary. One runtime belongs to
-// each Waku helper connection; capture and input never cross into a Cua daemon.
+// each Michelle helper connection; capture and input never cross into a Cua daemon.
 final class CuaDriver: @unchecked Sendable {
     private var handle: OpaquePointer?
     private let lock = NSLock()
@@ -17,7 +17,7 @@ final class CuaDriver: @unchecked Sendable {
         }
         var error = CuaDriverBuffer()
         defer { cua_driver_buffer_free_v1(&error) }
-        let status = waku_cua_driver_create_v1(cursorEnabled, nil, 0, &handle, &error)
+        let status = michelle_cua_driver_create_v1(cursorEnabled, nil, 0, &handle, &error)
         guard status == 0 else { throw nativeError(status, error) }
     }
 

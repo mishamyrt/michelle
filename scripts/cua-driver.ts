@@ -19,7 +19,7 @@ export async function bundleComputerUse(
   );
   await mkdir(binDirectory, { recursive: true });
   await mkdir(resourcesDirectory, { recursive: true });
-  for (const file of ["waku_js_repl", "waku_computer_use"]) {
+  for (const file of ["michelle_js_repl", "michelle_computer_use"]) {
     const destination = join(binDirectory, file);
     if (resolve(target, file) !== resolve(destination))
       await cp(join(target, file), destination);
@@ -37,8 +37,8 @@ export async function bundleComputerUse(
     await cp(join(root, source!), destination);
   }
   await writeCuaSkill(
-    join(binDirectory, "waku_computer_use"),
-    join(resourcesDirectory, "skills/waku-computer-use/SKILL.md"),
+    join(binDirectory, "michelle_computer_use"),
+    join(resourcesDirectory, "skills/michelle-computer-use/SKILL.md"),
   );
 }
 

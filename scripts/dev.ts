@@ -11,7 +11,7 @@ if (process.platform !== "darwin") {
 const appName = "Michelle Debug";
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || "target");
 const appPath = join(targetDir, "debug/Michelle Debug.app");
-const daemonPath = join(targetDir, "debug/waku-debug-daemon");
+const daemonPath = join(targetDir, "debug/michelle-debug-daemon");
 const watchedDirectories = [
   "src",
   "crates",
@@ -41,28 +41,28 @@ async function build(target: BuildTarget): Promise<boolean> {
     return buildDaemon();
   }
 
-  console.log("[waku-dev] Building app bundle...");
+  console.log("[michelle-dev] Building app bundle...");
   if (!(await buildDaemon())) {
     console.error(
-      "[waku-dev] Daemon build failed; keeping the current app open.",
+      "[michelle-dev] Daemon build failed; keeping the current app open.",
     );
     return false;
   }
   const result = await $`${join(root, "scripts/bundle.sh")} debug`.nothrow();
   if (result.exitCode !== 0) {
-    console.error("[waku-dev] Build failed; keeping the current app open.");
+    console.error("[michelle-dev] Build failed; keeping the current app open.");
     return false;
   }
   return true;
 }
 
 async function buildDaemon(): Promise<boolean> {
-  console.log("[waku-dev] Building daemon...");
+  console.log("[michelle-dev] Building daemon...");
   const result =
-    await $`cargo build --package waku-daemon --features dev-binary --bin waku-debug-daemon`.nothrow();
+    await $`cargo build --package michelle-daemon --features dev-binary --bin michelle-debug-daemon`.nothrow();
   if (result.exitCode !== 0) {
     console.error(
-      "[waku-dev] Daemon build failed; keeping the current daemon running.",
+      "[michelle-dev] Daemon build failed; keeping the current daemon running.",
     );
     return false;
   }
@@ -79,10 +79,10 @@ async function stopApp(): Promise<void> {
 }
 
 function launchApp(): ReturnType<typeof Bun.spawn> {
-  console.log(`[waku-dev] Launching ${appPath}`);
+  console.log(`[michelle-dev] Launching ${appPath}`);
   const launchedApp = Bun.spawn(["open", "-n", "-W", appPath], {
     cwd: root,
-    env: { ...process.env, WAKU_DAEMON_PATH: daemonPath },
+    env: { ...process.env, MICHELLE_DAEMON_PATH: daemonPath },
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -92,7 +92,7 @@ function launchApp(): ReturnType<typeof Bun.spawn> {
     stopping = true;
     closeWatchers();
     clearRebuildTimer();
-    console.log("[waku-dev] App exited; stopping the watcher.");
+    console.log("[michelle-dev] App exited; stopping the watcher.");
     process.exitCode = exitCode;
   });
   return launchedApp;
@@ -109,7 +109,7 @@ function closeWatchers(): void {
 }
 
 function reportWatcherError(error: Error): void {
-  console.error("[waku-dev] File watcher failed:", error);
+  console.error("[michelle-dev] File watcher failed:", error);
   process.exitCode = 1;
   void cleanup();
 }
@@ -128,8 +128,8 @@ function targetForChange(
   if (directory !== "crates" || filename === null) return "app";
   const relativePath = filename.toString().replaceAll("\\", "/");
   if (
-    relativePath.startsWith("waku-daemon/") ||
-    relativePath.startsWith("waku-core/")
+    relativePath.startsWith("michelle-daemon/") ||
+    relativePath.startsWith("michelle-core/")
   ) {
     return "daemon";
   }
@@ -186,7 +186,7 @@ async function drainBuildQueue(): Promise<void> {
       if (target === "daemon") {
         if (daemonChangeRevision === buildDaemonRevision) {
           console.log(
-            "[waku-dev] Daemon rebuilt; Michelle will swap the process without relaunching.",
+            "[michelle-dev] Daemon rebuilt; Michelle will swap the process without relaunching.",
           );
         }
         continue;
@@ -197,7 +197,7 @@ async function drainBuildQueue(): Promise<void> {
       // up the independently rebuilt daemon.
       if (appChangeRevision !== buildAppRevision) {
         console.log(
-          "[waku-dev] More changes arrived during the build; waiting to rebuild.",
+          "[michelle-dev] More changes arrived during the build; waiting to rebuild.",
         );
         continue;
       }
@@ -214,7 +214,7 @@ async function drainBuildQueue(): Promise<void> {
 async function cleanup(): Promise<void> {
   if (stopping) return;
   stopping = true;
-  console.log("[waku-dev] Stopping watcher and app...");
+  console.log("[michelle-dev] Stopping watcher and app...");
   closeWatchers();
   clearRebuildTimer();
   await stopApp();
@@ -238,11 +238,11 @@ if (appChangeRevision === initialAppRevision) {
   if (!stopping) app = launchApp();
 } else {
   console.log(
-    "[waku-dev] Changes arrived during the initial build; waiting to rebuild.",
+    "[michelle-dev] Changes arrived during the initial build; waiting to rebuild.",
   );
   if (queuedBuild !== undefined) void drainBuildQueue();
 }
 
 console.log(
-  "[waku-dev] Watching for source changes. Daemon-only edits hot-reload without relaunching Michelle.",
+  "[michelle-dev] Watching for source changes. Daemon-only edits hot-reload without relaunching Michelle.",
 );

@@ -88,12 +88,12 @@ pub(super) fn visible_settings_pages(
         })
 }
 
-impl Waku {
+impl Michelle {
     pub(super) fn render_settings(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
 
         div()
-            .key_context("Waku")
+            .key_context("Michelle")
             .track_focus(&self.settings_focus)
             .on_action(|_: &CloseWindow, window, _| crate::platform::hide_window(window))
             .on_action(cx.listener(Self::new_session_action))
@@ -1096,7 +1096,7 @@ impl Waku {
     fn daemon_exposure_from_fields(
         &self,
         cx: &App,
-    ) -> Result<waku_client::DaemonExposureSettings, String> {
+    ) -> Result<michelle_client::DaemonExposureSettings, String> {
         let port = self
             .daemon_port_input
             .read(cx)
@@ -1112,7 +1112,7 @@ impl Waku {
         settings.port = port;
         settings
             .with_allowed_origins_text(&origins)
-            .and_then(waku_client::DaemonExposureSettings::validate)
+            .and_then(michelle_client::DaemonExposureSettings::validate)
             .map_err(|error| error.to_string())
     }
 
@@ -1167,14 +1167,14 @@ impl Waku {
                 return;
             }
         };
-        settings.token = waku_client::DaemonExposureSettings::new_token();
+        settings.token = michelle_client::DaemonExposureSettings::new_token();
         self.daemon_token_revealed = false;
         self.apply_daemon_exposure(settings, cx);
     }
 
     fn apply_daemon_exposure(
         &mut self,
-        settings: waku_client::DaemonExposureSettings,
+        settings: michelle_client::DaemonExposureSettings,
         cx: &mut Context<Self>,
     ) {
         if self.daemon_reconfigure_pending || settings == self.state.daemon_exposure {
@@ -1503,7 +1503,7 @@ impl Waku {
     }
 
     fn set_ui_font_size(&mut self, size: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let size = waku_client::persistence::sanitized_ui_font_size(size);
+        let size = michelle_client::persistence::sanitized_ui_font_size(size);
         if self.state.ui_font_size == size {
             return;
         }
@@ -1517,7 +1517,7 @@ impl Waku {
     }
 
     fn set_code_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
-        let size = waku_client::persistence::sanitized_code_font_size(size);
+        let size = michelle_client::persistence::sanitized_code_font_size(size);
         if self.state.code_font_size == size {
             return;
         }
@@ -2277,14 +2277,14 @@ impl Waku {
         let event_wake = self.event_wake_tx.clone();
         let daemon = self.daemon.client();
         std::thread::Builder::new()
-            .name("waku-computer-permission-request".into())
+            .name("michelle-computer-permission-request".into())
             .spawn(move || {
                 let result = match daemon.request(
                     Uuid::nil(),
                     Uuid::nil(),
-                    waku_client::Command::ProbeComputerPermissions { prompt },
+                    michelle_client::Command::ProbeComputerPermissions { prompt },
                 ) {
-                    Ok(waku_client::ResponsePayload::ComputerPermissions { permissions }) => {
+                    Ok(michelle_client::ResponsePayload::ComputerPermissions { permissions }) => {
                         Ok(permissions)
                     }
                     Ok(_) => Err("the daemon returned an invalid permission response".into()),
@@ -2507,7 +2507,7 @@ fn permission_status_row(
     granted: bool,
     id: &'static str,
     theme: Theme,
-    cx: &mut Context<Waku>,
+    cx: &mut Context<Michelle>,
 ) -> Div {
     let status = if granted {
         div()

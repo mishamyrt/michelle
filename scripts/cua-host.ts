@@ -1,5 +1,5 @@
 // Build the pinned Cua SDK with its native host/cursor entrypoints exposed.
-// Keep its dependency graph and lockfile isolated from Waku's GPUI workspace.
+// Keep its dependency graph and lockfile isolated from Michelle's GPUI workspace.
 import { $ } from "bun";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -30,7 +30,7 @@ export async function prepareCuaHost(): Promise<string> {
     join(root, "resources/computer-use/cua-host.h"),
     "utf8",
   );
-  // Keep the cache key and build on Waku's toolchain, not Cua's older pin.
+  // Keep the cache key and build on Michelle's toolchain, not Cua's older pin.
   const toolchain = (
     await $`rustup show active-toolchain`.cwd(root).quiet().text()
   ).trim().split(/\s+/)[0]!;
@@ -38,7 +38,7 @@ export async function prepareCuaHost(): Promise<string> {
   const key = createHash("sha256")
     .update(revision + extension + header + compiler)
     .digest("hex");
-  const cache = join(root, ".waku-cache/cua-host");
+  const cache = join(root, ".michelle-cache/cua-host");
   const destination = join(cache, key);
   const library = "libcua_driver_sdk.dylib";
   if (existsSync(join(destination, library))) return destination;

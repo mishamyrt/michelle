@@ -1,10 +1,10 @@
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc};
 use gpui::{ClickEvent, KeyBinding, KeyboardButton, actions};
-use waku_client::persistence::SidebarProjectGroup;
+use michelle_client::persistence::SidebarProjectGroup;
 
 use super::*;
 
-actions!(waku_sidebar, [CancelSessionRename, FocusSidebar]);
+actions!(michelle_sidebar, [CancelSessionRename, FocusSidebar]);
 
 const SESSION_RENAME_PARENT_CONTEXT: &str = "SessionRename";
 const SESSION_RENAME_FIELD_CONTEXT: &str = "SessionRename > TextInput";
@@ -746,7 +746,7 @@ fn reveal_sidebar_list_row(list: &ListState, rows: &[SidebarRow], index: usize) 
     }
 }
 
-impl Waku {
+impl Michelle {
     pub(super) fn focus_sidebar_action(
         &mut self,
         _: &FocusSidebar,
@@ -1477,17 +1477,19 @@ impl Waku {
             return;
         }
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |waku, cx| {
+        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |michelle, cx| {
             let labels = cx
                 .background_executor()
                 .spawn(async move {
                     let mut labels = HashMap::new();
                     for path in paths {
                         let branch = match workspace.request(
-                            waku_client::WorkspaceOperation::InspectBranches { cwd: path.clone() },
+                            michelle_client::WorkspaceOperation::InspectBranches {
+                                cwd: path.clone(),
+                            },
                         ) {
-                            Ok(waku_client::WorkspaceResult::Branches {
+                            Ok(michelle_client::WorkspaceResult::Branches {
                                 snapshot: Some(snapshot),
                             }) => snapshot.display_branch().map(str::to_owned),
                             _ => None,
@@ -1499,11 +1501,11 @@ impl Waku {
                     labels
                 })
                 .await;
-            let _ = waku.update(cx, |waku, cx| {
-                if waku.sidebar_branch_scan_generation.get() != generation {
+            let _ = michelle.update(cx, |michelle, cx| {
+                if michelle.sidebar_branch_scan_generation.get() != generation {
                     return;
                 }
-                *waku.sidebar_branch_labels.borrow_mut() = labels
+                *michelle.sidebar_branch_labels.borrow_mut() = labels
                     .into_iter()
                     .map(|(path, branch)| (path, SharedString::from(branch)))
                     .collect();
@@ -2184,8 +2186,9 @@ impl Waku {
                 &menu,
                 move |cx| {
                     weak.upgrade()
-                        .map(|waku| {
-                            waku.read(cx)
+                        .map(|michelle| {
+                            michelle
+                                .read(cx)
                                 .sidebar_project_menu_items(project, weak.clone())
                         })
                         .unwrap_or_default()
@@ -2846,7 +2849,7 @@ impl Waku {
                 && matches!(row, SidebarRow::Session(_))),
             |element| {
                 let rows = self.sidebar_rows_snapshot.borrow().clone();
-                let waku = cx.entity().downgrade();
+                let michelle = cx.entity().downgrade();
                 let line_y = Rc::new(Cell::new(None));
                 let paint_line_y = line_y.clone();
                 let line_inset = if matches!(row, SidebarRow::Session(_))
@@ -2871,7 +2874,7 @@ impl Waku {
                                 project_drop_lines: RefCell::default(),
                             },
                             move |drag, _, window, cx| {
-                                let _ = waku.update(cx, |this, cx| {
+                                let _ = michelle.update(cx, |this, cx| {
                                     *drag.project_collections.borrow_mut() = this
                                         .state
                                         .sidebar_project_groups
@@ -3180,7 +3183,7 @@ impl Waku {
                 .child(SharedString::from(localized_session_title(session)))
                 .into_any_element()
         };
-        let waku = cx.entity().downgrade();
+        let michelle = cx.entity().downgrade();
         let menu = self.menu_handle(format!("session-{session_id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
         let keyboard_menu = menu.clone();
@@ -3336,18 +3339,18 @@ impl Waku {
                 SharedString::from(format!("session-menu-{session_id}")),
                 &menu,
                 move |_| {
-                    let rename_waku = waku.clone();
-                    let remove_waku = waku.clone();
+                    let rename_michelle = michelle.clone();
+                    let remove_michelle = michelle.clone();
                     vec![
                         MenuItem::new(tr!("common.rename"), move |window, cx| {
-                            let _ = rename_waku.update(cx, |waku, cx| {
-                                waku.begin_session_rename(session_id, window, cx);
+                            let _ = rename_michelle.update(cx, |michelle, cx| {
+                                michelle.begin_session_rename(session_id, window, cx);
                             });
                         }),
                         MenuItem::Separator,
                         MenuItem::new(tr!("common.remove"), move |_, cx| {
-                            let _ = remove_waku
-                                .update(cx, |waku, cx| waku.remove_session(session_id, cx));
+                            let _ = remove_michelle
+                                .update(cx, |michelle, cx| michelle.remove_session(session_id, cx));
                         }),
                     ]
                 },
@@ -4358,7 +4361,7 @@ mod tests {
 
     #[test]
     fn projectless_sidebar_projects_are_paths_under_the_workspace_root() {
-        let root = Path::new("/tmp/.waku/projects");
+        let root = Path::new("/tmp/.michelle/projects");
         let projectless = Project {
             id: Uuid::from_u128(1),
             name: "Task".to_owned(),

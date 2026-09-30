@@ -1,6 +1,6 @@
-# Contributing to Waku
+# Contributing to Michelle
 
-Thanks for helping improve Waku. Bug reports, focused fixes, tests, and
+Thanks for helping improve Michelle. Bug reports, focused fixes, tests, and
 well-scoped features are welcome.
 
 ## Development setup
@@ -21,7 +21,7 @@ bun run dev
 ```
 
 The watcher builds and signs `target/debug/Michelle Debug.app`. The provider
-daemon remains an external `target/debug/waku-debug-daemon`: provider-only
+daemon remains an external `target/debug/michelle-debug-daemon`: provider-only
 edits rebuild and hot-swap that process without relaunching the app, while
 desktop edits rebuild and relaunch the app normally. Keep that watcher running
 while you work. Do not start a second watcher or manually relaunch the debug
@@ -84,7 +84,7 @@ your responses in your own words.
   future.
 
 AI-assisted contributions are welcome. This policy aims to prevent low-effort
-submissions and preserve Waku's standards for code quality, performance, and
+submissions and preserve Michelle's standards for code quality, performance, and
 maintainability.
 
 ## License

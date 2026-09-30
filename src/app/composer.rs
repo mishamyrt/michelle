@@ -49,7 +49,7 @@ pub(super) fn composer_submit_action(
     }
 }
 
-impl Waku {
+impl Michelle {
     // ── Permission ─────────────────────────────────────────────────────────
 
     pub(super) fn render_permission(&self, cx: &mut Context<Self>) -> Option<Div> {
@@ -1324,7 +1324,7 @@ impl Waku {
                     .flex()
                     // The filter field keeps focus and the selected row is only
                     // drawn, never focused — the same split Zed's picker uses.
-                    // These arrive as actions bound to `WakuMenu > TextInput`,
+                    // These arrive as actions bound to `MichelleMenu > TextInput`,
                     // which is the only way to claim a key out from under a
                     // focused text field.
                     .on_action(move |_: &SelectNextEntry, _, cx| {
@@ -1482,16 +1482,16 @@ impl Waku {
             .flatten()
             .and_then(|requested| {
                 self.provider_probe(session.provider).and_then(|probe| {
-                    waku_protocol::model_catalog::cursor_catalog_model(&probe.models, requested)
+                    michelle_protocol::model_catalog::cursor_catalog_model(&probe.models, requested)
                 })
             })
             .map(|matched| matched.suffix)
             .unwrap_or_default();
-        let suffix_effort = waku_protocol::model_catalog::cursor_suffix_reasoning_effort(
+        let suffix_effort = michelle_protocol::model_catalog::cursor_suffix_reasoning_effort(
             &cursor_suffix,
             &model.reasoning_efforts,
         );
-        let suffix_tier = waku_protocol::model_catalog::cursor_suffix_service_tier(
+        let suffix_tier = michelle_protocol::model_catalog::cursor_suffix_service_tier(
             &cursor_suffix,
             &model.service_tiers,
         );
@@ -1950,7 +1950,7 @@ impl Waku {
         let paths = paths.to_vec();
         let daemon = self.daemon.clone();
         let draft_owner = self.selected_composer_draft_key();
-        cx.spawn(async move |waku, cx| {
+        cx.spawn(async move |michelle, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
@@ -1966,9 +1966,9 @@ impl Waku {
                         let response = daemon.client().request(
                             Uuid::nil(),
                             Uuid::nil(),
-                            waku_client::Command::ImportAttachment { name, upload },
+                            michelle_client::Command::ImportAttachment { name, upload },
                         )?;
-                        let waku_client::ResponsePayload::AttachmentStored { attachment } =
+                        let michelle_client::ResponsePayload::AttachmentStored { attachment } =
                             response
                         else {
                             anyhow::bail!("the daemon returned an invalid attachment response");
@@ -1978,14 +1978,14 @@ impl Waku {
                     Ok::<_, anyhow::Error>(stored)
                 })
                 .await;
-            let _ = waku.update(cx, |waku, cx| match result {
+            let _ = michelle.update(cx, |michelle, cx| match result {
                 Ok(stored) => {
-                    if waku.selected_composer_draft_key() != draft_owner {
+                    if michelle.selected_composer_draft_key() != draft_owner {
                         return;
                     }
                     let mut changed = false;
                     for (attachment, preview_image, is_image) in stored {
-                        changed |= waku.stage_daemon_attachment(
+                        changed |= michelle.stage_daemon_attachment(
                             attachment.path,
                             attachment.name,
                             attachment.is_dir,
@@ -1995,12 +1995,12 @@ impl Waku {
                         );
                     }
                     if changed {
-                        waku.schedule_composer_draft_save(cx);
+                        michelle.schedule_composer_draft_save(cx);
                         cx.notify();
                     }
                 }
                 Err(error) => {
-                    waku.show_toast(error.to_string());
+                    michelle.show_toast(error.to_string());
                     cx.notify();
                 }
             });
@@ -2041,7 +2041,7 @@ impl Waku {
     }
 
     /// Stage the clipboard's primary image/file representation. On-disk paths
-    /// reuse drop handling immediately; raw image bytes are copied into Waku's
+    /// reuse drop handling immediately; raw image bytes are copied into Michelle's
     /// durable blob store on the background executor before their chip appears.
     pub(super) fn stage_pasted_attachments(
         &mut self,
@@ -2066,7 +2066,7 @@ impl Waku {
 
         let daemon = self.daemon.clone();
         let draft_owner = self.selected_composer_draft_key();
-        cx.spawn(async move |waku, cx| {
+        cx.spawn(async move |michelle, cx| {
             let stored = cx
                 .background_executor()
                 .spawn(async move {
@@ -2082,13 +2082,13 @@ impl Waku {
                                 .request(
                                     Uuid::nil(),
                                     Uuid::nil(),
-                                    waku_client::Command::StoreBlob {
+                                    michelle_client::Command::StoreBlob {
                                         mime_type: preview_image.format.mime_type().to_owned(),
                                         bytes,
                                     },
                                 )
                                 .map_err(|error| error.to_string())?;
-                            let waku_client::ResponsePayload::BlobStored { reference, path } =
+                            let michelle_client::ResponsePayload::BlobStored { reference, path } =
                                 response
                             else {
                                 return Err("the daemon returned an invalid blob response".into());
@@ -2107,14 +2107,14 @@ impl Waku {
                         .collect::<Result<Vec<_>, _>>()
                 })
                 .await;
-            let _ = waku.update(cx, |waku, cx| match stored {
+            let _ = michelle.update(cx, |michelle, cx| match stored {
                 Ok(stored) => {
-                    if waku.selected_composer_draft_key() != draft_owner {
+                    if michelle.selected_composer_draft_key() != draft_owner {
                         return;
                     }
                     let mut staged = false;
                     for (path, name, reference, preview_image) in stored {
-                        staged |= waku.stage_daemon_attachment(
+                        staged |= michelle.stage_daemon_attachment(
                             path,
                             name,
                             false,
@@ -2124,12 +2124,12 @@ impl Waku {
                         );
                     }
                     if staged {
-                        waku.schedule_composer_draft_save(cx);
+                        michelle.schedule_composer_draft_save(cx);
                         cx.notify();
                     }
                 }
                 Err(error) => {
-                    waku.show_toast(tr!("errors.store_pasted_image", error = error));
+                    michelle.show_toast(tr!("errors.store_pasted_image", error = error));
                     cx.notify();
                 }
             });
@@ -2201,7 +2201,7 @@ impl Waku {
         self.composer.update(cx, |input, cx| input.clear(cx));
         // Submission notifications already hold this entity mutably. Dispatch
         // after that effect returns so the window action can safely re-enter
-        // Waku and move focus into the Resume picker.
+        // Michelle and move focus into the Resume picker.
         cx.defer(|cx| cx.dispatch_action(&OpenResumePicker));
         true
     }
@@ -3528,7 +3528,7 @@ pub(super) fn visible_branch_entries(
 // Base64 keeps the authenticated JSON transport browser-compatible but adds
 // one third of wire overhead. Stay comfortably below tungstenite's default
 // message limit until uploads move to a streaming content endpoint.
-const MAX_ATTACHMENT_BYTES: u64 = waku_client::attachments::MAX_ATTACHMENT_BYTES as u64;
+const MAX_ATTACHMENT_BYTES: u64 = michelle_client::attachments::MAX_ATTACHMENT_BYTES as u64;
 
 /// Reads a client-local drop into an upload payload. This is the explicit
 /// client/daemon boundary: none of these source paths are persisted or handed
@@ -3537,7 +3537,7 @@ fn attachment_upload_from_path(
     source: &Path,
 ) -> anyhow::Result<(
     String,
-    waku_client::attachments::AttachmentUpload,
+    michelle_client::attachments::AttachmentUpload,
     Option<Vec<u8>>,
 )> {
     let metadata = std::fs::symlink_metadata(source)
@@ -3563,7 +3563,7 @@ fn attachment_upload_from_path(
         let is_image = is_image_attachment_path(source);
         return Ok((
             name,
-            waku_client::attachments::AttachmentUpload::File {
+            michelle_client::attachments::AttachmentUpload::File {
                 data_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
             },
             is_image.then_some(bytes),
@@ -3599,10 +3599,10 @@ fn attachment_upload_from_path(
             if !metadata.is_file() {
                 continue;
             }
-            if entries.len() >= waku_client::attachments::MAX_ATTACHMENT_FILES {
+            if entries.len() >= michelle_client::attachments::MAX_ATTACHMENT_FILES {
                 anyhow::bail!(
                     "attachment directory contains more than {} files",
-                    waku_client::attachments::MAX_ATTACHMENT_FILES
+                    michelle_client::attachments::MAX_ATTACHMENT_FILES
                 );
             }
             total_bytes = total_bytes.saturating_add(metadata.len());
@@ -3615,7 +3615,7 @@ fn attachment_upload_from_path(
                 .to_path_buf();
             let bytes = std::fs::read(&path)
                 .with_context(|| format!("could not read attachment {}", path.display()))?;
-            entries.push(waku_client::attachments::AttachmentUploadEntry {
+            entries.push(michelle_client::attachments::AttachmentUploadEntry {
                 relative_path,
                 data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
             });
@@ -3623,7 +3623,7 @@ fn attachment_upload_from_path(
     }
     Ok((
         name,
-        waku_client::attachments::AttachmentUpload::Directory { entries },
+        michelle_client::attachments::AttachmentUpload::Directory { entries },
         None,
     ))
 }
@@ -3741,10 +3741,10 @@ fn model_picker_empty_state(
     theme: &Theme,
     focus: &FocusHandle,
     popover: ContextMenuHandle,
-    waku: WeakEntity<Waku>,
+    michelle: WeakEntity<Michelle>,
 ) -> AnyElement {
     let click_popover = popover.clone();
-    let click_waku = waku.clone();
+    let click_michelle = michelle.clone();
     div()
         .w(px(320.0))
         .rounded(px(13.0))
@@ -3808,11 +3808,11 @@ fn model_picker_empty_state(
                 .child(icon("icons/settings.svg", 11.0, theme.text_tertiary))
                 .child(tr!("models.open_provider_settings"))
                 .on_click(move |_, window, cx| {
-                    open_provider_settings_from_picker(&click_waku, &click_popover, window, cx);
+                    open_provider_settings_from_picker(&click_michelle, &click_popover, window, cx);
                 })
                 .on_key_down(move |event: &KeyDownEvent, window, cx| {
                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        open_provider_settings_from_picker(&waku, &popover, window, cx);
+                        open_provider_settings_from_picker(&michelle, &popover, window, cx);
                         cx.stop_propagation();
                     }
                 }),
@@ -3825,13 +3825,13 @@ fn model_picker_empty_state(
 /// picker returns focus to the composer as it closes, which would otherwise
 /// pull focus straight back out of the settings view.
 fn open_provider_settings_from_picker(
-    waku: &WeakEntity<Waku>,
+    michelle: &WeakEntity<Michelle>,
     popover: &ContextMenuHandle,
     window: &mut Window,
     cx: &mut App,
 ) {
     popover.close(window, cx);
-    let _ = waku.update(cx, |this, cx| {
+    let _ = michelle.update(cx, |this, cx| {
         this.open_settings_action(&OpenSettings, window, cx);
         this.open_settings_page(SettingsPage::Providers, cx);
     });
@@ -3842,7 +3842,7 @@ fn open_provider_settings_from_picker(
 /// Installed on this machine and not switched off in the Providers settings.
 /// Both of those are settings-level facts the user has already decided, so the
 /// tab is absent rather than dimmed — the rail offers what could be picked,
-/// not a catalog of everything Waku can speak to. A session locked to a
+/// not a catalog of everything Michelle can speak to. A session locked to a
 /// provider switched off afterwards keeps its own tab, since the picker is
 /// that session's only route to another model.
 pub(super) fn picker_rail_shows_provider(
