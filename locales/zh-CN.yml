@@ -238,6 +238,10 @@ sidebar.ordering: 排序
 sidebar.ordering_newest: 最新优先
 sidebar.ordering_oldest: 最旧优先
 sidebar.ordering_manual: 手动
+sidebar.projects: 项目
+sidebar.new_group: 新建分组
+sidebar.new_group_name: 新分组
+sidebar.move_to_group: 移至分组
 sidebar.show_more: 显示更多
 sidebar.yesterday: 昨天
 sidebar.this_week: 本周

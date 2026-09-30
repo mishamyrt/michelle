@@ -54,6 +54,17 @@ pub enum SidebarOrdering {
     Manual,
 }
 
+/// Desktop-owned collections; unassigned projects belong to trailing Projects.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SidebarProjectGroup {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(default)]
+    pub projects: Vec<Uuid>,
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
 fn default_sidebar_visibility() -> bool {
     true
 }
@@ -338,6 +349,10 @@ struct AppState {
     sidebar_session_order: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     sidebar_project_order: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sidebar_project_groups: Vec<SidebarProjectGroup>,
+    #[serde(default)]
+    sidebar_projects_collapsed: bool,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     sidebar_collapsed_projects: HashSet<Uuid>,
     #[serde(default = "default_right_panel_width")]
@@ -404,6 +419,10 @@ pub struct PersistedState {
     pub sidebar_session_order: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sidebar_project_order: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sidebar_project_groups: Vec<SidebarProjectGroup>,
+    #[serde(default)]
+    pub sidebar_projects_collapsed: bool,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub sidebar_collapsed_projects: HashSet<Uuid>,
     #[serde(default = "default_right_panel_width")]
@@ -429,6 +448,101 @@ pub struct PersistedState {
 }
 
 impl PersistedState {
+    pub fn sidebar_group_for_project(&self, project: Uuid) -> Option<Uuid> {
+        self.sidebar_project_groups
+            .iter()
+            .find(|group| group.projects.contains(&project))
+            .map(|group| group.id)
+    }
+
+    pub fn create_sidebar_project_group(&mut self, name: &str) -> Option<Uuid> {
+        let name = name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        let id = Uuid::new_v4();
+        self.sidebar_project_groups.push(SidebarProjectGroup {
+            id,
+            name: name.to_owned(),
+            projects: Vec::new(),
+            collapsed: false,
+        });
+        Some(id)
+    }
+
+    pub fn rename_sidebar_project_group(&mut self, id: Uuid, name: &str) -> bool {
+        let name = name.trim();
+        let Some(group) = self
+            .sidebar_project_groups
+            .iter_mut()
+            .find(|group| group.id == id)
+        else {
+            return false;
+        };
+        if name.is_empty() || group.name == name {
+            return false;
+        }
+        group.name = name.to_owned();
+        true
+    }
+
+    pub fn remove_sidebar_project_group(&mut self, id: Uuid) -> bool {
+        let count = self.sidebar_project_groups.len();
+        self.sidebar_project_groups.retain(|group| group.id != id);
+        self.sidebar_project_groups.len() != count
+    }
+
+    pub fn move_project_to_sidebar_group(&mut self, project: Uuid, target: Option<Uuid>) -> bool {
+        if !self
+            .projects
+            .iter()
+            .any(|item| item.id == project && !item.is_projectless())
+            || target.is_some_and(|id| {
+                !self
+                    .sidebar_project_groups
+                    .iter()
+                    .any(|group| group.id == id)
+            })
+            || self.sidebar_group_for_project(project) == target
+        {
+            return false;
+        }
+        for group in &mut self.sidebar_project_groups {
+            group.projects.retain(|id| *id != project);
+            if Some(group.id) == target {
+                group.projects.push(project);
+            }
+        }
+        true
+    }
+
+    pub fn reorder_sidebar_project_group(&mut self, source: Uuid, target: Option<Uuid>) -> bool {
+        let Some(from) = self
+            .sidebar_project_groups
+            .iter()
+            .position(|group| group.id == source)
+        else {
+            return false;
+        };
+        let to = match target {
+            Some(target) => match self
+                .sidebar_project_groups
+                .iter()
+                .position(|group| group.id == target)
+            {
+                Some(to) => to,
+                None => return false,
+            },
+            None => self.sidebar_project_groups.len() - 1,
+        };
+        if from == to {
+            return false;
+        }
+        let group = self.sidebar_project_groups.remove(from);
+        self.sidebar_project_groups.insert(to, group);
+        true
+    }
+
     pub fn session_mut(&mut self, id: Uuid) -> Option<&mut AgentSession> {
         let session = self.sessions.iter_mut().find(|session| session.id == id)?;
         self.dirty_sessions.insert(id);
@@ -475,6 +589,8 @@ impl PersistedState {
             sidebar_ordering: SidebarOrdering::Newest,
             sidebar_session_order: Vec::new(),
             sidebar_project_order: Vec::new(),
+            sidebar_project_groups: Vec::new(),
+            sidebar_projects_collapsed: false,
             sidebar_collapsed_projects: HashSet::new(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             markdown_preview: false,
@@ -619,6 +735,8 @@ impl PersistedState {
             sidebar_ordering: self.sidebar_ordering,
             sidebar_session_order: self.sidebar_session_order.clone(),
             sidebar_project_order: self.sidebar_project_order.clone(),
+            sidebar_project_groups: self.sidebar_project_groups.clone(),
+            sidebar_projects_collapsed: self.sidebar_projects_collapsed,
             sidebar_collapsed_projects: self.sidebar_collapsed_projects.clone(),
             right_panel_width: self.right_panel_width,
             markdown_preview: self.markdown_preview,
@@ -656,6 +774,8 @@ impl PersistedState {
         self.sidebar_ordering = app_state.sidebar_ordering;
         self.sidebar_session_order = app_state.sidebar_session_order;
         self.sidebar_project_order = app_state.sidebar_project_order;
+        self.sidebar_project_groups = app_state.sidebar_project_groups;
+        self.sidebar_projects_collapsed = app_state.sidebar_projects_collapsed;
         self.sidebar_collapsed_projects = app_state.sidebar_collapsed_projects;
         self.right_panel_width = app_state.right_panel_width;
         self.markdown_preview = app_state.markdown_preview;
@@ -1211,6 +1331,8 @@ mod tests {
         assert_eq!(state.sidebar_ordering, SidebarOrdering::Newest);
         assert!(state.sidebar_session_order.is_empty());
         assert!(state.sidebar_project_order.is_empty());
+        assert!(state.sidebar_project_groups.is_empty());
+        assert!(!state.sidebar_projects_collapsed);
         assert!(state.sidebar_collapsed_projects.is_empty());
         assert_eq!(state.last_runtime_mode, RuntimeMode::FullAccess);
     }
@@ -1264,6 +1386,62 @@ mod tests {
             assert_eq!(restored.sidebar_session_order, state.sidebar_session_order);
             assert_eq!(restored.sidebar_project_order, state.sidebar_project_order);
         }
+    }
+
+    #[test]
+    fn sidebar_project_groups_preserve_membership_order_and_disclosure() {
+        let mut state = PersistedState::empty();
+        let first = Project::from_path(PathBuf::from("/tmp/first"));
+        let second = Project::from_path(PathBuf::from("/tmp/second"));
+        state.projects = vec![first.clone(), second.clone()];
+        assert!(state.create_sidebar_project_group("  ").is_none());
+        let a = state.create_sidebar_project_group(" Work ").unwrap();
+        let b = state.create_sidebar_project_group("Personal").unwrap();
+        assert!(state.move_project_to_sidebar_group(first.id, Some(a)));
+        assert!(!state.move_project_to_sidebar_group(first.id, Some(a)));
+        assert!(!state.move_project_to_sidebar_group(first.id, Some(Uuid::nil())));
+        assert!(!state.move_project_to_sidebar_group(Uuid::nil(), Some(b)));
+        assert!(state.move_project_to_sidebar_group(first.id, Some(b)));
+        assert!(state.sidebar_project_groups[0].projects.is_empty());
+        assert_eq!(state.sidebar_project_groups[1].projects, vec![first.id]);
+        assert!(state.move_project_to_sidebar_group(first.id, Some(a)));
+        assert!(state.move_project_to_sidebar_group(second.id, Some(b)));
+        assert!(state.reorder_sidebar_project_group(b, Some(a)));
+        assert_eq!(
+            state
+                .sidebar_project_groups
+                .iter()
+                .map(|group| group.id)
+                .collect::<Vec<_>>(),
+            vec![b, a]
+        );
+        assert!(state.reorder_sidebar_project_group(b, None));
+        assert!(!state.reorder_sidebar_project_group(Uuid::nil(), Some(a)));
+        assert!(!state.rename_sidebar_project_group(a, " "));
+        assert!(state.rename_sidebar_project_group(a, " Projects at work "));
+        state.sidebar_project_groups[0].collapsed = true;
+        state.sidebar_projects_collapsed = true;
+        for mode in [
+            SidebarOrdering::Newest,
+            SidebarOrdering::Oldest,
+            SidebarOrdering::Manual,
+        ] {
+            state.sidebar_ordering = mode;
+            let saved = serde_json::to_vec(&state.app_state()).unwrap();
+            let mut restored = PersistedState::empty();
+            restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
+            assert_eq!(
+                restored.sidebar_project_groups,
+                state.sidebar_project_groups
+            );
+            assert!(restored.sidebar_projects_collapsed);
+        }
+        assert!(state.remove_sidebar_project_group(a));
+        assert_eq!(state.sidebar_group_for_project(first.id), None);
+        assert_eq!(state.sidebar_group_for_project(second.id), Some(b));
+        assert_eq!(state.projects.len(), 2);
+        assert!(state.move_project_to_sidebar_group(second.id, None));
+        assert_eq!(state.sidebar_group_for_project(second.id), None);
     }
 
     #[test]

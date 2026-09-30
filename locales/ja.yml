@@ -250,6 +250,10 @@ sidebar.ordering: 並び順
 sidebar.ordering_newest: 新しい順
 sidebar.ordering_oldest: 古い順
 sidebar.ordering_manual: 手動
+sidebar.projects: プロジェクト
+sidebar.new_group: 新しいグループ
+sidebar.new_group_name: 新しいグループ
+sidebar.move_to_group: グループに移動
 sidebar.show_more: もっと見る
 sidebar.yesterday: 昨日
 sidebar.this_week: 今週

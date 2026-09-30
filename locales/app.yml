@@ -494,6 +494,14 @@ sidebar.ordering_oldest:
   en: Oldest first
 sidebar.ordering_manual:
   en: Manual
+sidebar.projects:
+  en: Projects
+sidebar.new_group:
+  en: New Group
+sidebar.new_group_name:
+  en: New group
+sidebar.move_to_group:
+  en: Move to Group
 sidebar.show_more:
   en: Show more
 sidebar.yesterday:
