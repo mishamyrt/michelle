@@ -161,8 +161,8 @@ fn session_group_header(theme: &Theme) -> Div {
         .px(px(8.0))
         .flex()
         .items_center()
-        .text_size(sp(13.0))
-        .font_weight(FontWeight::MEDIUM)
+        .text_size(sp(13.5))
+        .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme.text_secondary)
 }
 
@@ -233,12 +233,11 @@ const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
 const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
 const SIDEBAR_SEARCH_BOTTOM_GAP: f32 = 10.0;
-const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
+const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 32.0;
 const SIDEBAR_COLLECTION_HEADER_HEIGHT: f32 = 32.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 1.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
 const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 6.0;
-const SIDEBAR_GROUP_GUIDE_X: f32 = 23.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 36.0;
 const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
@@ -1053,134 +1052,79 @@ impl Michelle {
             ))
     }
 
-    fn render_sidebar_header_actions(&self, cx: &mut Context<Self>) -> Div {
-        let theme = Theme::current(cx);
-        let menu = self.menu_handle("sidebar-options", cx);
-        let menu_open = menu.is_open();
-        let weak = cx.entity().downgrade();
+    fn sidebar_menu_items(&self, weak: WeakEntity<Self>) -> Vec<MenuItem> {
         let grouping = self.state.sidebar_grouping;
         let ordering = self.state.sidebar_ordering;
-        let options = dropdown_menu(
-            div()
-                .id("sidebar-options")
-                .w(px(20.0))
-                .h(px(20.0))
-                .rounded(px(6.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
-                .when(menu_open, |element| element.bg(theme.overlay_strong))
-                .hover(|element| element.bg(theme.overlay))
-                .active(|element| element.bg(theme.overlay_strong))
-                .tooltip(Tooltip::text(tr!("sidebar.options")))
-                .child(icon("icons/list-filter.svg", 14.0, theme.text_secondary)),
-            "sidebar-options-menu",
-            &menu,
-            MenuAlign::BelowLeft,
-            move |_| {
-                let grouping_weak = weak.clone();
-                let ordering_weak = weak.clone();
-                let mut items = vec![
-                    MenuItem::submenu_with_value(
-                        tr!("sidebar.grouping"),
-                        sidebar_grouping_label(grouping),
-                        move |_| {
-                            let project_weak = grouping_weak.clone();
-                            let updated_weak = grouping_weak.clone();
-                            vec![
-                                MenuItem::new(tr!("sidebar.grouping_project"), move |_, cx| {
-                                    let _ = project_weak.update(cx, |this, cx| {
-                                        this.set_sidebar_grouping(SidebarGrouping::Project, cx);
-                                    });
-                                })
-                                .selected(grouping == SidebarGrouping::Project),
-                                MenuItem::new(tr!("sidebar.grouping_updated"), move |_, cx| {
-                                    let _ = updated_weak.update(cx, |this, cx| {
-                                        this.set_sidebar_grouping(SidebarGrouping::Updated, cx);
-                                    });
-                                })
-                                .selected(grouping == SidebarGrouping::Updated),
-                            ]
-                        },
-                    ),
-                    MenuItem::submenu_with_value(
-                        tr!("sidebar.ordering"),
-                        sidebar_ordering_label(ordering),
-                        move |_| {
-                            let newest_weak = ordering_weak.clone();
-                            let oldest_weak = ordering_weak.clone();
-                            let manual_weak = ordering_weak.clone();
-                            vec![
-                                MenuItem::new(tr!("sidebar.ordering_newest"), move |_, cx| {
-                                    let _ = newest_weak.update(cx, |this, cx| {
-                                        this.set_sidebar_ordering(SidebarOrdering::Newest, cx);
-                                    });
-                                })
-                                .selected(ordering == SidebarOrdering::Newest),
-                                MenuItem::new(tr!("sidebar.ordering_oldest"), move |_, cx| {
-                                    let _ = oldest_weak.update(cx, |this, cx| {
-                                        this.set_sidebar_ordering(SidebarOrdering::Oldest, cx);
-                                    });
-                                })
-                                .selected(ordering == SidebarOrdering::Oldest),
-                                MenuItem::new(tr!("sidebar.ordering_manual"), move |_, cx| {
-                                    let _ = manual_weak.update(cx, |this, cx| {
-                                        this.set_sidebar_ordering(SidebarOrdering::Manual, cx);
-                                    });
-                                })
-                                .selected(ordering == SidebarOrdering::Manual),
-                            ]
-                        },
-                    ),
-                ];
-                if grouping == SidebarGrouping::Project {
-                    let weak = weak.clone();
-                    items.extend([
-                        MenuItem::Separator,
-                        MenuItem::new(tr!("sidebar.new_group"), move |window, cx| {
-                            let _ = weak
-                                .update(cx, |this, cx| this.create_sidebar_collection(window, cx));
-                        }),
-                    ]);
-                }
-                items
-            },
-        );
-        let add_project = div()
-            .id("add-project")
-            .tab_index(0)
-            .w(px(20.0))
-            .h(px(22.0))
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text(tr!("project.new_project")))
-            .child(icon("icons/folder-new.svg", 14.0, theme.text_secondary))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(|this, _, _, cx| {
-                cx.stop_propagation();
-                this.add_project(cx);
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.add_project(cx);
-                    cx.stop_propagation();
-                }
-            }));
-
-        div()
-            .flex()
-            .items_center()
-            .gap(px(2.0))
-            .child(options)
-            .child(add_project)
+        let grouping_weak = weak.clone();
+        let ordering_weak = weak.clone();
+        let project_weak = weak.clone();
+        let mut items = vec![
+            MenuItem::submenu_with_value(
+                tr!("sidebar.grouping"),
+                sidebar_grouping_label(grouping),
+                move |_| {
+                    let project_weak = grouping_weak.clone();
+                    let updated_weak = grouping_weak.clone();
+                    vec![
+                        MenuItem::new(tr!("sidebar.grouping_project"), move |_, cx| {
+                            let _ = project_weak.update(cx, |this, cx| {
+                                this.set_sidebar_grouping(SidebarGrouping::Project, cx);
+                            });
+                        })
+                        .selected(grouping == SidebarGrouping::Project),
+                        MenuItem::new(tr!("sidebar.grouping_updated"), move |_, cx| {
+                            let _ = updated_weak.update(cx, |this, cx| {
+                                this.set_sidebar_grouping(SidebarGrouping::Updated, cx);
+                            });
+                        })
+                        .selected(grouping == SidebarGrouping::Updated),
+                    ]
+                },
+            ),
+            MenuItem::submenu_with_value(
+                tr!("sidebar.ordering"),
+                sidebar_ordering_label(ordering),
+                move |_| {
+                    let newest_weak = ordering_weak.clone();
+                    let oldest_weak = ordering_weak.clone();
+                    let manual_weak = ordering_weak.clone();
+                    vec![
+                        MenuItem::new(tr!("sidebar.ordering_newest"), move |_, cx| {
+                            let _ = newest_weak.update(cx, |this, cx| {
+                                this.set_sidebar_ordering(SidebarOrdering::Newest, cx);
+                            });
+                        })
+                        .selected(ordering == SidebarOrdering::Newest),
+                        MenuItem::new(tr!("sidebar.ordering_oldest"), move |_, cx| {
+                            let _ = oldest_weak.update(cx, |this, cx| {
+                                this.set_sidebar_ordering(SidebarOrdering::Oldest, cx);
+                            });
+                        })
+                        .selected(ordering == SidebarOrdering::Oldest),
+                        MenuItem::new(tr!("sidebar.ordering_manual"), move |_, cx| {
+                            let _ = manual_weak.update(cx, |this, cx| {
+                                this.set_sidebar_ordering(SidebarOrdering::Manual, cx);
+                            });
+                        })
+                        .selected(ordering == SidebarOrdering::Manual),
+                    ]
+                },
+            ),
+            MenuItem::Separator,
+            MenuItem::new(tr!("project.new_project"), move |_, cx| {
+                let _ = project_weak.update(cx, |this, cx| this.add_project(cx));
+            })
+            .icon("icons/folder-new.svg"),
+        ];
+        if grouping == SidebarGrouping::Project {
+            items.push(MenuItem::new(
+                tr!("sidebar.new_group"),
+                move |window, cx| {
+                    let _ = weak.update(cx, |this, cx| this.create_sidebar_collection(window, cx));
+                },
+            ));
+        }
+        items
     }
 
     fn render_sidebar_action_row(
@@ -1529,7 +1473,7 @@ impl Michelle {
         width: f32,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> Div {
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         self.ensure_sidebar_branch_labels(cx);
         let is_resizing = self
@@ -1571,17 +1515,16 @@ impl Michelle {
             .relative()
             .child(
                 div().px(px(10.0)).size_full().child(
-                    list(
-                        self.sidebar_list_state.clone(),
-                        move |index, _window, cx| {
-                            entity
-                                .upgrade()
-                                .map(|entity| {
-                                    entity.update(cx, |this, cx| this.sidebar_row(index, &rows, cx))
+                    list(self.sidebar_list_state.clone(), move |index, window, cx| {
+                        entity
+                            .upgrade()
+                            .map(|entity| {
+                                entity.update(cx, |this, cx| {
+                                    this.sidebar_row(index, &rows, window, cx)
                                 })
-                                .unwrap_or_else(|| div().into_any_element())
-                        },
-                    )
+                            })
+                            .unwrap_or_else(|| div().into_any_element())
+                    })
                     .size_full(),
                 ),
             )
@@ -1600,25 +1543,26 @@ impl Michelle {
                         .bg(theme.border),
                 )
             });
-        let history = if self.state.sidebar_grouping == SidebarGrouping::Project {
-            let menu = self.menu_handle("sidebar-background", cx);
-            let weak = cx.entity().downgrade();
-            context_menu(history, "sidebar-background-menu", &menu, move |_| {
-                let weak = weak.clone();
-                vec![MenuItem::new(
-                    tr!("sidebar.new_group"),
-                    move |window, cx| {
-                        let _ =
-                            weak.update(cx, |this, cx| this.create_sidebar_collection(window, cx));
-                    },
-                )]
-            })
-        } else {
-            history.into_any_element()
-        };
-
-        div()
+        let menu = self.menu_handle("sidebar-background", cx);
+        let keyboard_menu = menu.clone();
+        let weak = cx.entity().downgrade();
+        let sidebar = div()
+            .id("sidebar")
+            .track_focus(menu.trigger_focus_handle())
+            .tab_index(0)
+            .tab_group()
+            .tab_stop(true)
+            .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
             .key_context("SidebarNavigation")
+            .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                if keyboard_menu.trigger_focus_handle().is_focused(window)
+                    && ((event.keystroke.key == "f10" && event.keystroke.modifiers.shift)
+                        || (event.keystroke.key == "enter" && event.keystroke.modifiers.control))
+                {
+                    keyboard_menu.open_context_menu(window, cx);
+                    cx.stop_propagation();
+                }
+            })
             .on_action(cx.listener(|this, action: &FocusComposer, window, cx| {
                 if !cx.stop_active_drag(window) {
                     this.focus_composer_action(action, window, cx);
@@ -1642,7 +1586,12 @@ impl Michelle {
                     .child(self.render_sidebar_new_session(cx)),
             )
             .child(history)
-            .child(self.render_sidebar_footer(cx))
+            .child(self.render_sidebar_footer(cx));
+        context_menu(sidebar, "sidebar-background-menu", &menu, move |cx| {
+            weak.upgrade()
+                .map(|entity| entity.read(cx).sidebar_menu_items(weak.clone()))
+                .unwrap_or_default()
+        })
     }
 
     /// Keep a newly selected task visible without disturbing the sidebar when
@@ -1959,20 +1908,22 @@ impl Michelle {
         }
     }
 
-    fn sidebar_row(&self, index: usize, rows: &[SidebarRow], cx: &mut Context<Self>) -> AnyElement {
+    fn sidebar_row(
+        &self,
+        index: usize,
+        rows: &[SidebarRow],
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(row) = rows.get(index) else {
             return div().into_any_element();
         };
         match *row {
             SidebarRow::Search => self.render_sidebar_search(cx).into_any_element(),
-            SidebarRow::Collection(id) => self.render_sidebar_collection(id, index, cx),
-            SidebarRow::Header(group) => {
-                let has_expanded_children = rows.get(index + 1).is_some_and(|row| {
-                    matches!(row, SidebarRow::Session(_) | SidebarRow::ShowMore(_))
-                });
-                self.render_sidebar_group_header(group, index, has_expanded_children, cx)
-                    .into_any_element()
-            }
+            SidebarRow::Collection(id) => self.render_sidebar_collection(id, index, window, cx),
+            SidebarRow::Header(group) => self
+                .render_sidebar_group_header(group, index, cx)
+                .into_any_element(),
             SidebarRow::Session(session_id) => self
                 .render_sidebar_session_item(session_id, index, cx)
                 .into_any_element(),
@@ -1990,7 +1941,6 @@ impl Michelle {
         &self,
         group: SidebarGroup,
         index: usize,
-        has_expanded_children: bool,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
@@ -2097,7 +2047,9 @@ impl Michelle {
             .relative()
             .w_full()
             .rounded(px(6.0))
-            .when(show_folder_icon, |header| header.pl(px(16.0)))
+            .when(show_folder_icon, |header| {
+                header.pl(px(8.0)).font_weight(FontWeight::NORMAL)
+            })
             .when(group == SidebarGroup::Projectless, |header| {
                 header.on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             })
@@ -2112,7 +2064,7 @@ impl Michelle {
                     .h(px(22.0))
                     .flex()
                     .items_center()
-                    .gap(px(5.0))
+                    .gap(px(12.0))
                     .when(show_folder_icon, |element| {
                         element.child(icon(folder_icon, 14.0, theme.text_secondary))
                     })
@@ -2128,20 +2080,6 @@ impl Michelle {
                     .child(div().flex_1()),
             )
             .when_some(compose, |element, compose| element.child(compose))
-            .when(index == 1, |element| {
-                element.child(self.render_sidebar_header_actions(cx))
-            })
-            .when(show_folder_icon && has_expanded_children, |element| {
-                element.child(
-                    div()
-                        .absolute()
-                        .left(px(SIDEBAR_GROUP_GUIDE_X))
-                        .top(px(19.0))
-                        .bottom(px(-2.0))
-                        .w(px(1.0))
-                        .bg(theme.border),
-                )
-            })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.toggle_sidebar_group(group, cx);
             }))
@@ -2241,6 +2179,7 @@ impl Michelle {
         &self,
         id: Option<Uuid>,
         index: usize,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -2258,6 +2197,7 @@ impl Michelle {
         });
         let menu = self.menu_handle(format!("project-collection-{id:?}"), cx);
         let keyboard_menu = menu.clone();
+        let group_name = SharedString::from(format!("project-collection-header-{id:?}"));
         let renaming = id.is_some() && self.sidebar_project_group_rename == id;
         let title = if renaming {
             div()
@@ -2282,30 +2222,34 @@ impl Michelle {
                 .into_any_element()
         };
         let header = session_group_header(&theme)
-            .id(format!("project-collection-header-{id:?}"))
+            .id(group_name.clone())
+            .group(group_name.clone())
             .h(px(SIDEBAR_COLLECTION_HEADER_HEIGHT))
-            .px(px(10.0))
+            .pl(px(8.0))
+            .pr(px(8.0))
             .py(px(2.0))
             .relative()
             .w_full()
             .rounded(px(6.0))
-            .gap(px(5.0))
+            .gap(px(12.0))
             .cursor_default()
-            .font_weight(FontWeight::SEMIBOLD)
+            .child(title)
             .child(
-                icon("icons/chevron-down.svg", 14.0, theme.text_secondary).when(
-                    collapsed,
-                    |icon| {
+                icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
+                    .flex_none()
+                    .when(collapsed, |icon| {
                         icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
                             0.75,
                         )))
-                    },
-                ),
+                    })
+                    .invisible()
+                    .group_hover(group_name, |icon| icon.visible())
+                    .when(
+                        window.last_input_was_keyboard()
+                            && menu.trigger_focus_handle().is_focused(window),
+                        |icon| icon.visible(),
+                    ),
             )
-            .child(title)
-            .when(index == 1, |header| {
-                header.child(self.render_sidebar_header_actions(cx))
-            })
             .when(!renaming, |header| {
                 header
                     .track_focus(menu.trigger_focus_handle())
@@ -2586,27 +2530,12 @@ impl Michelle {
             }));
 
         div()
-            .relative()
             .w_full()
             .h(px(SIDEBAR_SHOW_MORE_ROW_HEIGHT))
             .pl(px(SIDEBAR_GROUP_CHILD_PADDING))
             .flex()
             .items_center()
             .child(button)
-            .child(
-                div()
-                    .absolute()
-                    .left(px(SIDEBAR_GROUP_GUIDE_X))
-                    .top_0()
-                    .w(px(SIDEBAR_GROUP_CHILD_PADDING
-                        - SIDEBAR_GROUP_GUIDE_X
-                        - 4.0))
-                    .h(px(15.0))
-                    .border_l_1()
-                    .border_b_1()
-                    .rounded_bl(px(4.0))
-                    .border_color(theme.border),
-            )
     }
 
     fn show_more_project_sessions(&mut self, group: SidebarGroup, cx: &mut Context<Self>) {
@@ -3358,21 +3287,9 @@ impl Michelle {
         };
 
         div()
-            .relative()
             .w_full()
             .pb(px(SIDEBAR_SESSION_ROW_GAP))
             .child(row)
-            .when(grouped_by_project, |element| {
-                element.child(
-                    div()
-                        .absolute()
-                        .left(px(SIDEBAR_GROUP_GUIDE_X))
-                        .top_0()
-                        .bottom_0()
-                        .w(px(1.0))
-                        .bg(theme.border),
-                )
-            })
             .into_any_element()
     }
 
