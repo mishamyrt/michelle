@@ -680,7 +680,7 @@ impl Render for SidebarDrag {
             .rounded(px(7.0))
             .border_1()
             .border_color(theme.border)
-            .bg(theme.sidebar)
+            .bg(theme.sidebar_surface())
             .text_size(sp(13.0))
             .text_color(theme.text)
             .truncate()
@@ -1468,7 +1468,7 @@ impl Michelle {
             .bg(if is_resizing {
                 theme.sidebar_drag_background
             } else {
-                theme.sidebar
+                theme.sidebar_surface()
             })
             .child(self.render_sidebar_titlebar(window, cx))
             .child(

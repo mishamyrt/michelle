@@ -459,7 +459,7 @@ pub fn titlebar_double_click(window: &Window) {
 /// view above active Sidebar vibrancy; GPUI paints clear sidebar chrome and one
 /// translucent interaction layer above it.
 #[cfg(target_os = "macos")]
-pub fn configure_sidebar_material(window: &Window, dark: bool) {
+pub fn configure_sidebar_material(window: &Window, dark: bool, sidebar: gpui::Hsla) {
     use objc2::{MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{
         NSAutoresizingMaskOptions, NSColor, NSView, NSVisualEffectBlendingMode,
@@ -509,8 +509,13 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
             return;
         }
 
-        let channel = if dark { 0x18 } else { 0xF3 } as f64 / 255.0;
-        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(channel, channel, channel, 0.92);
+        let color = gpui::Rgba::from(sidebar);
+        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(
+            color.r.into(),
+            color.g.into(),
+            color.b.into(),
+            color.a.into(),
+        );
 
         SIDEBAR_TINT_VIEW.with_borrow_mut(|slot| {
             let needs_new_view = slot.as_ref().is_none_or(|tint_view| {
@@ -541,7 +546,7 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn configure_sidebar_material(_: &Window, _: bool) {}
+pub fn configure_sidebar_material(_: &Window, _: bool, _: gpui::Hsla) {}
 
 #[cfg(target_os = "macos")]
 pub fn set_sidebar_material_width(window: &Window, width: f32) {

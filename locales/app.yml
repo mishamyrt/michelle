@@ -150,7 +150,7 @@ settings.computer_use:
 settings.general_keywords:
   en: general local projects conversations privacy math latex formula expression
 settings.appearance_keywords:
-  en: appearance theme system light dark language english russian font size text editor
+  en: appearance theme color scheme system light dark language english russian font size text editor
 settings.providers_keywords:
   en: providers agents models cli version install detect claude codex cursor opencode opencode2 amp grok pi
 settings.skills:
@@ -300,7 +300,11 @@ web.error_daemon_token_required:
 settings.theme:
   en: Theme
 settings.theme_description:
-  en: Choose between system, light, or dark themes
+  en: Colors for the light and dark schemes
+settings.color_scheme:
+  en: Color Scheme
+settings.color_scheme_description:
+  en: Choose system, light, or dark appearance
 settings.ui_font_size:
   en: UI font size
 settings.ui_font_size_description:

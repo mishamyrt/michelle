@@ -1,4 +1,6 @@
 use gpui::{App, Global, Hsla, Rems, Window, WindowAppearance, hsla, rems, rgb, transparent_black};
+use serde::Deserialize;
+use std::{fs, io, path::Path};
 
 pub use michelle_client::theme::ThemePreference;
 
@@ -39,8 +41,10 @@ fn native_override(preference: ThemePreference) -> Option<bool> {
 /// tint is installed as a native layer above Sidebar vibrancy; keeping this
 /// GPUI surface clear avoids incorrectly accumulating the alpha of nested Metal
 /// backgrounds. Selected, hovered, and pressed rows remain a 6% neutral layer.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Theme {
+    #[serde(skip)]
     pub is_dark: bool,
     pub canvas: Hsla,
     pub sidebar: Hsla,
@@ -91,6 +95,20 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// The native sidebar layer owns its tint on macOS, so GPUI stays clear.
+    pub fn sidebar_surface(self) -> Hsla {
+        if cfg!(target_os = "macos") {
+            transparent_black()
+        } else {
+            self.sidebar
+        }
+    }
+
+    pub fn generation(cx: &App) -> u64 {
+        cx.try_global::<ActiveMichelleTheme>()
+            .map_or(0, |theme| theme.1)
+    }
+
     pub fn current(cx: &App) -> Self {
         if cx.has_global::<ActiveMichelleTheme>() {
             cx.global::<ActiveMichelleTheme>().0
@@ -103,11 +121,7 @@ impl Theme {
         Self {
             is_dark: true,
             canvas: rgb(0x1A1A1A).into(),
-            sidebar: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0x181818).into()
-            },
+            sidebar: Hsla::from(rgb(0x181818)).opacity(0.92),
             sidebar_drag_background: rgb(0x181818).into(),
             sidebar_item_background: hsla(0.0, 0.0, 0.941, 0.06),
             surface: rgb(0x1A1A1A).into(),
@@ -150,11 +164,7 @@ impl Theme {
         Self {
             is_dark: false,
             canvas: rgb(0xF6F5F6).into(),
-            sidebar: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0xF3F3F3).into()
-            },
+            sidebar: Hsla::from(rgb(0xF3F3F3)).opacity(0.92),
             sidebar_drag_background: rgb(0xF3F3F3).into(),
             sidebar_item_background: hsla(0.0, 0.0, 0.078, 0.06),
             surface: rgb(0xF6F5F6).into(),
@@ -194,15 +204,101 @@ impl Theme {
     }
 }
 
+/// One file supplies both complete color schemes. The filename is the stable
+/// settings key; changing the display name does not lose the selection.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeDefinition {
+    #[serde(skip)]
+    pub file: Option<String>,
+    pub name: String,
+    pub light: Theme,
+    pub dark: Theme,
+}
+
+impl Default for ThemeDefinition {
+    fn default() -> Self {
+        Self {
+            file: None,
+            name: "Michelle".into(),
+            light: Theme::light(),
+            dark: Theme::dark(),
+        }
+    }
+}
+
+impl ThemeDefinition {
+    fn parse(source: &str) -> anyhow::Result<Self> {
+        let mut theme: Self = toml::from_str(source)?;
+        theme.name = theme.name.trim().to_owned();
+        anyhow::ensure!(!theme.name.is_empty(), "theme name must not be empty");
+        theme.dark.is_dark = true;
+        Ok(theme)
+    }
+
+    fn resolve(&self, preference: ThemePreference, appearance: WindowAppearance) -> Theme {
+        if resolves_to_dark(preference, appearance) {
+            self.dark
+        } else {
+            self.light
+        }
+    }
+}
+
+/// Called once on a background worker at startup; rendering reads the result.
+pub fn load_themes() -> Vec<ThemeDefinition> {
+    let loaded = dirs::data_dir()
+        .ok_or_else(|| io::Error::other("Application Support directory is unavailable"))
+        .and_then(|directory| load_themes_from_directory(&directory.join("Michelle/themes")));
+    match loaded {
+        Ok(themes) => themes,
+        Err(error) => {
+            eprintln!("could not load themes: {error}");
+            vec![ThemeDefinition::default()]
+        }
+    }
+}
+
+fn load_themes_from_directory(directory: &Path) -> io::Result<Vec<ThemeDefinition>> {
+    fs::create_dir_all(directory)?;
+    let mut themes = Vec::new();
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("toml")
+            || !entry.file_type()?.is_file()
+        {
+            continue;
+        }
+        let Some(file) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        match fs::read_to_string(&path)
+            .map_err(anyhow::Error::from)
+            .and_then(|source| ThemeDefinition::parse(&source))
+        {
+            Ok(mut theme) => {
+                theme.file = Some(file.to_owned());
+                themes.push(theme);
+            }
+            Err(error) => eprintln!("could not load theme {}: {error}", path.display()),
+        }
+    }
+    themes.sort_by(|left, right| left.name.cmp(&right.name).then(left.file.cmp(&right.file)));
+    themes.insert(0, ThemeDefinition::default());
+    Ok(themes)
+}
+
 #[derive(Clone, Copy)]
-struct ActiveMichelleTheme(Theme);
+struct ActiveMichelleTheme(Theme, u64);
 
 impl Global for ActiveMichelleTheme {}
 
 /// Publish the resolved palette. [`Theme::current`] reads it back from the
 /// global, which is how every view gets its colors.
 fn set_active_theme(theme: Theme, cx: &mut App) {
-    cx.set_global(ActiveMichelleTheme(theme));
+    let generation = Theme::generation(cx).wrapping_add(1);
+    cx.set_global(ActiveMichelleTheme(theme, generation));
 }
 
 /// Resolve and publish the startup palette, before any window exists.
@@ -216,17 +312,91 @@ pub fn init(cx: &mut App) {
     set_active_theme(theme, cx);
 }
 
-pub fn apply_theme_preference(preference: ThemePreference, window: &mut Window, cx: &mut App) {
+pub fn apply_theme_preference(
+    preference: ThemePreference,
+    definition: &ThemeDefinition,
+    window: &mut Window,
+    cx: &mut App,
+) {
     crate::platform::set_window_appearance(window, native_override(preference));
-    let is_dark = resolves_to_dark(preference, cx.window_appearance());
-    set_active_theme(
-        if is_dark {
-            Theme::dark()
-        } else {
-            Theme::light()
-        },
-        cx,
-    );
-    crate::platform::configure_sidebar_material(window, is_dark);
+    let theme = definition.resolve(preference, cx.window_appearance());
+    set_active_theme(theme, cx);
+    crate::platform::configure_sidebar_material(window, theme.is_dark, theme.sidebar);
     window.refresh();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EXAMPLE: &str = include_str!("../docs/themes/example.toml");
+
+    #[test]
+    fn complete_palettes_resolve_independently_of_system_appearance() {
+        let theme = ThemeDefinition::parse(EXAMPLE).unwrap();
+        assert_eq!(theme.name, "Example");
+        assert!(!theme.light.is_dark);
+        assert!(theme.dark.is_dark);
+        assert_eq!(theme.light.canvas, rgb(0xF6F5F6).into());
+        assert_eq!(theme.dark.canvas, rgb(0x1A1A1A).into());
+        assert!((theme.dark.sidebar.a - 235.0 / 255.0).abs() < f32::EPSILON);
+        for appearance in [
+            WindowAppearance::Light,
+            WindowAppearance::Dark,
+            WindowAppearance::VibrantDark,
+        ] {
+            assert_eq!(
+                theme.resolve(ThemePreference::Light, appearance),
+                theme.light
+            );
+            assert_eq!(theme.resolve(ThemePreference::Dark, appearance), theme.dark);
+            assert_eq!(
+                theme.resolve(ThemePreference::System, appearance).is_dark,
+                appearance != WindowAppearance::Light,
+            );
+        }
+    }
+
+    #[test]
+    fn incomplete_or_invalid_themes_are_rejected() {
+        assert!(ThemeDefinition::parse(EXAMPLE.split("[dark]").next().unwrap()).is_err());
+        for source in [
+            EXAMPLE.replacen("text = \"#242424\"\n", "", 1),
+            EXAMPLE.replacen("text = \"#E2E2E2\"\n", "", 1),
+            EXAMPLE.replace("#0091FF", "#GGGGGG"),
+            EXAMPLE.replace("name = \"Example\"", "name = \" \""),
+            EXAMPLE.replace("[dark]", "[dark]\nunknown_color = \"#FFFFFF\""),
+            EXAMPLE.replace("[light]", "[light]\nis_dark = true"),
+        ] {
+            assert!(ThemeDefinition::parse(&source).is_err());
+        }
+    }
+
+    #[test]
+    fn startup_catalog_keeps_michelle_and_only_loads_valid_toml_files() {
+        let directory =
+            std::env::temp_dir().join(format!("michelle-themes-{}", uuid::Uuid::new_v4()));
+        let themes = load_themes_from_directory(&directory).unwrap();
+        assert_eq!(themes.len(), 1);
+        assert_eq!(themes[0].name, "Michelle");
+        assert_eq!(themes[0].file, None);
+
+        fs::write(directory.join("incomplete.toml"), "name = 'Incomplete'").unwrap();
+        fs::write(directory.join("ignored.txt"), EXAMPLE).unwrap();
+        fs::create_dir(directory.join("directory.toml")).unwrap();
+        assert_eq!(load_themes_from_directory(&directory).unwrap().len(), 1);
+
+        fs::write(directory.join("custom.toml"), EXAMPLE).unwrap();
+        fs::write(
+            directory.join("alpha.toml"),
+            EXAMPLE.replace("Example", "Alpha"),
+        )
+        .unwrap();
+        let themes = load_themes_from_directory(&directory).unwrap();
+        assert_eq!(themes.len(), 3);
+        assert_eq!(themes[0].name, "Michelle");
+        assert_eq!(themes[1].name, "Alpha");
+        assert_eq!(themes[2].file.as_deref(), Some("custom.toml"));
+        fs::remove_dir_all(directory).unwrap();
+    }
 }

@@ -180,7 +180,7 @@ impl Michelle {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(theme.sidebar)
+            .bg(theme.sidebar_surface())
             .child(self.render_settings_sidebar_titlebar(window, cx))
             .child(
                 div().px(px(12.0)).child(
@@ -1179,19 +1179,19 @@ impl Michelle {
 
     fn render_appearance_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let selected_theme = self.state.theme;
+        let selected_scheme = self.state.theme;
         let selected_language = self.state.language;
         let weak = cx.entity().downgrade();
-        let theme_handle = self.menu_handle("theme-selector", cx);
-        let theme_selector = dropdown_menu(
-            MenuChip::new("theme-selector")
-                .label(selected_theme.label())
+        let scheme_handle = self.menu_handle("color-scheme-selector", cx);
+        let scheme_selector = dropdown_menu(
+            MenuChip::new("color-scheme-selector")
+                .label(selected_scheme.label())
                 .outlined()
-                .selected(theme_handle.is_open())
+                .selected(scheme_handle.is_open())
                 .w(px(116.0))
                 .justify_between(),
-            "theme-selector-menu",
-            &theme_handle,
+            "color-scheme-selector-menu",
+            &scheme_handle,
             MenuAlign::BelowRight,
             move |_| {
                 ThemePreference::ALL
@@ -1200,14 +1200,49 @@ impl Michelle {
                         let weak = weak.clone();
                         MenuItem::new(preference.label(), move |window, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.set_theme_preference(preference, window, cx);
+                                this.set_color_scheme(preference, window, cx);
                             });
                         })
-                        .selected(preference == selected_theme)
+                        .selected(preference == selected_scheme)
                     })
                     .collect()
             },
         );
+
+        let theme_selector = (self.themes.len() > 1).then(|| {
+            let selected_theme = self.selected_theme();
+            let selected_file = selected_theme.file.clone();
+            let themes = self.themes.clone();
+            let weak = cx.entity().downgrade();
+            let handle = self.menu_handle("theme-selector", cx);
+            dropdown_menu(
+                MenuChip::new("theme-selector")
+                    .label(selected_theme.name.clone())
+                    .outlined()
+                    .selected(handle.is_open())
+                    .min_w(px(116.0))
+                    .max_w(px(260.0))
+                    .justify_between(),
+                "theme-selector-menu",
+                &handle,
+                MenuAlign::BelowRight,
+                move |_| {
+                    themes
+                        .iter()
+                        .map(|theme| {
+                            let weak = weak.clone();
+                            let file = theme.file.clone();
+                            MenuItem::new(theme.name.clone(), move |window, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_theme(file.clone(), window, cx);
+                                });
+                            })
+                            .selected(theme.file == selected_file)
+                        })
+                        .collect()
+                },
+            )
+        });
 
         let selected_ui_font_size = self.state.ui_font_size;
         let weak = cx.entity().downgrade();
@@ -1303,6 +1338,41 @@ impl Michelle {
             .rounded(px(13.0))
             .overflow_hidden()
             .bg(theme.raised)
+            .when_some(theme_selector, |element, selector| {
+                element
+                    .child(
+                        div()
+                            .w_full()
+                            .min_h(px(60.0))
+                            .px(px(20.0))
+                            .py(px(12.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(24.0))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_size(sp(13.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(tr!("settings.theme")),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(5.0))
+                                            .text_size(sp(12.5))
+                                            .line_height(sp(18.0))
+                                            .text_color(theme.text_secondary)
+                                            .child(tr!("settings.theme_description")),
+                                    ),
+                            )
+                            .child(selector),
+                    )
+                    .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            })
             .child(
                 div()
                     .w_full()
@@ -1321,7 +1391,7 @@ impl Michelle {
                                     .text_size(sp(13.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(tr!("settings.theme")),
+                                    .child(tr!("settings.color_scheme")),
                             )
                             .child(
                                 div()
@@ -1329,10 +1399,10 @@ impl Michelle {
                                     .text_size(sp(12.5))
                                     .line_height(sp(18.0))
                                     .text_color(theme.text_secondary)
-                                    .child(tr!("settings.theme_description")),
+                                    .child(tr!("settings.color_scheme_description")),
                             ),
                     )
-                    .child(theme_selector),
+                    .child(scheme_selector),
             )
             .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
             .child(
@@ -2326,7 +2396,45 @@ impl Michelle {
             }))
     }
 
-    fn set_theme_preference(
+    fn selected_theme(&self) -> &ThemeDefinition {
+        self.themes
+            .iter()
+            .find(|theme| theme.file == self.state.theme_name)
+            .unwrap_or(&self.themes[0])
+    }
+
+    pub(super) fn apply_theme(&self, window: &mut Window, cx: &mut App) {
+        crate::theme::apply_theme_preference(self.state.theme, self.selected_theme(), window, cx);
+    }
+
+    pub(super) fn load_themes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let task = cx
+            .background_executor()
+            .spawn(async { crate::theme::load_themes() });
+        cx.spawn_in(window, async move |this, cx| {
+            let themes = task.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.themes = Rc::new(themes);
+                if this.themes.len() > 1 {
+                    this.apply_theme(window, cx);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn set_theme(&mut self, file: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.theme_name == file {
+            return;
+        }
+        self.state.theme_name = file;
+        self.apply_theme(window, cx);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_color_scheme(
         &mut self,
         preference: ThemePreference,
         window: &mut Window,
@@ -2336,7 +2444,7 @@ impl Michelle {
             return;
         }
         self.state.theme = preference;
-        crate::theme::apply_theme_preference(preference, window, cx);
+        self.apply_theme(window, cx);
         self.save();
         cx.notify();
     }

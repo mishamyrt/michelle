@@ -382,6 +382,7 @@ pub fn run() {
                     crate::platform::configure_sidebar_material(
                         window,
                         crate::theme::Theme::current(cx).is_dark,
+                        crate::theme::Theme::current(cx).sidebar,
                     );
                     cx.activate(true);
                 })

@@ -2246,12 +2246,16 @@ mod tests {
             "re-syncing the same style must not invalidate"
         );
 
-        view.sync_style(&light, &Metrics::BODY);
-        let relit = view.flat(0, || {
-            flatten_plain("a", SANS_FAMILY, FontWeight::NORMAL, light.text)
-        });
-        assert!(!Rc::ptr_eq(&cached, &relit));
-        assert_eq!(relit.runs[0].color, light.text);
+        let mut custom = Theme::dark();
+        custom.text = gpui::rgb(0xC0FFEE).into();
+        for palette in [Palette::from_theme(&custom), light] {
+            view.sync_style(&palette, &Metrics::BODY);
+            let relit = view.flat(0, || {
+                flatten_plain("a", SANS_FAMILY, FontWeight::NORMAL, palette.text)
+            });
+            assert!(!Rc::ptr_eq(&cached, &relit));
+            assert_eq!(relit.runs[0].color, palette.text);
+        }
     }
 
     /// Reasoning text goes through the same view as a response, so a plain

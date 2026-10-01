@@ -254,6 +254,9 @@ pub struct PersistedWindowState {
 pub struct AppSettings {
     pub favorite_models: Vec<FavoriteModel>,
     pub theme: ThemePreference,
+    /// User theme filename. `None` selects the built-in Michelle palette.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme_name: Option<String>,
     pub language: AppLanguage,
     /// Base text size for the interface, in pixels: chrome and prose are
     /// authored against the 14px default and scale from it. Hand-edited
@@ -276,6 +279,7 @@ impl Default for AppSettings {
         Self {
             favorite_models: Vec::new(),
             theme: ThemePreference::System,
+            theme_name: None,
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
@@ -381,6 +385,8 @@ pub struct PersistedState {
     pub favorite_models: Vec<FavoriteModel>,
     #[serde(default)]
     pub theme: ThemePreference,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_name: Option<String>,
     #[serde(default)]
     pub language: AppLanguage,
     #[serde(default = "default_ui_font_size")]
@@ -562,6 +568,7 @@ impl PersistedState {
             remembered_model_traits: Vec::new(),
             favorite_models: Vec::new(),
             theme: ThemePreference::System,
+            theme_name: None,
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
@@ -691,6 +698,7 @@ impl PersistedState {
         AppSettings {
             favorite_models: self.favorite_models.clone(),
             theme: self.theme,
+            theme_name: self.theme_name.clone(),
             language: self.language,
             ui_font_size: self.ui_font_size,
             code_font_size: self.code_font_size,
@@ -731,6 +739,7 @@ impl PersistedState {
     fn apply_app_settings(&mut self, settings: AppSettings) {
         self.favorite_models = settings.favorite_models;
         self.theme = settings.theme;
+        self.theme_name = settings.theme_name;
         self.language = settings.language;
         self.ui_font_size = sanitized_ui_font_size(settings.ui_font_size);
         self.code_font_size = sanitized_code_font_size(settings.code_font_size);
@@ -1256,6 +1265,23 @@ fn restore_task_state_skeletons(sessions: &mut [AgentSession]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_theme_selection_preserves_legacy_color_scheme_preferences() {
+        let old: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(old.theme, ThemePreference::Dark);
+        assert_eq!(old.theme_name, None);
+        let settings: AppSettings =
+            serde_json::from_str(r#"{"theme":"light","theme_name":"custom.toml"}"#).unwrap();
+        let mut state = PersistedState::empty();
+        state.apply_app_settings(settings);
+        assert_eq!(state.theme, ThemePreference::Light);
+        assert_eq!(state.theme_name.as_deref(), Some("custom.toml"));
+        let serialized = serde_json::to_string(&state.app_settings()).unwrap();
+        let restored: AppSettings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(restored.theme, ThemePreference::Light);
+        assert_eq!(restored.theme_name.as_deref(), Some("custom.toml"));
+    }
 
     #[test]
     fn obsolete_usage_fields_are_ignored_without_losing_desktop_state() {

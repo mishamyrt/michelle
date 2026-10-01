@@ -59,7 +59,7 @@ use crate::persistence::{
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
 use crate::terminal::TerminalView;
-use crate::theme::{Theme, ThemePreference, sp};
+use crate::theme::{Theme, ThemeDefinition, ThemePreference, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_scroll, file_icon, icon,
@@ -1051,6 +1051,7 @@ pub struct Michelle {
     /// the currently visible task stays intact during daemon latency.
     pending_session_activation: Option<PendingSessionActivation>,
     state: PersistedState,
+    themes: Rc<Vec<ThemeDefinition>>,
     store: StateStore,
     /// Cached before rendering so path labels can abbreviate the home prefix
     /// without consulting the environment or account database in a frame.
@@ -1991,7 +1992,7 @@ impl Michelle {
                 window.display(cx).and_then(|display| display.uuid().ok()),
             ));
         }
-        crate::theme::apply_theme_preference(state.theme, window, cx);
+        crate::theme::apply_theme_preference(state.theme, &ThemeDefinition::default(), window, cx);
         crate::platform::set_sidebar_material_width(window, sidebar_width);
         let project_paths = state
             .projects
@@ -2220,7 +2221,7 @@ impl Michelle {
 
             cx.observe_window_appearance(window, |this: &mut Self, window, cx| {
                 if this.state.theme == ThemePreference::System {
-                    crate::theme::apply_theme_preference(this.state.theme, window, cx);
+                    this.apply_theme(window, cx);
                     cx.notify();
                 }
             })
@@ -2624,6 +2625,7 @@ impl Michelle {
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,
                 state,
+                themes: Rc::new(vec![ThemeDefinition::default()]),
                 store,
                 home_directory,
                 composer,
@@ -2924,6 +2926,7 @@ impl Michelle {
         // that there is an entity to notify and deliberately not before the
         // first frame.
         entity.update(cx, |this, cx| {
+            this.load_themes(window, cx);
             this.restart_task_state_sync();
             for session_id in startup_live_session_ids {
                 this.start_runtime_attachment(session_id, cx);

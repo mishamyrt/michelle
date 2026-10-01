@@ -24,7 +24,7 @@ struct ConversationNavigationRailSnapshot {
     viewport_height: f32,
     active_turn: Option<Uuid>,
     reset_generation: u64,
-    theme_is_dark: bool,
+    theme_generation: u64,
 }
 
 impl PartialEq for ConversationNavigationRailSnapshot {
@@ -34,7 +34,7 @@ impl PartialEq for ConversationNavigationRailSnapshot {
             && self.viewport_height == other.viewport_height
             && self.active_turn == other.active_turn
             && self.reset_generation == other.reset_generation
-            && self.theme_is_dark == other.theme_is_dark
+            && self.theme_generation == other.theme_generation
     }
 }
 
@@ -46,7 +46,7 @@ impl Default for ConversationNavigationRailSnapshot {
             viewport_height: 0.0,
             active_turn: None,
             reset_generation: 0,
-            theme_is_dark: true,
+            theme_generation: 0,
         }
     }
 }
@@ -317,7 +317,7 @@ impl Michelle {
                 viewport_height: f32::from(viewport_size.height),
                 active_turn,
                 reset_generation: self.navigation_rail_reset_generation.get(),
-                theme_is_dark: Theme::current(cx).is_dark,
+                theme_generation: Theme::generation(cx),
             };
             if self.navigation_rail.read(cx).snapshot != navigation_rail_snapshot {
                 self.navigation_rail.update(cx, |rail, cx| {
@@ -2941,7 +2941,7 @@ mod navigation_rail_scroll_tests {
                         viewport_height: 600.0,
                         active_turn: None,
                         reset_generation: 0,
-                        theme_is_dark: true,
+                        theme_generation: 0,
                     },
                     cx,
                 );

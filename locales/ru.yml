@@ -75,7 +75,7 @@ settings.usage: Использование
 settings.daemon: Демон
 settings.computer_use: Управление компьютером
 settings.general_keywords: основные локальные проекты диалоги приватность математика latex формулы выражения general local privacy math
-settings.appearance_keywords: внешний вид тема системная светлая тёмная язык русский английский шрифт размер текст редактор appearance theme language russian english font
+settings.appearance_keywords: внешний вид тема цветовая схема системная светлая тёмная язык русский английский шрифт размер текст редактор appearance theme color scheme language russian english font
 settings.providers_keywords: провайдеры агенты модели cli версия установка обнаружение claude codex cursor opencode opencode2 amp grok pi providers agents
 settings.skills: Навыки
 settings.skills_keywords: навыки библиотека агент выключить включить удалить общие skills skill claude codex cursor opencode pi amp shared
@@ -150,7 +150,9 @@ web.error_daemon_url_host: URL демона должен содержать им
 web.error_secure_websocket_required: Защищённая страница Michelle Web может подключаться только через wss://
 web.error_daemon_token_required: Введите токен демона
 settings.theme: Тема
-settings.theme_description: Выберите системную, светлую или тёмную тему
+settings.theme_description: Цвета для светлой и тёмной схем
+settings.color_scheme: Цветовая схема
+settings.color_scheme_description: Выберите системную, светлую или тёмную схему
 settings.ui_font_size: Размер шрифта интерфейса
 settings.ui_font_size_description: Размер текста в интерфейсе и сообщениях
 settings.code_font_size: Размер шрифта кода
