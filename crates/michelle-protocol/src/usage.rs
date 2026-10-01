@@ -1,4 +1,3 @@
-use chrono::Datelike as _;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -48,14 +47,9 @@ pub fn reset_label(resets_at: i64, now: i64) -> String {
     }
     use chrono::TimeZone as _;
     match chrono::Local.timestamp_opt(resets_at, 0) {
-        chrono::LocalResult::Single(date) if crate::i18n::uses_east_asian_date_format() => tr!(
+        chrono::LocalResult::Single(date) if crate::i18n::is_russian() => tr!(
             "usage.resets_date",
-            date = format!(
-                "{}月{}日 {}",
-                date.month(),
-                date.day(),
-                date.format("%H:%M")
-            )
+            date = date.format("%d.%m %H:%M").to_string()
         ),
         chrono::LocalResult::Single(date) => tr!(
             "usage.resets_date",

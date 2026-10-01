@@ -1,0 +1,1091 @@
+_version: 1
+
+menu.about: "О %{app}"
+menu.settings: Настройки…
+menu.quit: "Завершить %{app}"
+menu.file: Файл
+menu.new_task: Новая задача
+menu.new_project: Новый проект…
+menu.edit: Правка
+menu.undo: Отменить
+menu.redo: Повторить
+menu.cut: Вырезать
+menu.copy: Скопировать
+menu.paste: Вставить
+menu.select_all: Выбрать всё
+menu.view: Вид
+menu.command_palette: Палитра команд…
+menu.toggle_sidebar: Показать или скрыть боковую панель
+menu.toggle_right_panel: Показать или скрыть правую панель
+menu.focus_composer: Перейти к вводу сообщения
+menu.toggle_model_picker: Показать или скрыть выбор модели
+menu.toggle_usage_panel: Показать или скрыть статистику использования
+menu.window: Окно
+menu.toggle_fps_counter: Показать или скрыть счётчик FPS
+menu.close_window: Закрыть окно
+window.minimize: Свернуть
+window.maximize: Развернуть
+window.restore: Восстановить
+
+command_palette.placeholder: Найти задачу или выполнить команду…
+command_palette.resume_placeholder: Найти сессию терминала…
+command_palette.resume_provider_placeholder: Выберите провайдера…
+command_palette.suggested: Предложения
+command_palette.tasks: Задачи
+command_palette.sessions: Сессии терминала
+command_palette.providers: Провайдеры
+command_palette.commands: Команды
+command_palette.settings: Настройки
+command_palette.new_task: Новая задача
+command_palette.resume: Продолжить…
+command_palette.change_provider: Сменить провайдера
+command_palette.current_provider: Текущий провайдер
+command_palette.open_project: Открыть проект…
+command_palette.choose_model: Выбрать модель…
+command_palette.model_reasoning: Настроить рассуждения…
+command_palette.copy_task_id: Скопировать ID задачи
+command_palette.copy_agent_cli_thread_id: Скопировать ID диалога в CLI агента
+command_palette.task_id_copied: ID задачи скопирован
+command_palette.agent_cli_thread_id_copied: ID диалога в CLI агента скопирован
+command_palette.collapse_sidebar_groups: Свернуть все группы боковой панели
+command_palette.show_sidebar: Показать боковую панель
+command_palette.hide_sidebar: Скрыть боковую панель
+command_palette.show_right_panel: Показать правую панель
+command_palette.hide_right_panel: Скрыть правую панель
+command_palette.current: Текущий
+command_palette.you: Вы
+command_palette.agent: Агент
+command_palette.no_results: Задачи и команды не найдены
+command_palette.no_results_hint: Ищите по названию задачи, сообщению, проекту, настройке или команде
+command_palette.no_matching_providers: Провайдеры не найдены
+command_palette.loading_sessions: Загрузка сессий терминала…
+command_palette.no_resume_sessions: Нет сессий терминала для продолжения
+command_palette.no_resume_sessions_hint: Сессии, уже добавленные в Michelle, скрыты. Начните сессию в CLI агента и попробуйте снова.
+command_palette.could_not_load_sessions: Не удалось загрузить сессии терминала
+command_palette.loading_selected_session: Загрузка диалога…
+command_palette.resume_failed: "Не удалось продолжить сессию: %{error}"
+
+language.title: Язык
+language.system: Системный
+language.description: Выберите язык интерфейса Michelle
+settings.general: Основные
+settings.appearance: Внешний вид
+settings.providers: Провайдеры
+settings.usage: Использование
+settings.daemon: Демон
+settings.computer_use: Управление компьютером
+settings.general_keywords: основные локальные проекты диалоги приватность математика latex формулы выражения general local privacy math
+settings.appearance_keywords: внешний вид тема системная светлая тёмная язык русский английский шрифт размер текст редактор appearance theme language russian english font
+settings.providers_keywords: провайдеры агенты модели cli версия установка обнаружение claude codex cursor opencode opencode2 amp grok pi providers agents
+settings.skills: Навыки
+settings.skills_keywords: навыки библиотека агент выключить включить удалить общие skills skill claude codex cursor opencode pi amp shared
+settings.usage_keywords: использование токены стоимость расходы кеш день график модели история usage tokens cost cache claude codex
+settings.daemon_keywords: демон сервер удалённый сеть доступ источник токен порт daemon web origin websocket
+settings.computer_use_keywords: управление компьютером запись экрана универсальный доступ приложения codex computer use accessibility
+settings.back: Назад
+settings.search: Поиск в настройках
+daemon.expose_title: Разрешить подключения к демону
+daemon.expose_description: Разрешить другим клиентам Michelle подключаться к этому компьютеру. При изменении перезапускается только демон.
+daemon.status_local: Только локально
+daemon.status_exposed: Доступен по сети
+daemon.status_restarting: Перезапускается
+daemon.connection_title: Доступ к серверу
+daemon.connection_description: Источники браузера должны совпадать точно. Несколько источников разделяйте запятыми.
+daemon.port: Порт
+daemon.port_description: Когда сетевой доступ включён, Michelle принимает подключения на этом порту через все сетевые интерфейсы.
+daemon.port_placeholder: "34123"
+daemon.allowed_origins: Разрешённые источники браузера
+daemon.allowed_origins_description: Точные источники http:// или https://, которым разрешено открывать WebSocket.
+daemon.allowed_origins_placeholder: "https://michelle.example.com, http://localhost:3001"
+daemon.apply: Применить
+daemon.restarting: Перезапуск…
+daemon.credentials_title: Данные для подключения
+daemon.credentials_description: Введите эти данные в Michelle Web. В URL используется имя этого компьютера в локальной сети.
+daemon.websocket_url: URL WebSocket
+daemon.token: Токен
+daemon.reveal_token: Показать токен
+daemon.hide_token: Скрыть токен
+daemon.regenerate_token: Создать заново
+daemon.security_warning: Токен даёт полный доступ к задачам, файлам, Git, вложениям и агентам на этом компьютере. За пределами частной сети используйте WSS через доверенный TLS-прокси.
+daemon.external_title: Внешний демон
+daemon.external_description: Приложение подключено к демону, которым управляют вне Michelle. Настройте сервер, источники браузера и токен на его компьютере.
+daemon.web_external_description: Michelle Web подключается к демону, которым управляют вне браузера. Настройте сервер, источники браузера и токен на его компьютере.
+daemon.web_connection_description: Этот браузер не запускает и не останавливает демон.
+daemon.not_configured: Не настроен
+daemon.status: Состояние
+daemon.disconnect: Отключиться
+daemon.forget: Забыть демон
+daemon.reconnect: Подключиться заново
+daemon.phase_booting: Запускается
+daemon.phase_disconnected: Нет подключения
+daemon.phase_connecting: Подключение
+daemon.phase_connected: Подключён
+daemon.phase_error: Ошибка
+daemon.invalid_port: Введите порт от 1 до 65535
+daemon.invalid_settings: "Некорректные настройки демона: %{error}"
+daemon.stop_active_tasks: Остановите активные задачи перед изменением доступа к демону
+daemon.settings_applied: Доступ к демону обновлён
+daemon.restart_failed: "Не удалось перезапустить демон: %{error}"
+daemon.url_copied: URL WebSocket скопирован
+daemon.token_copied: Токен демона скопирован
+web.connect_title: Подключиться к демону Michelle
+web.connect_description: Введите URL удалённого сервера и токен из раздела «Настройки → Демон» в приложении.
+web.token_placeholder: Токен доступа к демону
+web.remember_device: Запомнить на этом устройстве
+web.remember_device_description: Иначе данные для подключения удалятся после завершения сессии браузера.
+web.connect: Подключиться
+web.connecting: Подключение…
+web.security_warning: Браузер отправляет токен только в этот WebSocket. За пределами частной сети используйте WSS через доверенный TLS-прокси.
+web.starting: Запуск Michelle…
+web.starting_label: Запуск Michelle
+web.start_failed_label: Не удалось запустить Michelle
+web.load_failed: Не удалось загрузить Michelle
+web.try_again: Попробовать снова
+web.daemon_connection_closed: Соединение с демоном закрыто
+web.daemon_not_configured: Демон не настроен
+web.error_daemon_url_required: Введите URL демона
+web.error_daemon_url_invalid: Введите корректный URL демона с ws:// или wss://
+web.error_daemon_url_scheme: URL демона должен начинаться с ws:// или wss://
+web.error_daemon_url_host: URL демона должен содержать имя хоста и не содержать учётных данных
+web.error_secure_websocket_required: Защищённая страница Michelle Web может подключаться только через wss://
+web.error_daemon_token_required: Введите токен демона
+settings.theme: Тема
+settings.theme_description: Выберите системную, светлую или тёмную тему
+settings.ui_font_size: Размер шрифта интерфейса
+settings.ui_font_size_description: Размер текста в интерфейсе и сообщениях
+settings.code_font_size: Размер шрифта кода
+settings.code_font_size_description: Размер текста в редакторе файлов, изменениях, блоках кода и выводе инструментов
+settings.render_math: Отображать формулы
+settings.render_math_description: Показывать оформленные формулы в Markdown. Выключите, чтобы видеть исходный LaTeX.
+settings.theme_system: Системная
+settings.theme_light: Светлая
+settings.theme_dark: Тёмная
+
+input.do_anything: Напишите задачу…
+input.search_models: Поиск моделей…
+input.search_branches: Поиск веток
+input.search_projects: Поиск проектов
+input.new_branch_name: Название новой ветки
+input.detected_automatically: Определяется автоматически
+input.filter_projects: Фильтр проектов
+input.search_or_enter_address: Поиск или адрес
+input.find: Найти
+input.replace: Заменить
+common.checking: Проверка…
+common.refresh: Обновить
+common.recheck: Проверить снова
+common.reset: Сбросить
+common.revoke: Отозвать
+common.retry: Повторить
+common.creating: Создание…
+settings.local_by_default: По умолчанию локально
+settings.local_by_default_description: Проекты, диалоги и настройки хранятся на этом компьютере
+settings.local_by_default_web_description: Проекты, диалоги и вложения хранятся на компьютере с подключённым демоном. Настройки Michelle Web остаются в этом браузере.
+
+providers.coding_agents: Агенты для разработки
+providers.description: Michelle управляет CLI агентов, установленных на этом компьютере. Установите агент или войдите в аккаунт через его CLI, затем обновите список
+providers.web_description: Michelle управляет CLI агентов на компьютере с демоном. Установите агент или войдите в аккаунт через его CLI, затем обновите список
+providers.check_failed: "Не удалось проверить %{command}: %{error}"
+providers.show_settings: "Показать настройки %{provider}"
+providers.hide_settings: "Скрыть настройки %{provider}"
+providers.enable: "Включить %{provider}"
+providers.disable: "Выключить %{provider}"
+providers.disabled_for_new_tasks: Выключен для новых задач
+providers.model_count_one: "Моделей: %{count}"
+providers.model_count_many: "Моделей: %{count}"
+providers.not_detected_as: "%{command} не найден в PATH"
+providers.using_override: "Используется %{path} вместо поиска в PATH"
+providers.invalid_override: По этому пути нет исполняемого файла. Очистите поле для поиска в PATH
+providers.detected_at: "Найден по пути %{path}"
+providers.detected_as: "Найден как %{command}"
+providers.searches_path: "Michelle не нашла %{command} в PATH"
+providers.binary_path: Путь к исполняемому файлу
+providers.binary_path_description: "Файл, который Michelle запускает для %{provider}. Нажмите Return, чтобы применить. Оставьте поле пустым для поиска в PATH"
+providers.checked_just_now: Проверено только что
+providers.checked_minutes_ago: "Проверено %{count} мин назад"
+providers.checked_hours_ago: "Проверено %{count} ч назад"
+computer_use.allow_apps: Разрешить Michelle управлять приложениями
+computer_use.availability: Управление компьютером доступно с Codex, OpenCode, OpenCode 2, Grok и Pi
+computer_use.desktop_access: Доступ к рабочему столу
+computer_use.windows_access_description: Управление приложениями в текущей сессии Windows. Windows может ограничивать доступ к приложениям с повышенными правами и защищённым рабочим столам.
+computer_use.linux_access_description: Управление приложениями в текущей сессии Linux. Захват экрана и ввод зависят от композитора и служб доступности.
+computer_use.macos_access: Доступ в macOS
+computer_use.helper_access: "Предоставьте доступ %{helper} — отдельному помощнику Michelle для управления приложениями"
+computer_use.screen_recording: Запись экрана
+computer_use.screen_recording_description: Захватывается только окно одобренного приложения
+computer_use.accessibility: Универсальный доступ
+computer_use.accessibility_description: После одобрения отправляет события мыши и клавиатуры
+computer_use.always_allowed_apps: Приложения с постоянным доступом
+computer_use.always_allowed_apps_description: Michelle привязывает разрешения к ID пакета приложения и команде, подписавшей его
+computer_use.no_always_allowed_apps: Постоянный доступ не выдан ни одному приложению. Разрешения для отдельных задач хранятся только в памяти
+computer_use.access_granted: Доступ предоставлен
+computer_use.grant_access: Предоставить доступ
+computer_use.permission_check_failed: Не удалось проверить разрешения на управление компьютером
+common.settings: Настройки
+common.copy: Скопировать
+common.remove: Удалить
+common.rename: Переименовать
+session.new_task: Новая задача
+
+sidebar.today: Сегодня
+sidebar.search: Поиск
+sidebar.options: Настройки боковой панели
+sidebar.grouping: Группировка
+sidebar.grouping_project: По проекту
+sidebar.grouping_updated: По обновлению
+sidebar.ordering: Порядок
+sidebar.ordering_newest: Сначала новые
+sidebar.ordering_oldest: Сначала старые
+sidebar.ordering_manual: Вручную
+sidebar.projects: Проекты
+sidebar.new_group: Новая группа
+sidebar.new_group_name: Новая группа
+sidebar.move_to_group: Переместить в группу
+sidebar.show_more: Показать ещё
+sidebar.yesterday: Вчера
+sidebar.this_week: На этой неделе
+sidebar.this_month: В этом месяце
+sidebar.this_year: В этом году
+sidebar.more: Ещё
+sidebar.working: "Работает %{elapsed}"
+sidebar.just_now: только что
+sidebar.minutes_ago: "%{count} мин"
+sidebar.hours_ago: "%{count} ч"
+sidebar.days_ago: "%{count} дн"
+sidebar.unknown_project: Неизвестный проект
+sidebar.close: Закрыть боковую панель
+sidebar.hide: Скрыть боковую панель
+sidebar.open: Открыть боковую панель
+sidebar.tasks: Задачи
+sidebar.add_project: Добавить удалённый проект
+sidebar.resize: Изменить ширину боковой панели
+sidebar.status_working: Работает
+sidebar.status_waiting: Ожидает
+sidebar.status_background: Ожидает фоновые задачи
+sidebar.status_failed: Ошибка
+project.new_project: Новый проект…
+project.no_project: Работать без проекта
+project.no_project_name: Без проекта
+project.none_found: Проекты не найдены
+project.choose_project: выберите проект
+project.default_folder: Папка по умолчанию
+project.project_lower: проект
+project.without_a_project: без проекта
+project.your_project: вашем проекте
+onboarding.open_project_to_begin: Откройте проект, чтобы начать
+onboarding.description: Michelle запускает агентов в выбранных папках. Код, сессии и история остаются на этом компьютере
+onboarding.web_description: Выберите путь на компьютере с демоном или начните без проекта.
+onboarding.open_project_folder: Открыть папку проекта…
+onboarding.what_should_we_build: Что будем создавать?
+onboarding.what_should_we_build_in: "Что будем создавать в "
+onboarding.question_mark: "?"
+common.copied: Скопировано
+common.copy_message: Скопировать сообщение
+common.copy_message_title: Скопировать сообщение
+common.copy_selection: Скопировать выделенное
+common.copy_to_composer: Скопировать в поле сообщения
+common.copy_code: Скопировать код
+common.copy_expression: Скопировать выражение
+common.cancel: Отмена
+common.send: Отправить
+session.fork_task: Создать ответвление задачи
+session.fork_task_title: Создать ответвление задачи
+session.forking_task: Создание ответвления задачи…
+session.forking_task_title: Создание ответвления задачи…
+session.revert_to_here: Вернуться к этому месту
+session.revert_to_here_title: Вернуться к этому месту
+session.reverting_message: Откат сообщения…
+session.reverting_message_title: Откат сообщения…
+
+time.yesterday_at: "Вчера в %{time}"
+time.weekday_at: "%{weekday}, %{time}"
+time.monday: Понедельник
+time.tuesday: Вторник
+time.wednesday: Среда
+time.thursday: Четверг
+time.friday: Пятница
+time.saturday: Суббота
+time.sunday: Воскресенье
+time.month_1: Январь
+time.month_2: Февраль
+time.month_3: Март
+time.month_4: Апрель
+time.month_5: Май
+time.month_6: Июнь
+time.month_7: Июль
+time.month_8: Август
+time.month_9: Сентябрь
+time.month_10: Октябрь
+time.month_11: Ноябрь
+time.month_12: Декабрь
+
+activity.count: "%{activity}: %{count}"
+activity.running: "Выполняется: %{activities}"
+activity.detail: Подробности действия
+activity.named_content: "Содержимое %{name}"
+activity.ran: "Выполнено: %{activities}"
+activity.action_think: Рассуждение
+activity.action_run: Выполнение
+activity.action_edit: Изменение
+activity.action_read: Чтение
+activity.action_search: Поиск
+activity.action_list: Просмотр списка
+activity.action_plan: Планирование
+activity.action_use: Использование
+activity.ask_questions: Задать вопросы
+activity.arguments: Аргументы
+activity.tool_name: Инструмент
+activity.mcp_server: MCP-сервер
+activity.output: Вывод
+activity.image_output: Изображение в выводе
+activity.open_file: Открыть файл
+activity.search_for: "Найти %{query}"
+activity.searched_web: Поиск в интернете выполнен
+activity.open_url: "Открыть %{url}"
+activity.opened_web_page: Веб-страница открыта
+activity.find_in_url: "Найти %{pattern} на %{url}"
+activity.find_on_page: "Найти %{pattern} на странице"
+activity.search_within_url: "Поиск на %{url}"
+activity.searched_within_page: Поиск на веб-странице выполнен
+activity.browsed_page: "Просмотрено страниц: %{count}"
+activity.browsed_pages: "Просмотрено страниц: %{count}"
+activity.browsed_web: Просмотр интернета завершён
+activity.exit_code: "Код выхода: %{code}"
+activity.output_with_exit_code: "%{output}\n\nКод выхода: %{code}"
+activity.run_command: Выполнить команду
+activity.running_named_command: "Выполняется %{command}"
+activity.ran_named_command: "Выполнено %{command}"
+activity.named_command_failed: "Ошибка команды: %{command}"
+activity.running_described_command: "Выполняется команда: %{description}"
+activity.ran_described_command: "Выполнена команда: %{description}"
+activity.described_command_failed: "Ошибка команды: %{description}"
+activity.running_command: Выполняется команда
+activity.ran_command: Команда выполнена
+activity.command_failed: Ошибка команды
+activity.edit_file: Изменить файл
+activity.write_file: Записать файл
+activity.editing_named_file: "Изменение %{file}"
+activity.edited_named_file: "Изменён %{file}"
+activity.edit_failed_named_file: "Не удалось изменить %{file}"
+activity.editing_files: Изменение файлов
+activity.edited_files: Файлы изменены
+activity.edit_failed: Не удалось изменить файлы
+activity.file_count: "Файлов: %{count}"
+activity.read_file: Прочитать файл
+activity.reading_named_file: "Чтение %{file}"
+activity.read_named_file: "Прочитан %{file}"
+activity.read_named_file_failed: "Не удалось прочитать %{file}"
+activity.reading_file: Чтение файла
+activity.read_file_completed: Файл прочитан
+activity.read_file_failed: Не удалось прочитать файл
+activity.search_files: Поиск в файлах
+activity.find_files: Найти файлы
+activity.searching_files_for: "Поиск %{query} в файлах"
+activity.searched_files_for: "Поиск %{query} в файлах выполнен"
+activity.file_search_failed_for: "Не удалось найти %{query} в файлах"
+activity.searching_files: Поиск в файлах
+activity.searched_files: Поиск в файлах выполнен
+activity.file_search_failed: Не удалось выполнить поиск в файлах
+activity.list_files: Получить список файлов
+activity.listing_files_in: "Получение списка файлов в %{directory}"
+activity.listed_files_in: "Получен список файлов в %{directory}"
+activity.file_list_failed_in: "Не удалось получить список файлов в %{directory}"
+activity.listing_files: Получение списка файлов
+activity.listed_files: Список файлов получен
+activity.file_list_failed: Не удалось получить список файлов
+activity.searching_web_for: "Поиск %{query} в интернете"
+activity.searched_web_for: "Поиск %{query} в интернете выполнен"
+activity.web_search_failed_for: "Не удалось найти %{query} в интернете"
+activity.searching_web: Поиск в интернете
+activity.searched_the_web: Поиск в интернете выполнен
+activity.web_search_failed: Не удалось выполнить поиск в интернете
+activity.updating_plan: Обновление плана
+activity.updated_plan: План обновлён
+activity.plan_update_failed: Не удалось обновить план
+activity.activity: Действие
+activity.tool: Инструмент
+activity.plan_updated: План обновлён
+activity.compacting_context: Сжатие контекста
+activity.compacted_context: Контекст сжат
+activity.compaction_failed: Не удалось сжать контекст
+activity.provider_retrying: Повторная отправка запроса
+activity.background_shell: Фоновая оболочка
+activity.output_truncated: "\n\n… вывод обрезан"
+activity.thought: Рассуждение
+activity.thoughts: Рассуждения
+activity.command: Команда
+activity.command_detail: Команда
+activity.commands: Команды
+activity.file_edit: Изменение файла
+activity.file_edits: Изменения файлов
+activity.file_read: Чтение файла
+activity.file_reads: Чтение файлов
+activity.file_search: Поиск в файлах
+activity.file_searches: Поиск в файлах
+activity.file_list: Список файлов
+activity.file_lists: Списки файлов
+activity.search: Поиск
+activity.searches: Поиск
+activity.plan_step: Шаг плана
+activity.plan_steps: Шаги плана
+activity.tool_call: Вызов инструмента
+activity.tool_calls: Вызовы инструментов
+
+mode.supervised: С подтверждением
+mode.auto_accept_edits: Автоодобрение правок
+mode.auto: Автоматический
+mode.full_access: Полный доступ
+mode.supervised_description: Спрашивать перед выполнением команд и изменением файлов
+mode.auto_accept_edits_description: Одобрять правки автоматически, спрашивать перед остальными действиями
+mode.auto_description: ИИ одобряет обычные действия, а рискованные требуют вашего подтверждения
+mode.full_access_description: Разрешить команды и правки без подтверждения
+agent_preset.standard: Стандартный режим
+agent_preset.code: Режим кода
+agent_preset.minimal: Минимальный режим
+agent_preset.creator: Режим создателя
+agent_preset.standard_description: Агент для разработки с редактированием файлов, оболочкой, поиском в файлах и интернете, навыками, планированием, целями, субагентами и рабочими процессами.
+agent_preset.code_description: Все возможности стандартного режима с доступом к инструментам через Code Mode SDK. Модель может объединять несколько операций в одной программе на TypeScript.
+agent_preset.minimal_description: Агент для разработки с двумя инструментами — постоянной сессией bash и str_replace_editor.
+agent_preset.creator_description: Для создания собственных наборов настроек агента. Все возможности стандартного режима, а также анализ среды выполнения, эксперименты с плагинами и инструкции по созданию настроек.
+agent_preset.custom: Свой набор
+agent_preset.no_description: Без описания.
+computer_use.allow_for_task: Разрешить для задачи
+computer_use.always_allow_app: Всегда разрешать приложение
+computer_use.allow_control: "Разрешить Michelle управлять %{app}?"
+computer_use.screenshot_shared: Снимок этого окна будет передан активной модели Codex
+computer_use.sensitive_action: Это действие может вводить текст или нажимать клавиши
+computer_use.bundle_id: "ID пакета: %{id}"
+computer_use.no_bundle_id: У приложения нет ID пакета, поэтому постоянный доступ выдать нельзя
+computer_use.stopped: Остановлено
+computer_use.controlling: Управление
+computer_use.captured: Снимок сделан
+computer_use.preparing_preview: Подготовка предпросмотра…
+common.deny: Запретить
+permission.allow_once: Разрешить один раз
+permission.allow_for_session: Разрешить для сессии
+permission.always_allow: Всегда разрешать
+permission.a_tool: инструмент
+permission.run_a_tool: Запустить инструмент
+permission.run_a_tool_lower: запустить инструмент
+permission.blocked_path: "Заблокированный путь: %{path}"
+permission.agent_wants_to_run: "Агент хочет запустить %{tool}"
+permission.run_tool: "Запустить %{tool}?"
+permission.allow_named_permission: "Разрешить %{permission}?"
+permission.agent_asks_for_named_permission: "Агент запрашивает разрешение «%{permission}»"
+permission.agent_asks_for_permission: Агент запрашивает разрешение
+permission.agent_wants_to: "Агент хочет %{action}"
+common.close: Закрыть
+common.default: По умолчанию
+composer.no_providers: Установите или включите провайдера, чтобы отправить сообщение
+models.none_found: Модели не найдены
+models.favorite_hint: Отметьте модель звёздочкой, чтобы закрепить её здесь
+models.loading: Загрузка моделей…
+models.none_reported: Провайдер не сообщил о доступных моделях
+models.no_providers: Нет провайдеров
+models.no_providers_title: Нет доступных провайдеров
+models.no_providers_description: Установите CLI агента или включите провайдера в настройках.
+models.open_provider_settings: Открыть настройки провайдеров
+models.choose: Выбрать модель
+models.favorites: Избранное
+models.add_favorite: Добавить в избранное
+models.remove_favorite: Удалить из избранного
+models.standard: Стандартный
+models.reasoning: Рассуждения
+models.service_tier: Уровень обслуживания
+models.context_window: Контекстное окно
+model_option.none: Нет
+model_option.minimal: Минимальный
+model_option.low: Низкий
+model_option.medium: Средний
+model_option.high: Высокий
+model_option.extra_high: Очень высокий
+model_option.max: Максимальный
+model_option.ultra: Ультра
+model_option.ultracode: Ultracode
+model_option.context_200k: 200K
+model_option.context_1m: 1M
+model_option.auto: Автоматически
+model_option.fast: Быстрый
+model_option.amp_fast_description: Более быстрый уровень обслуживания Amp с повышенным расходом лимита
+model_option.fast_description: Более быстрые ответы с повышенным расходом лимита
+command_scope.project: проект
+command_scope.user: пользователь
+command_scope.skill: навык
+command_scope.builtin: встроенная
+command_scope.michelle: Michelle
+
+skills.search: Поиск навыков…
+skills.count_one: "Навыков: 1"
+skills.count_many: "Навыков: %{count}"
+skills.count_disabled: "Выключено: %{count}"
+skills.filter_caption: "Показано %{shown} из %{total}"
+skills.scanning: Поиск навыков в папках…
+skills.no_match: Навыки не найдены
+skills.section_user: Пользователь
+skills.source_shared: Общие
+skills.scope_user_detail: доступен во всех проектах
+skills.scope_in_project: "в %{project}"
+skills.filter_all: Все навыки
+skills.select_placeholder: Выберите навык
+skills.detail_invoke: Вызов
+skills.detail_location: Расположение
+skills.detail_contents: Содержимое
+skills.detail_updated: Обновлён
+skills.no_description: Без описания
+skills.disabled_badge: Выключен
+skills.file_count_one: "Вспомогательных файлов: 1"
+skills.file_count_many: "Вспомогательных файлов: %{count}"
+skills.updated_just_now: Только что
+skills.updated_minutes: "%{count} мин назад"
+skills.updated_hours: "%{count} ч назад"
+skills.updated_days: "%{count} дн назад"
+skills.allowed_tools: Инструменты
+skills.duplicate_one: Этот навык есть ещё в одной папке — используется копия с самой узкой областью действия
+skills.duplicate_many: "Других папок с этим навыком: %{count} — используется копия с самой узкой областью действия"
+skills.open_file: Открыть SKILL.md
+skills.reveal: Показать в файловом менеджере
+skills.copy_path: Скопировать путь
+skills.path_copied: Путь скопирован
+skills.delete: Удалить
+skills.confirm_delete: Подтвердить удаление
+skills.deleted_toast: "«%{name}» перемещён в Корзину"
+skills.delete_failed: "Не удалось удалить навык: %{error}"
+skills.toggle_failed: "Не удалось обновить навык: %{error}"
+skills.empty_title: Навыков пока нет
+skills.empty_description: Навык — это папка с файлом SKILL.md, содержащим инструкции для агента, например порядок развёртывания или список проверок кода. Здесь отображаются навыки для Claude Code, Codex и других агентов. Их можно вызвать через /имя.
+skills.library: Библиотека навыков
+skills.details: Сведения о навыке
+skills.section_user_skills: Навыки пользователя
+skills.enable_named: "Включить %{name}"
+skills.disable_named: "Выключить %{name}"
+commands.fast_description: Переключить быстрый режим
+commands.fast_enabled: Быстрый режим включён
+commands.fast_disabled: Быстрый режим выключен
+commands.goal_description: Задать цель, к которой задача будет идти
+commands.resume_description: Продолжить сессию агента из терминала
+
+goal.title: Цель
+goal.objective_placeholder: К какой цели должна идти эта задача?
+goal.set: Задать цель
+goal.save: Сохранить цель
+goal.replace: Заменить цель
+goal.replace_notice: Сохранение заменит текущую цель и сбросит её прогресс.
+goal.pause: Приостановить цель
+goal.resume: Продолжить работу над целью
+goal.clear: Удалить цель
+goal.status_active: Активна
+goal.status_paused: Приостановлена
+goal.status_stalled: Заблокирована
+goal.status_usage_limited: Достигнут лимит использования
+goal.status_budget_limited: Бюджет исчерпан
+goal.status_complete: Достигнута
+goal.chip_active: Работа над целью
+goal.chip_paused: Цель приостановлена
+goal.chip_stalled: Цель заблокирована
+goal.chip_usage_limited: Достигнут лимит использования
+goal.chip_budget_limited: Цель не достигнута
+goal.chip_complete: Цель достигнута
+goal.set_notice: "Цель задана: %{objective}"
+goal.usage_tokens: "%{used} / %{budget} токенов"
+goal.usage_tokens_unbudgeted: "Токенов: %{used}"
+composer.edit_in_composer: Изменить в поле сообщения
+composer.steer: Направить агента
+composer.remove_followup: Удалить из очереди
+composer.queued_message_actions: Действия с сообщением в очереди
+user_input.other_placeholder: Введите другой ответ
+user_input.back: Назад
+user_input.next: Далее
+user_input.submit: Отправить
+user_input.progress: "%{current} из %{total}"
+composer.preparing_task: Подготовка задачи…
+composer.queue_followup: Добавить в очередь (⏎)
+composer.message: Сообщение
+composer.queue_placeholder: Добавьте сообщение в очередь…
+composer.prompt_placeholder: Попросите Michelle что-нибудь создать…
+composer.attach_daemon: Прикрепить файл или папку с компьютера демона
+composer.attach_daemon_title: Прикрепить с компьютера демона
+composer.stop: Остановить
+composer.stop_confirm: Нажмите Escape ещё раз, чтобы остановить
+composer.steer_current: Направить агента в текущем шаге
+composer.starting_agent: Запуск агента…
+composer.suggestions: Подсказки для сообщения
+composer.loading_suggestions: Загрузка подсказок…
+composer.remove_attachment: "Удалить %{name}"
+branches.detached_head: Отсоединённый HEAD
+branches.search_project: "Поиск веток — %{project}"
+branches.switching: Переключение…
+branches.create_and_checkout: Создать новую ветку и переключиться на неё
+branches.create_hint: Return — создать · Esc — отменить
+branches.none_found: Ветки не найдены
+branches.create_and_checkout_ellipsis: Создать новую ветку и переключиться на неё…
+branches.title: Ветки
+branches.choose: Выберите ветку
+branches.checked_out_elsewhere: Используется в другом рабочем дереве
+workspace.work_in: Среда исполнения
+workspace.local: Локальный проект
+workspace.new_worktree: Новый Worktree
+workspace.workspace: рабочая папка
+workspace.worktree: Рабочее дерево
+terminal.starting: Запуск терминала…
+project.add_project: Добавить проект
+errors.remote_project_picker: Для добавления проекта с компьютера демона нужен выбор удалённого пути. Он пока недоступен
+
+session.stopped: Остановлено
+session.turn_completed: Шаг завершён
+session.turn_waiting_background: Ожидание фоновых задач
+transcript.waiting_background: Ожидание фоновых задач
+session.stopped_before_response: Агент остановился, не вернув ответ
+session.codex_exited_before_response: Codex app-server завершился, не вернув ответ
+session.steer_rejected: "Не удалось направить агента (%{error}). Сообщение добавлено в очередь"
+session.steer_rejected_plain: Не удалось направить агента. Сообщение добавлено в очередь
+session.agent_ran_out_of_context: Агент исчерпал контекст для этого шага
+session.agent_declined_turn: Агент отказался выполнять этот шаг
+session.agent_stopped_reason: "Агент остановился: %{reason}"
+errors.open_session: "Не удалось открыть сессию: %{error}"
+errors.create_projectless_task: "Не удалось создать задачу в ~/.michelle/projects: %{error}"
+errors.save_projectless_migration: "Не удалось сохранить перенос задачи без проекта: %{error}"
+errors.move_projectless_task: "Не удалось перенести старую задачу без проекта в ~/.michelle/projects: %{error}"
+errors.remote_host_path: Этот путь находится на компьютере демона и не может быть открыт в приложении
+errors.change_branch: "Не удалось сменить ветку: %{error}"
+errors.capture_pre_turn_checkpoint: "Не удалось сохранить контрольную точку перед шагом: %{error}"
+errors.capture_turn_checkpoint: "Не удалось сохранить контрольную точку шага: %{error}"
+errors.save_local_state: "Не удалось сохранить локальное состояние: %{error}"
+errors.task_project_not_found: Проект задачи не найден
+errors.provider_native_session_unavailable: "Сессия в %{provider} недоступна"
+errors.provider_native_thread_unavailable: "Диалог в %{provider} недоступен"
+errors.provider_native_cursor_unavailable: "Позиция в сессии %{provider} недоступна"
+errors.provider_native_thread_cursor_unavailable: "Позиция в диалоге %{provider} недоступна"
+errors.provider_michelle_task_unavailable: "Задача Michelle для %{provider} недоступна"
+errors.provider_not_installed: "%{provider} не установлен"
+errors.provider_not_found: "%{provider} не установлен или не найден"
+errors.claude_fork_checkpoint_missing: Claude не передал контрольную точку для ответвления
+errors.claude_turn_checkpoint_unavailable: "Контрольная точка Claude для этого шага недоступна: %{error}"
+errors.provider_session_file_unavailable: "Файл сессии %{provider} недоступен"
+errors.provider_turn_branching_unsupported: "%{provider} не поддерживает откат или ответвление диалога на выбранном шаге"
+errors.fork_task: "Не удалось создать ответвление задачи: %{error}"
+errors.create_rewind_snapshot: "Не удалось создать резервный снимок перед откатом: %{error}"
+errors.restore_checkpoint: "Не удалось восстановить контрольную точку: %{error}"
+errors.restore_checkpoint_and_safety: "Не удалось восстановить контрольную точку (%{error}) и резервный снимок (%{restore_error}). Ссылка для восстановления сохранена в %{safety_ref}"
+errors.rollback_rejected_workspace_restored: "Провайдер отклонил откат, поэтому рабочая папка восстановлена: %{error}"
+errors.rollback_and_safety_failed: "Не удалось выполнить откат у провайдера (%{error}) и восстановить резервный снимок (%{restore_error}). Ссылка для восстановления сохранена в %{safety_ref}"
+errors.no_session_selected: Сессия не выбрана
+errors.session_not_found: Сессия не найдена
+errors.task_not_found: Задача не найдена
+errors.task_not_loaded: Эта задача не загружена
+errors.task_already_forking: Ответвление этой задачи уже создаётся
+errors.task_already_rewinding: Откат этой задачи уже выполняется
+errors.no_live_runtime: У этой задачи нет запущенного агента
+errors.unexpected_daemon_response: "Ожидалось %{expected}, от демона получено %{actual}"
+errors.daemon_disconnected: Нет подключения к демону Michelle
+errors.path_outside_workspace: Этот путь находится вне активной рабочей папки на компьютере демона
+errors.rename_task: "Не удалось переименовать задачу: %{error}"
+errors.remove_task: "Не удалось удалить задачу: %{error}"
+errors.save_draft: "Не удалось сохранить черновик: %{error}"
+errors.rewind_task: "Не удалось откатить задачу: %{error}"
+errors.project_not_found: Проект не найден
+errors.prepare_task_project_not_found: "Не удалось подготовить задачу: проект не найден"
+errors.store_pasted_image: "Не удалось прикрепить вставленное изображение: %{error}"
+errors.create_worktree: "Не удалось создать рабочее дерево: %{error}"
+errors.prepared_runtime_unavailable: Подготовленная среда агента недоступна
+errors.start_agent: "Не удалось запустить агента: %{error}"
+errors.provider_no_active_turn: "У %{provider} нет активного шага для изменения направления"
+errors.provider_transport_write: "Ошибка отправки данных в %{provider}: %{error}"
+errors.provider_transport_write_short: "Ошибка отправки данных в %{provider}"
+errors.provider_transport_read: "Ошибка чтения данных от %{provider}: %{error}"
+errors.provider_invalid_json: "%{provider} отправил некорректный JSON: %{error}"
+errors.provider_exited: "%{provider} завершился со статусом %{status}"
+errors.provider_rpc_exited: "RPC %{provider} завершился со статусом %{status}"
+errors.read_provider_exit_status: "Не удалось прочитать статус завершения %{provider}: %{error}"
+errors.initialize_provider: "Не удалось инициализировать %{provider}: %{error}"
+errors.provider_no_session_id: "%{provider} не сообщил ID сессии"
+errors.provider_rejected_prompt_detail: "%{provider} отклонил запрос: %{error}"
+errors.stop_provider: "Не удалось остановить %{provider}: %{error}"
+errors.switch_provider_model: "Не удалось сменить модель %{provider}: %{error}"
+errors.change_provider_thinking: "Не удалось изменить уровень рассуждений %{provider}: %{error}"
+errors.open_provider_session: "Не удалось открыть сессию %{provider}: %{error}"
+errors.select_model: "Не удалось выбрать модель: %{error}"
+errors.read_provider_event_stream: "Не удалось прочитать поток событий %{provider}: %{error}"
+errors.answer_provider_permission: "Не удалось ответить на запрос разрешения от %{provider}: %{error}"
+errors.answer_provider_question: "Не удалось ответить на вопрос %{provider}: %{error}"
+errors.initialize_codex_app_server: Не удалось инициализировать Codex app-server
+errors.register_computer_use_skill: Не удалось зарегистрировать навык управления компьютером Michelle в Codex
+errors.codex_thread_open_incomplete: Codex не завершил открытие диалога
+errors.codex_goals_unsupported: Эта версия Codex не поддерживает цели диалога
+errors.provider_receive_prompt: "%{provider} не смог получить запрос"
+errors.provider_start_turn: "%{provider} не смог начать шаг"
+errors.provider_rejected_steer: "%{provider} отклонил изменение направления: %{error}"
+errors.provider_stopped_receiving: "%{provider} перестал получать сообщения"
+errors.provider_initialize_session: "%{provider} не смог инициализировать сессию"
+errors.provider_rejected_prompt: "%{provider} отклонил запрос до начала выполнения"
+errors.provider_complete_turn: "%{provider} не смог завершить шаг"
+errors.provider_reported_error: "%{provider} сообщил об ошибке"
+session.response_unavailable: Этот ответ больше недоступен
+session.response_cannot_fork: Сейчас нельзя создать ответвление от этого ответа
+session.response_fork_in_progress: Дождитесь создания ответвления, прежде чем удалять исходную задачу
+session.response_cannot_copy: Не удалось скопировать этот ответ в новую задачу
+session.forked_with_checkpoint_warning: "Ответвление задачи создано, но некоторые контрольные точки Git не удалось скопировать: %{error}"
+session.forked_from_response: Создано ответвление задачи от этого ответа
+session.message_not_editable: Сейчас нельзя изменить это сообщение
+session.edited_message_empty: Изменённое сообщение не может быть пустым
+session.message_unavailable: Это сообщение больше недоступно
+session.select_before_rewind: Выберите задачу перед откатом диалога
+session.stop_before_rewind: Остановите текущий шаг перед откатом диалога
+session.provider_cannot_rewind: "%{provider} пока не поддерживает безопасный откат своего диалога"
+session.pre_turn_checkpoint_missing: Контрольная точка Git перед этим сообщением отсутствует
+session.rewind_title: "%{title} (откат)"
+session.rewound: "Выполнен откат к началу шага %{turn}"
+session.rewound_with_stale_refs: "Выполнен откат к началу шага %{turn}. Остались устаревшие ссылки: %{error}"
+
+right_panel.browser: Браузер
+right_panel.terminal: Терминал
+right_panel.files: Файлы
+right_panel.diff: Изменения
+right_panel.toggle: Показать или скрыть правую панель
+right_panel.open_surface: Открыть инструмент
+right_panel.choose_surface: Выберите содержимое правой панели
+right_panel.browser_description: Открыть локальное приложение или URL
+right_panel.terminal_description: Запустить оболочку в рабочей папке
+right_panel.files_description: Просмотреть файлы рабочей папки
+right_panel.diff_description: Просмотреть изменения файлов
+right_panel.terminal_unavailable: Терминал недоступен
+right_panel.terminal_unavailable_description: Откройте терминал снова, чтобы запустить оболочку
+right_panel.resize: Изменить ширину правой панели
+right_panel.tabs: Вкладки правой панели
+right_panel.add_tab: Добавить вкладку панели
+right_panel.hide: Скрыть правую панель
+right_panel.close_tab: "Закрыть %{title}"
+open_in.open: "Открыть проект в %{app}"
+open_in.choose: Открыть проект в…
+environment.title: Окружение
+environment.summary: Окружение и фоновая работа
+environment.changes: Изменения
+environment.commit_or_push: Создать коммит или отправить
+environment.compare_branch: Сравнить ветку
+environment.task_id: ID задачи
+environment.agent_cli_thread_id: ID диалога в CLI агента
+commit.message_placeholder: Сообщение коммита (пустое — создать автоматически)…
+commit.message: Сообщение коммита
+commit.include_unstaged: Включить изменения вне индекса
+commit.commit: Создать коммит
+commit.commit_and_push: Создать коммит и отправить
+commit.push: Отправить
+commit.generating_message: Создание сообщения коммита…
+commit.committing: Создание коммита…
+commit.committing_and_pushing: Создание и отправка коммита…
+commit.pushing: Отправка…
+commit.no_task: Нет задачи для создания коммита
+commit.no_workspace: У этой задачи нет рабочей папки
+commit.no_changes: Нет изменений для коммита
+commit.agent_unavailable: CLI текущего агента недоступен, поэтому создать сообщение коммита нельзя
+commit.committed: Коммит создан
+commit.committed_and_pushed: Коммит создан и отправлен
+commit.pushed: Изменения отправлены
+
+background.title: Фоновая работа
+background.description: Процессы и субагенты, запущенные агентом
+background.processes: Фоновые процессы
+background.agents: Субагенты
+background.process: Процесс
+background.monitor: Наблюдение
+background.subagent: Субагент
+background.no_work: Нет фоновой работы
+background.no_work_description: Здесь появятся длительные команды и субагенты.
+background.view: Просмотреть
+background.stop: Остановить
+background.stop_named: "Остановить %{name}"
+background.stop_all: Остановить всё
+background.stop_not_running: Процесс уже завершён.
+background.output: Вывод
+background.no_output: Вывода пока нет
+background.command: Команда
+background.prompt: Запрос
+background.cwd: Рабочая папка
+background.role: Роль
+background.model: Модель
+background.latest_update: Последнее обновление
+background.exit_code: Код выхода
+background.output_truncated: Предыдущий вывод обрезан
+background.process_count: "Фоновых процессов: %{count}"
+background.process_count_one: "Фоновых процессов: 1"
+background.agent_count: "Субагентов: %{count}"
+background.agent_count_one: "Субагентов: 1"
+background.status.starting: Запускается
+background.status.running: Выполняется
+background.status.monitoring: Наблюдение
+background.status.stopping: Останавливается
+background.status.completed: Завершено
+background.status.failed: Ошибка
+background.status.stopped: Остановлено
+background.status.lost: Нет подключения
+background.unavailable: Эта работа больше недоступна.
+
+files.unsaved_changes: "Несохранённые изменения — %{shortcut}, чтобы сохранить"
+files.no_project_open: Проект не открыт
+files.no_project_open_description: Откройте проект, чтобы просмотреть его файлы
+files.no_project_is_open: Проект не открыт
+files.unable_to_edit: "Не удалось изменить файл: %{error}"
+files.could_not_save_opening: "Не удалось сохранить %{path}: файл ещё открывается"
+files.could_not_save_read_only: "Не удалось сохранить %{path}: файл недоступен для редактирования"
+files.could_not_save: "Не удалось сохранить %{path}: %{error}"
+files.preview_markdown: Предпросмотр Markdown
+files.edit_markdown_source: Изменить исходный текст
+files.resize_tree: Изменить ширину дерева файлов
+files.refresh: Обновить файлы
+files.loading: Загрузка файлов…
+files.workspace_files: Файлы рабочей папки
+files.loading_file: Загрузка файла
+files.reading_from_daemon: Чтение с компьютера демона.
+files.file_unavailable: Файл недоступен
+files.loading_editor: Загрузка редактора
+files.preparing_editor: Подготовка редактора…
+files.preparing_syntax: Подготовка подсветки синтаксиса.
+file_picker.open_project: Открыть проект
+file_picker.attach: Прикрепить
+file_picker.daemon_folders: Папки демона
+file_picker.daemon_items: Файлы и папки демона
+file_picker.choose_project_folder: Выберите папку проекта на компьютере демона
+file_picker.attach_from_daemon: Прикрепите файл или папку с компьютера демона
+file_picker.daemon_disconnected: Демон не подключён
+file_picker.locations: Расположения
+file_picker.home: Домашняя папка
+file_picker.file_system: Файловая система
+file_picker.back: Назад
+file_picker.forward: Вперёд
+file_picker.enclosing_folder: Родительская папка
+file_picker.filter_folder: Фильтр в этой папке
+file_picker.filter: Фильтр
+file_picker.refresh: Обновить
+file_picker.name: Имя
+file_picker.kind: Тип
+file_picker.loading_folder: Загрузка папки…
+file_picker.no_matching_items: Ничего не найдено
+file_picker.empty_folder: Эта папка пуста
+file_picker.folders: Папки
+file_picker.files: Файлы
+file_picker.selected_folder: Выбранная папка
+file_picker.selected_item: Выбранный объект
+file_picker.none: Нет
+file_picker.opening: Открытие…
+file_picker.attaching: Прикрепление…
+file_picker.open: Открыть
+file_picker.folder: Папка
+file_picker.file: Файл
+file_picker.typed_file: "Файл %{type}"
+
+diff.no_changes: Нет изменений
+diff.no_changes_description: В этом источнике нет изменений файлов для просмотра
+diff.filter_files: Фильтр файлов…
+diff.source_last_turn: Последний шаг
+diff.source_turn: "Шаг %{turn}"
+diff.source_uncommitted: Без коммита
+diff.source_unstaged: Вне индекса
+diff.source_staged: В индексе
+diff.source_committed: В коммите
+diff.source_branch: Ветка
+diff.loading: Загрузка изменений…
+diff.preparing_review: Подготовка просмотра…
+diff.loading_description: Создание согласованного снимка Git для просмотра
+diff.unavailable: Изменения недоступны
+diff.refresh: Обновить изменения
+diff.refresh_failed: "Не удалось обновить изменения: %{error}"
+diff.truncated: Большой diff · показаны первые 50 000 строк
+diff.unmodified_lines: "Строк без изменений: %{count}"
+diff.expand_all_context: Показать все строки без изменений
+diff.expand_context: Показать строки без изменений · Shift + щелчок — все строки
+diff.expand_context_above: Показать 100 строк выше · Shift + щелчок — все строки
+diff.expand_context_below: Показать 100 строк ниже · Shift + щелчок — все строки
+diff.resize_tree: Изменить ширину дерева изменённых файлов
+diff.changed_files: Изменённые файлы
+diff.file_count_one: "Файлов: 1"
+diff.file_count: "Файлов: %{count}"
+diff.status_added: Добавлен
+diff.status_deleted: Удалён
+diff.rows_hidden_one: Ещё одна строка · откройте «Изменения», чтобы увидеть всё
+diff.rows_hidden: "Скрыто строк: %{count} · откройте «Изменения», чтобы увидеть всё"
+terminal.transport_failed: Ошибка соединения с терминалом
+terminal.no_workspace_description: Выберите задачу перед открытием терминала.
+terminal.process_exited: Процесс завершён
+browser.back: "Назад (%{shortcut})"
+browser.forward: "Вперёд (%{shortcut})"
+browser.stop_loading: Остановить загрузку (Esc)
+browser.reload: "Обновить (%{shortcut})"
+browser.open_external: Открыть в браузере по умолчанию
+browser.browse_web: Просмотр интернета
+browser.start_hint: "Введите URL или поисковый запрос выше — %{shortcut} переводит фокус в адресную строку"
+browser.unavailable: Браузер недоступен
+browser.unavailable_on_platform: Встроенный браузер пока недоступен на этой платформе
+find.bad_pattern: Некорректное выражение
+find.no_results: Ничего не найдено
+find.result_count: "%{current} из %{total}"
+find.match_case: "Учитывать регистр (%{shortcut})"
+find.match_whole_word: "Слово целиком (%{shortcut})"
+find.use_regex: "Регулярное выражение (%{shortcut})"
+find.previous_match: Предыдущее совпадение (⇧Enter)
+find.next_match: Следующее совпадение (Enter)
+find.close: Закрыть (Esc)
+find.replace: Заменить (Enter)
+find.replace_all: "Заменить всё (%{shortcut})"
+find.toggle_replace: Показать или скрыть замену
+common.dismiss_notification: Закрыть уведомление
+common.reveal_in_finder: Показать в файловом менеджере
+attachments.close_preview: Закрыть предпросмотр изображения
+attachments.open_preview: "Открыть %{name}"
+attachments.preview_unavailable: Изображение недоступно
+common.copy_named: "Скопировать %{name}"
+
+transcript.worked: Работа завершена
+transcript.worked_for: "Время работы: %{duration}"
+transcript.you_stopped_after: "Вы остановили работу через %{duration}"
+transcript.working_for: "Работает %{duration}"
+transcript.thinking: Рассуждает
+transcript.thought_for: "Время рассуждений: %{duration}"
+transcript.changed_file: "Изменено файлов: %{count}"
+transcript.changed_files: "Изменено файлов: %{count}"
+transcript.review_changes: Изменения
+transcript.show_more_files: "Показать ещё файлов: %{count}"
+transcript.show_fewer_files: Показать меньше файлов
+transcript.showing_first_files: "Показаны первые %{count} из %{total}"
+transcript.scroll_to_bottom: Перейти вниз
+transcript.conversation_turns: Шаги диалога
+transcript.turn_label: "Шаг %{number}: %{prompt}"
+transcript.edit_message: Изменить сообщение
+duration.second: "%{count} сек."
+duration.seconds: "%{count} сек."
+duration.minute: "%{count} мин."
+duration.minutes: "%{count} мин."
+duration.hour: "%{count} ч"
+duration.hours: "%{count} ч"
+duration.seconds_short: "%{count} с"
+duration.minutes_short: "%{count} мин"
+duration.hours_short: "%{count} ч"
+duration.two_units: "%{first} %{second}"
+
+usage.scan_summary: "Проверено диалогов: %{scanned} (%{skipped} вне периода) · записей об использовании: %{records} · %{seconds} с"
+usage.daily: По дням
+usage.monthly: По месяцам
+usage.projects: Проекты
+usage.scanning: Анализ диалогов провайдеров…
+usage.rescan: Повторно проверить диалоги провайдеров
+usage.range: "%{start} — %{end}"
+usage.full_api_rate_note: "* при оплате по полному тарифу API"
+usage.sessions_summary: "Ввод, чтение из кеша и вывод · сессий: %{count}"
+usage.raw_token_cost: РАСЧЁТНАЯ СТОИМОСТЬ ТОКЕНОВ
+usage.processed_tokens_upper: ОБРАБОТАННЫЕ ТОКЕНЫ
+usage.cost_share: "%{share} стоимости · токенов: %{tokens}"
+usage.token_share: "%{share} токенов · %{cost}"
+usage.no_activity_window: Нет активности за этот период
+usage.cost_upper: СТОИМОСТЬ
+usage.tokens_upper: ТОКЕНЫ
+usage.daily_cost: Стоимость по дням
+usage.daily_processed_tokens: Обработанные токены по дням
+usage.model_upper: МОДЕЛЬ
+usage.day_upper: ДЕНЬ
+usage.breakdown: Детализация
+usage.no_projects_match: Проекты не найдены
+usage.by_project: По проектам
+usage.projects_caption: "%{projects} · токенов: %{tokens} · %{sessions}"
+usage.projects_shown: "Показано %{shown} из %{projects}"
+usage.percent_of_cost: "%{share} стоимости"
+usage.token_count: "Токенов: %{count}"
+usage.last_active: "последняя активность %{date}"
+usage.show_models: "Показать детализацию расходов (%{models})"
+usage.other_sessions: Другие сессии
+usage.rates_unavailable: Тарифы моделей недоступны. Стоимость не рассчитывается, пока не загрузится таблица тарифов
+usage.total: Всего
+usage.processed_tokens: Обработанные токены
+usage.per_active_day: "%{count} за активный день"
+usage.cached_input: Ввод из кеша
+usage.observed_input_share: "%{share} зарегистрированного ввода"
+usage.uncached_input: Ввод без кеша
+usage.cache_writes: "Записей в кеш: %{count}"
+usage.output: Вывод
+usage.includes_reasoning: "в том числе на рассуждения: %{count}"
+usage.cache_savings: Экономия за счёт кеша
+usage.raw_cost_multiple: "Отношение к стоимости токенов: %{multiple}×"
+usage.vs_full_input_rates: по сравнению с полным тарифом на ввод
+usage.model: Модель
+usage.cost: Стоимость
+usage.share: Доля
+usage.tokens: Токены
+usage.day: День
+usage.cost_quality: Источник стоимости
+usage.provider_reported: Сообщена провайдером
+usage.model_priced: Рассчитана по тарифу модели
+usage.unpriced: Не рассчитана
+usage.no_activity_12_months: Нет активности за последние 12 месяцев
+usage.last_12_months: Последние 12 месяцев
+usage.so_far: на данный момент
+usage.no_activity: Нет активности
+usage.models_by_spend: "%{models} · по расходам"
+usage.tokens_and_sessions: "Токенов: %{tokens} · %{sessions}"
+usage.month_caption: "Токенов: %{tokens} · %{sessions} · %{days}"
+usage.last_7_days: Последние 7 дней
+usage.last_30_days: Последние 30 дней
+usage.last_90_days: Последние 90 дней
+usage.this_month: Этот месяц
+usage.last_month: Прошлый месяц
+usage.custom: Свой период
+usage.project_one: "Проектов: %{count}"
+usage.project_many: "Проектов: %{count}"
+usage.session_one: "Сессий: %{count}"
+usage.session_many: "Сессий: %{count}"
+usage.model_one: "Моделей: %{count}"
+usage.model_many: "Моделей: %{count}"
+usage.active_day_one: "Активных дней: %{count}"
+usage.active_day_many: "Активных дней: %{count}"
+usage.filter_projects: Фильтр проектов…
+usage.chart_description: "%{metric} по дням для Claude Code и Codex."
+usage.refresh_failed: "Не удалось обновить статистику использования: %{error}"
+usage.context_used: "Контекст занят на %{percent}% (%{shortcut})"
+usage.shortcut: "Использование (%{shortcut})"
+usage.context_window: Контекстное окно
+usage.plan_limits: Лимиты тарифа
+usage.plan_limits_named: "Лимиты тарифа · %{plan}"
+usage.open_account_settings: Открыть настройки использования аккаунта
+usage.unavailable: "Недоступно — %{error}"
+usage.usage_limit: Лимит использования
+usage.hour_limit: "Лимит за %{count} ч"
+usage.day_limit: "Лимит за %{count} дн"
+usage.weekly_limit: Недельный лимит
+usage.daily_limit: Дневной лимит
+usage.monthly_limit: Месячный лимит
+usage.limit_suffix: " — лимит"
+usage.scoped_limit: "%{period} · %{name}"
+usage.weekly_all_models: За неделю · все модели
+usage.weekly_model: "За неделю · %{model}"
+usage.resets_soon: Скоро обновится
+usage.resets_in_minutes: "Обновится через %{count} мин"
+usage.resets_in_hours: "Обновится через %{count} ч"
+usage.resets_in_hours_minutes: "Обновится через %{hours} ч %{minutes} мин"
+usage.resets_date: "Обновится %{date}"
+usage_error.signin_cannot_read: "Не удалось получить статистику через аккаунт %{provider} (HTTP %{status}). Выполните шаг с %{provider}, чтобы обновить авторизацию"
+usage_error.rate_limited: Сервис статистики временно ограничивает частоту запросов
+usage_error.http_status: "Сервис статистики вернул HTTP %{status}"
+usage_error.invalid_json: Сервис статистики вернул некорректный JSON
+usage_error.no_home_directory: Нет домашней папки
+usage_error.read_file: "Не удалось прочитать %{path}"
+usage_error.codex_auth_invalid: auth.json Codex не содержит корректный JSON
+usage_error.codex_access_token_missing: "В auth.json Codex нет токена доступа. Выполните `codex login`"
+usage_error.opencode_go_key_rejected: "Ключ API OpenCode Go не позволяет получить статистику (HTTP %{status}). Подключите OpenCode Go заново"
+usage_error.opencode_go_not_entitled: Для статистики OpenCode Go нужна активная подписка OpenCode Go
+usage_error.no_rate_limit_windows: Сервис статистики не сообщил о периодах лимитов
+usage_error.start_grok_probe: "Не удалось запустить `grok agent stdio`"
+usage_error.grok_stdin_unavailable: Стандартный ввод Grok недоступен
+usage_error.grok_stdout_unavailable: Стандартный вывод Grok недоступен
+usage_error.start_grok_reader: Не удалось запустить чтение диагностических данных Grok
+usage_error.grok_billing_timeout: Grok не ответил на запрос о расходах вовремя
+usage_error.grok_answered: "Grok ответил: %{error}"
+usage_error.grok_no_billing_data: "Grok не сообщил данные о расходах. Выполните `grok`, чтобы войти в аккаунт"
+usage_error.claude_credentials_missing: Нет данных авторизации Claude Code в Связке ключей или ~/.claude
+usage_error.run_security: Не удалось запустить /usr/bin/security
+usage_error.keychain_item_missing: "В Связке ключей нет записи %{service}"
+usage_error.claude_credentials_invalid: Данные авторизации Claude Code не содержат корректный JSON
+usage_error.claude_oauth_missing: В данных авторизации Claude Code нет записи claudeAiOauth
+usage_error.claude_access_token_missing: В данных авторизации Claude Code нет токена доступа
+usage_error.run_curl: Не удалось запустить /usr/bin/curl
+usage_error.curl_stdin_unavailable: Стандартный ввод curl недоступен
+usage_error.configure_curl: Не удалось передать настройки в curl
+usage_error.curl_did_not_finish: curl не завершился
+usage_error.curl_failed: "Ошибка curl: %{error}"
+usage_error.unknown_error: неизвестная ошибка
+usage_error.curl_no_status: curl не вернул строку статуса HTTP

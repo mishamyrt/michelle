@@ -150,7 +150,7 @@ settings.computer_use:
 settings.general_keywords:
   en: general local projects conversations privacy math latex formula expression
 settings.appearance_keywords:
-  en: appearance theme system light dark language english chinese simplified font size text editor
+  en: appearance theme system light dark language english russian font size text editor
 settings.providers_keywords:
   en: providers agents models cli version install detect claude codex cursor opencode opencode2 amp grok pi
 settings.skills:
@@ -602,10 +602,6 @@ time.yesterday_at:
   en: Yesterday %{time}
 time.weekday_at:
   en: "%{weekday} %{time}"
-time.date_at:
-  en: "%{month}/%{day}, %{time}"
-time.full_date_at:
-  en: "%{year}/%{month}/%{day}, %{time}"
 time.monday:
   en: Monday
 time.tuesday:
@@ -620,6 +616,30 @@ time.saturday:
   en: Saturday
 time.sunday:
   en: Sunday
+time.month_1:
+  en: January
+time.month_2:
+  en: February
+time.month_3:
+  en: March
+time.month_4:
+  en: April
+time.month_5:
+  en: May
+time.month_6:
+  en: June
+time.month_7:
+  en: July
+time.month_8:
+  en: August
+time.month_9:
+  en: September
+time.month_10:
+  en: October
+time.month_11:
+  en: November
+time.month_12:
+  en: December
 
 activity.count:
   en: "%{count} %{activity}"

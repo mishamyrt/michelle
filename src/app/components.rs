@@ -54,10 +54,10 @@ pub(super) fn working_wave_dots(color: Hsla) -> AnyElement {
 }
 
 pub(super) fn format_message_time(created_at: u64) -> String {
-    format_message_time_at(created_at, Local::now())
+    format_message_time_at(created_at, Local::now(), &rust_i18n::locale())
 }
 
-fn format_message_time_at(created_at: u64, now: DateTime<Local>) -> String {
+fn format_message_time_at(created_at: u64, now: DateTime<Local>, locale: &str) -> String {
     let Ok(seconds) = i64::try_from(created_at) else {
         return String::new();
     };
@@ -66,44 +66,38 @@ fn format_message_time_at(created_at: u64, now: DateTime<Local>) -> String {
             let timestamp = timestamp.with_timezone(&Local);
             let message_date = timestamp.date_naive();
             let today = now.date_naive();
-            if crate::i18n::uses_east_asian_date_format() {
+            if locale == "ru" {
                 let time = timestamp.format("%H:%M").to_string();
                 if message_date >= today {
                     return time;
                 }
                 if today.pred_opt() == Some(message_date) {
-                    return tr!("time.yesterday_at", time = time);
+                    return tr!("time.yesterday_at", locale = locale, time = time);
                 }
                 let week_start = today
                     .checked_sub_days(Days::new(today.weekday().num_days_from_monday().into()))
                     .unwrap_or(today);
                 if message_date >= week_start {
                     let weekday = match timestamp.weekday() {
-                        chrono::Weekday::Mon => tr!("time.monday"),
-                        chrono::Weekday::Tue => tr!("time.tuesday"),
-                        chrono::Weekday::Wed => tr!("time.wednesday"),
-                        chrono::Weekday::Thu => tr!("time.thursday"),
-                        chrono::Weekday::Fri => tr!("time.friday"),
-                        chrono::Weekday::Sat => tr!("time.saturday"),
-                        chrono::Weekday::Sun => tr!("time.sunday"),
+                        chrono::Weekday::Mon => tr!("time.monday", locale = locale),
+                        chrono::Weekday::Tue => tr!("time.tuesday", locale = locale),
+                        chrono::Weekday::Wed => tr!("time.wednesday", locale = locale),
+                        chrono::Weekday::Thu => tr!("time.thursday", locale = locale),
+                        chrono::Weekday::Fri => tr!("time.friday", locale = locale),
+                        chrono::Weekday::Sat => tr!("time.saturday", locale = locale),
+                        chrono::Weekday::Sun => tr!("time.sunday", locale = locale),
                     };
-                    return tr!("time.weekday_at", weekday = weekday, time = time);
-                }
-                if message_date.year() == today.year() {
                     return tr!(
-                        "time.date_at",
-                        month = timestamp.month(),
-                        day = timestamp.day(),
+                        "time.weekday_at",
+                        locale = locale,
+                        weekday = weekday,
                         time = time
                     );
                 }
-                return tr!(
-                    "time.full_date_at",
-                    year = timestamp.year(),
-                    month = timestamp.month(),
-                    day = timestamp.day(),
-                    time = time
-                );
+                if message_date.year() == today.year() {
+                    return timestamp.format("%d.%m, %H:%M").to_string();
+                }
+                return timestamp.format("%d.%m.%Y, %H:%M").to_string();
             }
             let time = timestamp
                 .format("%I:%M %p")
@@ -116,7 +110,7 @@ fn format_message_time_at(created_at: u64, now: DateTime<Local>) -> String {
             }
 
             if today.pred_opt() == Some(message_date) {
-                return tr!("time.yesterday_at", time = time);
+                return tr!("time.yesterday_at", locale = locale, time = time);
             }
 
             let week_start = today
@@ -1593,23 +1587,23 @@ mod message_time_tests {
         let now = local_datetime(2026, 8, 9, 16, 0); // Sunday
 
         assert_eq!(
-            format_message_time_at(unix_seconds(local_datetime(2026, 8, 9, 9, 5)), now),
+            format_message_time_at(unix_seconds(local_datetime(2026, 8, 9, 9, 5)), now, "en"),
             "9:05 AM"
         );
         assert_eq!(
-            format_message_time_at(unix_seconds(local_datetime(2026, 8, 8, 17, 0)), now),
+            format_message_time_at(unix_seconds(local_datetime(2026, 8, 8, 17, 0)), now, "en"),
             "Yesterday 5:00 PM"
         );
         assert_eq!(
-            format_message_time_at(unix_seconds(local_datetime(2026, 8, 7, 13, 12)), now),
+            format_message_time_at(unix_seconds(local_datetime(2026, 8, 7, 13, 12)), now, "en"),
             "Friday 1:12 PM"
         );
         assert_eq!(
-            format_message_time_at(unix_seconds(local_datetime(2026, 5, 12, 23, 0)), now),
+            format_message_time_at(unix_seconds(local_datetime(2026, 5, 12, 23, 0)), now, "en"),
             "May 12th, 11:00 PM"
         );
         assert_eq!(
-            format_message_time_at(unix_seconds(local_datetime(2024, 8, 4, 11, 0)), now),
+            format_message_time_at(unix_seconds(local_datetime(2024, 8, 4, 11, 0)), now, "en"),
             "Aug 4th 2024, 11:00 AM"
         );
     }
@@ -1628,8 +1622,25 @@ mod message_time_tests {
             (21, "st"),
         ] {
             let formatted =
-                format_message_time_at(unix_seconds(local_datetime(2026, 5, day, 9, 0)), now);
+                format_message_time_at(unix_seconds(local_datetime(2026, 5, day, 9, 0)), now, "en");
             assert!(formatted.starts_with(&format!("May {day}{suffix},")));
+        }
+    }
+
+    #[test]
+    fn russian_message_times_use_localized_dates_and_a_24_hour_clock() {
+        let now = local_datetime(2026, 8, 9, 16, 0);
+        for (date, expected) in [
+            (local_datetime(2026, 8, 9, 9, 5), "09:05"),
+            (local_datetime(2026, 8, 8, 17, 0), "Вчера в 17:00"),
+            (local_datetime(2026, 8, 7, 13, 12), "Пятница, 13:12"),
+            (local_datetime(2026, 5, 12, 23, 0), "12.05, 23:00"),
+            (local_datetime(2024, 8, 4, 11, 0), "04.08.2024, 11:00"),
+        ] {
+            assert_eq!(
+                format_message_time_at(unix_seconds(date), now, "ru"),
+                expected
+            );
         }
     }
 

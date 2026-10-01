@@ -7,26 +7,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AppLanguage {
+    // Removed locales fall back without invalidating the rest of the settings.
+    #[serde(alias = "simplified-chinese", alias = "japanese")]
     System,
     English,
-    SimplifiedChinese,
-    Japanese,
+    Russian,
 }
 
 impl AppLanguage {
-    pub const ALL: [Self; 4] = [
-        Self::System,
-        Self::English,
-        Self::SimplifiedChinese,
-        Self::Japanese,
-    ];
+    pub const ALL: [Self; 3] = [Self::System, Self::English, Self::Russian];
 
     pub fn locale(self) -> &'static str {
         match self.resolved() {
             Self::System => unreachable!("system language always resolves to a shipped locale"),
             Self::English => "en",
-            Self::SimplifiedChinese => "zh-CN",
-            Self::Japanese => "ja",
+            Self::Russian => "ru",
         }
     }
 
@@ -36,8 +31,7 @@ impl AppLanguage {
         match self {
             Self::System => translate("language.system"),
             Self::English => "English".to_owned(),
-            Self::SimplifiedChinese => "简体中文".to_owned(),
-            Self::Japanese => "日本語".to_owned(),
+            Self::Russian => "Русский".to_owned(),
         }
     }
 
@@ -54,10 +48,8 @@ impl AppLanguage {
 
     fn from_locale_id(locale: &str) -> Self {
         let locale = locale.replace('_', "-").to_ascii_lowercase();
-        if locale == "zh-cn" || locale == "zh-sg" || locale.starts_with("zh-hans") {
-            Self::SimplifiedChinese
-        } else if locale == "ja" || locale.starts_with("ja-") {
-            Self::Japanese
+        if locale == "ru" || locale.starts_with("ru-") {
+            Self::Russian
         } else {
             Self::English
         }
@@ -78,12 +70,8 @@ pub fn translate(key: &str) -> String {
     rust_i18n::t!(key).into_owned()
 }
 
-pub fn uses_east_asian_date_format() -> bool {
-    locale_uses_east_asian_date_format(&rust_i18n::locale())
-}
-
-fn locale_uses_east_asian_date_format(locale: &str) -> bool {
-    matches!(locale, "zh-CN" | "ja")
+pub fn is_russian() -> bool {
+    &*rust_i18n::locale() == "ru"
 }
 
 #[cfg(target_os = "macos")]
@@ -115,20 +103,17 @@ mod tests {
     #[test]
     fn language_locale_ids_are_supported() {
         assert_eq!(AppLanguage::English.locale(), "en");
-        assert_eq!(AppLanguage::SimplifiedChinese.locale(), "zh-CN");
-        assert_eq!(AppLanguage::Japanese.locale(), "ja");
+        assert_eq!(AppLanguage::Russian.locale(), "ru");
         let locales = rust_i18n::available_locales!();
-        assert_eq!(locales.len(), 3);
+        assert_eq!(locales.len(), 2);
         assert!(locales.iter().any(|locale| locale.as_ref() == "en"));
-        assert!(locales.iter().any(|locale| locale.as_ref() == "zh-CN"));
-        assert!(locales.iter().any(|locale| locale.as_ref() == "ja"));
+        assert!(locales.iter().any(|locale| locale.as_ref() == "ru"));
     }
 
     #[test]
     fn language_names_are_autonyms() {
         assert_eq!(AppLanguage::English.label(), "English");
-        assert_eq!(AppLanguage::SimplifiedChinese.label(), "简体中文");
-        assert_eq!(AppLanguage::Japanese.label(), "日本語");
+        assert_eq!(AppLanguage::Russian.label(), "Русский");
     }
 
     #[test]
@@ -138,39 +123,46 @@ mod tests {
             serde_json::to_string(&AppLanguage::System).unwrap(),
             r#""system""#
         );
-        assert!(matches!(
-            AppLanguage::System.locale(),
-            "en" | "zh-CN" | "ja"
-        ));
+        assert!(matches!(AppLanguage::System.locale(), "en" | "ru"));
     }
 
     #[test]
-    fn japanese_system_locales_are_detected() {
-        assert_eq!(AppLanguage::from_locale_id("ja"), AppLanguage::Japanese);
-        assert_eq!(AppLanguage::from_locale_id("ja_JP"), AppLanguage::Japanese);
+    fn russian_system_locales_are_detected() {
+        for locale in ["ru", "ru_RU", "ru-RU", "RU-by"] {
+            assert_eq!(AppLanguage::from_locale_id(locale), AppLanguage::Russian);
+        }
+        for locale in [
+            "en-US",
+            "zh-CN",
+            "zh-Hans-CN",
+            "zh_SG",
+            "zh-Hant-TW",
+            "ja",
+            "ja_JP",
+        ] {
+            assert_eq!(AppLanguage::from_locale_id(locale), AppLanguage::English);
+        }
     }
 
     #[test]
-    fn japanese_and_simplified_chinese_use_east_asian_dates() {
-        assert!(locale_uses_east_asian_date_format("ja"));
-        assert!(locale_uses_east_asian_date_format("zh-CN"));
-        assert!(!locale_uses_east_asian_date_format("en"));
-    }
-
-    #[test]
-    fn simplified_chinese_system_locales_are_detected_without_enabling_traditional_chinese() {
+    fn language_preferences_round_trip_and_removed_locales_fall_back_to_system() {
+        for language in AppLanguage::ALL {
+            let json = serde_json::to_string(&language).unwrap();
+            assert_eq!(
+                serde_json::from_str::<AppLanguage>(&json).unwrap(),
+                language
+            );
+        }
         assert_eq!(
-            AppLanguage::from_locale_id("zh-Hans-CN"),
-            AppLanguage::SimplifiedChinese
+            serde_json::to_string(&AppLanguage::Russian).unwrap(),
+            r#""russian""#
         );
-        assert_eq!(
-            AppLanguage::from_locale_id("zh_SG"),
-            AppLanguage::SimplifiedChinese
-        );
-        assert_eq!(
-            AppLanguage::from_locale_id("zh-Hant-TW"),
-            AppLanguage::English
-        );
+        for removed in ["simplified-chinese", "japanese"] {
+            assert_eq!(
+                serde_json::from_value::<AppLanguage>(serde_json::json!(removed)).unwrap(),
+                AppLanguage::System
+            );
+        }
     }
 
     #[test]
@@ -181,29 +173,16 @@ mod tests {
             "Expose managed daemon"
         );
         assert_eq!(
-            &*rust_i18n::t!("settings.general", locale = "zh-CN"),
-            "通用"
+            &*rust_i18n::t!("settings.general", locale = "ru"),
+            "Основные"
         );
         assert_eq!(
-            &*rust_i18n::t!(
-                "computer_use.allow_control",
-                locale = "zh-CN",
-                app = "Finder"
-            ),
-            "允许 Michelle 控制“Finder”吗？"
+            &*rust_i18n::t!("computer_use.allow_control", locale = "ru", app = "Finder"),
+            "Разрешить Michelle управлять Finder?"
         );
         assert_eq!(
-            &*rust_i18n::t!("session.rewound", locale = "zh-CN", turn = 3),
-            "已回退到第 3 轮任务之前"
-        );
-        assert_eq!(&*rust_i18n::t!("settings.general", locale = "ja"), "一般");
-        assert_eq!(
-            &*rust_i18n::t!("computer_use.allow_control", locale = "ja", app = "Finder"),
-            "Michelle に「Finder」の操作を許可しますか？"
-        );
-        assert_eq!(
-            &*rust_i18n::t!("session.rewound", locale = "ja", turn = 3),
-            "タスクをターン 3 の前まで巻き戻しました"
+            &*rust_i18n::t!("session.rewound", locale = "ru", turn = 3),
+            "Выполнен откат к началу шага 3"
         );
     }
 

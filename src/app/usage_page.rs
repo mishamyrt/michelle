@@ -2833,28 +2833,32 @@ fn usage_project_path(path: &Path, home: Option<&Path>) -> String {
     }
 }
 
-/// `2026-08-07` → `Aug 7`.
+/// `2026-08-07` → `Aug 7` or `07.08`.
 fn format_day_short(day: NaiveDate) -> String {
-    if crate::i18n::uses_east_asian_date_format() {
-        format!("{}月{}日", day.month(), day.day())
+    if crate::i18n::is_russian() {
+        day.format("%d.%m").to_string()
     } else {
         day.format("%b %-d").to_string()
     }
 }
 
-/// `2026-08-01` → `August 2026`.
+/// `2026-08-01` → `August 2026` or `Август 2026`.
 fn format_month(first_day: NaiveDate) -> String {
-    if crate::i18n::uses_east_asian_date_format() {
-        format!("{}年{}月", first_day.year(), first_day.month())
+    if crate::i18n::is_russian() {
+        format!(
+            "{} {}",
+            tr!(&format!("time.month_{}", first_day.month())),
+            first_day.year()
+        )
     } else {
         first_day.format("%B %Y").to_string()
     }
 }
 
-/// `2025-09-01` → `Sep 2025`.
+/// `2025-09-01` → `Sep 2025` or `09.2025`.
 fn format_month_short(day: NaiveDate) -> String {
-    if crate::i18n::uses_east_asian_date_format() {
-        format!("{}年{}月", day.year(), day.month())
+    if crate::i18n::is_russian() {
+        day.format("%m.%Y").to_string()
     } else {
         day.format("%b %Y").to_string()
     }

@@ -1286,6 +1286,23 @@ mod tests {
     }
 
     #[test]
+    fn removed_languages_fall_back_without_losing_other_preferences() {
+        for language in ["simplified-chinese", "japanese"] {
+            let settings: AppSettings = serde_json::from_value(serde_json::json!({
+                "language": language,
+                "theme": "dark",
+                "ui_font_size": 18.0,
+                "render_math": false
+            }))
+            .unwrap();
+            assert_eq!(settings.language, AppLanguage::System);
+            assert_eq!(settings.theme, ThemePreference::Dark);
+            assert_eq!(settings.ui_font_size, 18.0);
+            assert!(!settings.render_math);
+        }
+    }
+
+    #[test]
     fn math_rendering_defaults_on_and_persists_as_an_app_preference() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(defaults.render_math);

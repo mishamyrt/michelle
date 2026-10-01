@@ -2555,7 +2555,7 @@ mod tests {
             model: "gpt-5.6-luna".into(),
         });
         state.theme = ThemePreference::Light;
-        state.language = AppLanguage::SimplifiedChinese;
+        state.language = AppLanguage::Russian;
         state.sidebar_visible = false;
         state.right_panel_visible = false;
         state.sidebar_width = 318.0;
@@ -2616,7 +2616,7 @@ mod tests {
         );
         assert_eq!(restored.favorite_models, state.favorite_models);
         assert_eq!(restored.theme, ThemePreference::Light);
-        assert_eq!(restored.language, AppLanguage::SimplifiedChinese);
+        assert_eq!(restored.language, AppLanguage::Russian);
         assert!(!restored.sidebar_visible);
         assert!(!restored.right_panel_visible);
         assert_eq!(restored.sidebar_width, 318.0);
@@ -2774,7 +2774,7 @@ mod tests {
         let store = store_in(&directory);
         let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
         state.theme = ThemePreference::Light;
-        state.language = AppLanguage::SimplifiedChinese;
+        state.language = AppLanguage::Russian;
         state.sidebar_width = 301.0;
         store.save(&mut state).unwrap();
 
@@ -2786,7 +2786,7 @@ mod tests {
         );
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(value["theme"], "light");
-        assert_eq!(value["language"], "simplified-chinese");
+        assert_eq!(value["language"], "russian");
         for daemon_key in [
             "computer_use_enabled",
             "computer_use_allowed_apps",
@@ -2840,7 +2840,7 @@ mod tests {
         }
 
         // A hand edit is picked up on the next load.
-        let edited = text.replace("simplified-chinese", "english");
+        let edited = text.replace("russian", "english");
         fs::write(&settings, edited).unwrap();
         let restored = store_in(&directory).load().unwrap();
         assert_eq!(restored.language, AppLanguage::English);
