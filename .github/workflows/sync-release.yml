@@ -68,19 +68,8 @@ jobs:
           export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           destination="r2:${bucket}"
           immutable="Cache-Control: public, max-age=31536000, immutable"
-          fresh="Cache-Control: public, max-age=300, must-revalidate"
 
           rclone copy assets "$destination" \
             --s3-no-check-bucket \
-            --exclude appcast.xml \
             --header-upload "$immutable" \
             --progress
-
-          for pointer in appcast.xml; do
-            if [ -f "assets/$pointer" ]; then
-              rclone copyto "assets/$pointer" "${destination}/${pointer}" \
-                --s3-no-check-bucket \
-                --header-upload "$fresh" \
-                --progress
-            fi
-          done

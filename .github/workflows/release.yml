@@ -127,7 +127,6 @@ jobs:
       - name: Release
         env:
           MICHELLE_SIGNING_IDENTITY: ${{ secrets.MICHELLE_SIGNING_IDENTITY }}
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: bun run release --local
 
       - uses: actions/upload-artifact@v7
@@ -137,7 +136,6 @@ jobs:
             dist/Michelle-${{ needs.version.outputs.version }}.dmg
             dist/Michelle-${{ needs.version.outputs.version }}.md
             dist/Michelle-${{ needs.version.outputs.version }}.zip
-            dist/appcast.xml
           if-no-files-found: error
 
   draft-release:
@@ -189,4 +187,3 @@ jobs:
             artifacts/*.dmg
             artifacts/*.md
             artifacts/*.zip
-            artifacts/appcast.xml

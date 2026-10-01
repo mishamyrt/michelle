@@ -1,7 +1,6 @@
 _version: 1
 
 menu.about: 关于 %{app}
-menu.check_for_updates: 检查更新…
 menu.settings: 设置…
 menu.quit: 退出 %{app}
 menu.file: 文件
@@ -27,10 +26,6 @@ menu.close_window: 关闭窗口
 window.minimize: 最小化
 window.maximize: 最大化
 window.restore: 还原
-updater.update: 更新
-updater.updating: 正在更新…
-updater.up_to_date: Michelle 已是最新版本
-updater.failed: "更新失败：%{error}"
 command_palette.placeholder: 搜索任务或运行命令…
 command_palette.resume_placeholder: 搜索终端会话…
 command_palette.resume_provider_placeholder: 选择服务商…
@@ -77,7 +72,7 @@ settings.providers: 服务商
 settings.usage: 用量
 settings.daemon: 守护进程
 settings.computer_use: 电脑操作
-settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 数学 公式 表达式 math latex
+settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 数学 公式 表达式 math latex
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 大小 编辑器
 settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode opencode2 amp grok pi
 settings.skills: 技能
@@ -183,8 +178,6 @@ common.creating: 正在创建…
 settings.local_by_default: 默认存储在本地
 settings.local_by_default_description: 项目、对话和设置均存储在这台电脑上
 settings.local_by_default_web_description: 项目、对话和附件保留在所连接的守护进程主机上。Michelle Web 的偏好设置保留在此浏览器中。
-settings.automatic_updates: 自动更新
-settings.automatic_updates_description: 在后台检查新版本，并在发现更新时提示安装
 providers.coding_agents: 编程智能体
 providers.description: Michelle 调用安装在这台电脑上的智能体命令行工具。请先安装相应工具或完成登录，然后刷新
 providers.web_description: Michelle 调用安装在守护进程主机上的智能体命令行工具。请先安装相应工具或完成登录，然后刷新

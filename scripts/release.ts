@@ -11,7 +11,6 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { defaultDownloadUrlPrefix, generateAppcast } from "./appcast";
 import { extractReleaseNotes } from "./changelog";
 
 const appName = "Michelle";
@@ -28,10 +27,10 @@ const help = `Build, notarize, and publish a production release of Michelle.
 Usage:
   bun run release [options]
 
-The default run builds a signed, notarized DMG, packages the Sparkle update
-archive, regenerates the signed appcast, and uploads everything to Cloudflare
-R2. Set MICHELLE_DOWNLOAD_URL_PREFIX to the bucket's public URL when publishing
-to R2. The GitHub release workflow uses --local and publishes the files itself.
+The default run builds a signed, notarized DMG and zip archive, then uploads
+them with release notes to Cloudflare R2. Set MICHELLE_DOWNLOAD_URL_PREFIX to
+the bucket's public URL when publishing to R2. The GitHub release workflow uses
+--local and publishes the files itself.
 
 Options:
   --local                       Build, notarize, and write the DMG + zip
@@ -57,16 +56,10 @@ Environment:
   MICHELLE_R2_REMOTE                rclone remote name (default: r2)
   MICHELLE_R2_BUCKET                R2 bucket name (default: michelle-releases)
   MICHELLE_DOWNLOAD_URL_PREFIX      base URL served by the bucket
-                                (default: ${defaultDownloadUrlPrefix})
-  MICHELLE_HISTORY_COUNT            prior archives pulled for deltas (default: 15)
-  MICHELLE_NO_HISTORY=1             skip pulling prior archives (no deltas)
-  SPARKLE_BIN                   Sparkle tools dir (default: the bundle.sh cache
-                                under .michelle-cache/sparkle)
-  SPARKLE_PRIVATE_KEY           Sparkle EdDSA private key (otherwise keychain)
+                                (default: this version's GitHub release URL)
 
 Before the first production release:
   xcrun notarytool store-credentials NOTARY   # notarization credentials
-  See RELEASING.md for the R2 bucket, rclone remote, and Sparkle key setup.
 `;
 
 const { values } = parseArgs({
@@ -113,11 +106,7 @@ type CargoMetadata = {
   }>;
 };
 
-/** CFBundleVersion derived from the Cargo version. Sparkle decides which of
- *  two builds is newer by comparing this value, so it must grow with every
- *  release: three digits per semver field keep 0.2.0 → 2000 ahead of
- *  0.1.9 → 1009, and every release ahead of the pre-Sparkle DMGs that
- *  shipped CFBundleVersion 1. */
+/** Derive a monotonic CFBundleVersion from the Cargo version. */
 function derivedBuildNumber(version: string): string {
   const match = version.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:-|$)/);
   const major = Number(match?.[1]);
@@ -154,10 +143,6 @@ const r2Destination = `${r2Remote}:${r2Bucket}`;
 // A bucket-scoped R2 API token cannot create buckets, and rclone otherwise
 // checks/creates one before writing. The bucket must already exist.
 const rcloneFlags = ["--s3-no-check-bucket"];
-const downloadUrlPrefix =
-  process.env.MICHELLE_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix;
-const historyCount = Number(process.env.MICHELLE_HISTORY_COUNT ?? "15");
-const skipHistory = process.env.MICHELLE_NO_HISTORY === "1";
 
 if (adhoc && values["signing-identity"]) {
   throw new Error("Use either --adhoc or --signing-identity, not both.");
@@ -171,9 +156,6 @@ if (explicitBuildNumber && !/^\d+(?:\.\d+){0,2}$/.test(explicitBuildNumber)) {
   throw new Error(
     "--build-number must contain one to three period-separated integers.",
   );
-}
-if (!Number.isSafeInteger(historyCount) || historyCount < 0) {
-  throw new Error("MICHELLE_HISTORY_COUNT must be a non-negative integer.");
 }
 
 for (const tool of [
@@ -208,16 +190,13 @@ if (!cargoPackage) {
 }
 
 const version = cargoPackage.version;
+const downloadUrlPrefix =
+  process.env.MICHELLE_DOWNLOAD_URL_PREFIX ??
+  `https://github.com/mishamyrt/michelle/releases/download/v${version}/`;
 const shortVersion = version.split("-", 1)[0];
 const buildNumber = explicitBuildNumber ?? derivedBuildNumber(version);
 const dmgName = `${appName}-${version}.dmg`;
 const zipName = `${appName}-${version}.zip`;
-if (publishing && version !== shortVersion) {
-  throw new Error(
-    `Version ${version} is a prerelease, and the appcast serves a single ` +
-      "stable channel. Release a stable version, or build with --local.",
-  );
-}
 if (!publishing) {
   const reason = localOnly ? "--local" : adhoc ? "--adhoc" : "--skip-notarize";
   console.log(`Building without publishing (${reason}).`);
@@ -295,11 +274,6 @@ const bundledComputerUseHelper = join(
   contentsDirectory,
   "Helpers",
   `${computerUseHelperName}.app`,
-);
-const bundledSparkleFramework = join(
-  contentsDirectory,
-  "Frameworks",
-  "Sparkle.framework",
 );
 
 async function verifyJavaScriptRepl(executable: string): Promise<void> {
@@ -410,7 +384,6 @@ try {
     bundledComputerUseSkill,
     bundledPiComputerUseExtension,
     bundledComputerUseHelper,
-    join(bundledSparkleFramework, "Sparkle"),
   ]) {
     await access(artifact);
   }
@@ -428,9 +401,6 @@ try {
       : `Signing the final app bundle as ${identity}`,
   );
   if (adhoc) {
-    // No hardened runtime here: an ad-hoc identity carries no Team ID, so
-    // library validation would refuse the embedded Sparkle framework and the
-    // updater could never be exercised from an ad-hoc build.
     await $`codesign --force --sign - ${appBundle}`;
   } else {
     await $`codesign --force --options runtime --timestamp --sign ${identity} ${appBundle}`;
@@ -441,9 +411,6 @@ try {
   const stagingDirectory = join(temporaryDirectory, "root");
   mountDirectory = join(temporaryDirectory, "mount");
   await mkdir(stagingDirectory);
-  // ditto, not fs.cp: fs.cp rewrites the Sparkle framework's relative
-  // symlinks into absolute paths under target/, which breaks the framework
-  // on any other machine and fails the deep verify below.
   await $`ditto ${appBundle} ${join(stagingDirectory, `${appName}.app`)}`;
   await mkdir(dirname(outputPath), { recursive: true });
   await rm(outputPath, { force: true });
@@ -480,11 +447,6 @@ try {
     "Helpers",
     `${computerUseHelperName}.app`,
   );
-  const mountedSparkleFramework = join(
-    mountedContents,
-    "Frameworks",
-    "Sparkle.framework",
-  );
   for (const artifact of [
     join(mountedContents, "MacOS", executableName),
     mountedDaemon,
@@ -503,7 +465,6 @@ try {
       "pi-extension.ts",
     ),
     mountedComputerUseHelper,
-    join(mountedSparkleFramework, "Sparkle"),
   ]) {
     await access(artifact);
   }
@@ -519,7 +480,6 @@ try {
   await $`codesign --verify --strict --verbose=2 ${mountedJsRepl}`;
   await $`codesign --verify --strict --verbose=2 ${mountedDaemon}`;
   await $`codesign --verify --deep --strict --verbose=2 ${mountedComputerUseHelper}`;
-  await $`codesign --verify --strict --verbose=2 ${mountedSparkleFramework}`;
   await $`codesign --verify --deep --strict --verbose=2 ${mountedApp}`;
   await verifyJavaScriptRepl(mountedJsRepl);
   await $`diskutil eject ${mountDirectory}`;
@@ -548,9 +508,8 @@ try {
     await $`xcrun stapler staple -v ${outputPath}`;
     await $`xcrun stapler validate -v ${outputPath}`;
     await $`spctl --assess --type open --context context:primary-signature --verbose=2 ${outputPath}`;
-    // Notarizing the DMG also notarized the app's code, so the same
-    // submission staples the app for the Sparkle archive.
-    logStep("Stapling the app for the update archive");
+    // The same notarization submission covers the app in the zip archive.
+    logStep("Stapling the app for the zip archive");
     await $`xcrun stapler staple -v ${appBundle}`;
   } else if (adhoc) {
     console.warn(
@@ -568,71 +527,12 @@ try {
   logStep(`Packaging ${zipName}`);
   await $`ditto -c -k --keepParent ${appBundle} ${zipPath}`;
 
-  // A clean staging directory holds this release plus, when publishing, the
-  // recent history generate_appcast needs to build binary deltas.
-  const updatesDirectory = join(projectRoot, "dist", "updates");
-  await rm(updatesDirectory, { force: true, recursive: true });
-  await mkdir(updatesDirectory, { recursive: true });
-
-  if (publishing && !skipHistory) {
-    logStep(
-      `Selecting the ${historyCount} most recent archives from R2 (for deltas)`,
-    );
-    type RemoteFile = { Name: string; IsDir: boolean };
-    const remoteFiles = JSON.parse(
-      await $`rclone lsjson ${r2Destination} ${rcloneFlags} --files-only --include ${"*.zip"} --include ${"appcast.xml"}`
-        .quiet()
-        .text(),
-    ) as RemoteFile[];
-    const archivePattern = new RegExp(`^${appName}-.+\\.zip$`);
-    const archiveVersion = (name: string) =>
-      name.slice(appName.length + 1, -".zip".length);
-    const versionOrder = new Intl.Collator("en", { numeric: true });
-    const recentArchives = remoteFiles
-      .filter(
-        ({ Name, IsDir }) =>
-          !IsDir && archivePattern.test(Name) && Name !== zipName,
-      )
-      .sort((a, b) =>
-        versionOrder.compare(archiveVersion(b.Name), archiveVersion(a.Name)),
-      )
-      .slice(0, historyCount)
-      .map(({ Name }) => Name);
-    const historyFiles = [
-      ...(remoteFiles.some(({ Name }) => Name === "appcast.xml")
-        ? ["appcast.xml"]
-        : []),
-      ...recentArchives,
-    ];
-    if (historyFiles.length > 0) {
-      const includeFlags = historyFiles.flatMap((name) => [
-        "--include",
-        `/${name}`,
-      ]);
-      await $`rclone copy ${r2Destination} ${updatesDirectory} ${rcloneFlags} ${includeFlags}`;
-    }
-    console.log(
-      recentArchives.length > 0
-        ? `Pulled ${recentArchives.join(", ")}`
-        : "No prior archives found.",
-    );
-  }
-
-  await $`ditto ${zipPath} ${join(updatesDirectory, zipName)}`;
-
-  // Release notes: this version's CHANGELOG.md section ships next to the
-  // archive as Michelle-<version>.md; generate_appcast links it as the update's
-  // release notes, which Sparkle renders in the prompt.
   const changelogFile = Bun.file(join(projectRoot, "CHANGELOG.md"));
   const notes = (await changelogFile.exists())
     ? extractReleaseNotes(await changelogFile.text(), version)
     : null;
   const notesName = `${appName}-${version}.md`;
   const notesContents = `${notes ?? "See CHANGELOG.md for details."}\n`;
-  await Bun.write(join(updatesDirectory, notesName), notesContents);
-  // The tag workflow publishes files from dist/ as GitHub release assets;
-  // sync-release then mirrors those assets to R2. Keep the notes beside the
-  // appcast there as well so Sparkle's release-notes URL cannot 404.
   await Bun.write(join(projectRoot, "dist", notesName), notesContents);
   console.log(
     notes
@@ -640,27 +540,18 @@ try {
       : `No "${version}" section in CHANGELOG.md — attached fallback notes.`,
   );
 
-  logStep("Generating the signed appcast");
-  await generateAppcast(updatesDirectory, downloadUrlPrefix);
-  await $`ditto ${join(updatesDirectory, "appcast.xml")} ${join(projectRoot, "dist", "appcast.xml")}`;
-
   if (publishing) {
-    // Archives and the DMG are immutable once published → cache forever.
-    // appcast.xml changes every release → keep it fresh so update checks are
-    // never served stale.
     const immutableCache =
       "Cache-Control: public, max-age=31536000, immutable";
     logStep(`Uploading ${dmgName} to ${r2Destination}`);
     await $`rclone copyto ${outputPath} ${`${r2Destination}/${dmgName}`} ${rcloneFlags} --header-upload ${immutableCache} --progress`;
-    logStep(`Uploading update archives to ${r2Destination}`);
-    await $`rclone copy ${updatesDirectory} ${r2Destination} ${rcloneFlags} --exclude ${"appcast.xml"} --exclude ${"old_updates/**"} --header-upload ${immutableCache} --progress`;
-    logStep("Uploading appcast.xml");
-    await $`rclone copyto ${join(updatesDirectory, "appcast.xml")} ${`${r2Destination}/appcast.xml`} ${rcloneFlags} --header-upload ${"Cache-Control: public, max-age=300, must-revalidate"}`;
+    logStep(`Uploading ${zipName} and release notes to ${r2Destination}`);
+    await $`rclone copyto ${zipPath} ${`${r2Destination}/${zipName}`} ${rcloneFlags} --header-upload ${immutableCache} --progress`;
+    await $`rclone copyto ${join(projectRoot, "dist", notesName)} ${`${r2Destination}/${notesName}`} ${rcloneFlags} --header-upload ${immutableCache} --progress`;
 
     console.log(`\nMichelle ${version} (build ${buildNumber}) is live:`);
     console.log(`  download : ${downloadUrlPrefix}${dmgName}`);
-    console.log(`  update   : ${downloadUrlPrefix}${zipName}`);
-    console.log(`  feed     : ${downloadUrlPrefix}appcast.xml`);
+    console.log(`  archive  : ${downloadUrlPrefix}${zipName}`);
   }
 
   console.log(`\nDMG ready: ${outputPath}`);

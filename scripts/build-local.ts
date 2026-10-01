@@ -21,7 +21,6 @@ await $`env MICHELLE_CODESIGN_IDENTITY=- sh scripts/bundle.sh release`;
 const app = resolve(process.env.CARGO_TARGET_DIR ?? "target", "release/Michelle.app");
 const contents = `${app}/Contents`;
 const helper = `${contents}/Helpers/Michelle Computer Use.app`;
-const sparkle = `${contents}/Frameworks/Sparkle.framework`;
 const repl = `${contents}/Resources/michelle_js_repl`;
 const daemon = `${contents}/MacOS/michelle-daemon`;
 const { package: { version } } = Bun.TOML.parse(await Bun.file("Cargo.toml").text()) as { package: { version: string } };
@@ -33,13 +32,10 @@ const fingerprint = Bun.file(`${helper}/Contents/Resources/.michelle-helper-fing
 await Bun.write(fingerprint, `${(await fingerprint.text()).trim()}\n${certificate}\n`);
 
 // Sign inside out. A self-signed certificate has no Team ID, so hardened
-// runtime library validation would reject the embedded Sparkle/Cua libraries.
+// runtime library validation would reject the embedded Cua library.
 for (const code of [
   `${helper}/Contents/Frameworks/libcua_driver_sdk.dylib`,
   helper,
-  `${sparkle}/Versions/B/Autoupdate`,
-  `${sparkle}/Versions/B/Updater.app`,
-  sparkle,
   repl,
   daemon,
   app,

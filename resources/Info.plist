@@ -24,13 +24,6 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
-    <!-- Sparkle reads the appcast asset from the latest GitHub release.
-         The private half of SUPublicEDKey signs each archive during
-         `bun run release`. -->
-    <key>SUFeedURL</key>
-    <string>https://github.com/mishamyrt/michelle/releases/latest/download/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>gv9GLMPjH5yMQkZMFXnoNfHOyL8/7KGzl/jzAqlzZZY=</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>
