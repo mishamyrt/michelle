@@ -2804,7 +2804,12 @@ impl Michelle {
                         .gap(px(4.0))
                         .text_size(sp(12.5))
                         .line_height(sp(14.0))
-                        .child(self.render_provider_model_control(cx))
+                        .child(
+                            div()
+                                .relative()
+                                .top(px(0.0))
+                                .child(self.render_provider_model_control(cx)),
+                        )
                         .children(self.render_model_traits_control(cx))
                         .children(self.render_agent_preset_control(cx))
                         .child(self.render_access_control(cx))
