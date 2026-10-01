@@ -423,6 +423,54 @@ pub(super) enum SidebarRow {
     GroupSpacer,
 }
 
+fn sidebar_working_headers(
+    state: &PersistedState,
+    today: NaiveDate,
+    projectless_root: Option<&Path>,
+) -> HashSet<SidebarRow> {
+    let projectless_projects = state
+        .projects
+        .iter()
+        .filter(|project| sidebar_project_is_projectless(project, projectless_root))
+        .map(|project| project.id)
+        .collect::<HashSet<_>>();
+    let mut collections = HashMap::new();
+    for collection in &state.sidebar_project_groups {
+        for project in &collection.projects {
+            collections.entry(*project).or_insert(collection.id);
+        }
+    }
+    let mut headers = HashSet::new();
+    for session in state.sessions.iter().filter(|session| {
+        session.has_started()
+            && matches!(
+                session.status,
+                SessionStatus::Connecting | SessionStatus::Working
+            )
+    }) {
+        let group = match state.sidebar_grouping {
+            SidebarGrouping::Updated => SidebarGroup::Updated(session_date_group(
+                sidebar_session_timestamp(session),
+                today,
+            )),
+            SidebarGrouping::Project => {
+                let projectless = projectless_projects.contains(&session.project_id);
+                let collection = (!projectless)
+                    .then(|| collections.get(&session.project_id).copied())
+                    .flatten();
+                headers.insert(SidebarRow::Collection(collection));
+                if projectless {
+                    SidebarGroup::Projectless
+                } else {
+                    SidebarGroup::Project(session.project_id)
+                }
+            }
+        };
+        headers.insert(SidebarRow::Header(group));
+    }
+    headers
+}
+
 fn append_sidebar_project_collections(
     rows: &mut Vec<SidebarRow>,
     sections: Vec<Vec<SidebarRow>>,
@@ -1456,7 +1504,7 @@ impl Michelle {
     /// tick for values that move at most once per stream commit. The
     /// fingerprint is an allocation-free scan of exactly what
     /// [`Self::sidebar_rows`] reads: started sessions with their project and
-    /// recency, the presentation preferences, the collapsed-group set, and
+    /// recency and activity, the presentation preferences, the collapsed-group set, and
     /// today's date and the moving project-recency boundary.
     fn sidebar_rows_cached(&self, today: NaiveDate, now: u64) -> Rc<Vec<SidebarRow>> {
         let mut fingerprint = mix(0x51de_ba5e_5eed_c0de, today.num_days_from_ce() as u64);
@@ -1481,6 +1529,13 @@ impl Michelle {
             }
             fingerprint = mix_uuid(fingerprint, session.id);
             fingerprint = mix_uuid(fingerprint, session.project_id);
+            fingerprint = mix(
+                fingerprint,
+                u64::from(matches!(
+                    session.status,
+                    SessionStatus::Connecting | SessionStatus::Working
+                )),
+            );
             if self.state.sidebar_ordering == SidebarOrdering::Manual {
                 fingerprint = mix(fingerprint, session.created_at);
             }
@@ -1542,6 +1597,11 @@ impl Michelle {
         );
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
             *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(self.sidebar_rows(today, now));
+            *self.sidebar_working_headers.borrow_mut() = sidebar_working_headers(
+                &self.state,
+                today,
+                crate::projectless::workspace_root().as_deref(),
+            );
             self.sidebar_rows_fingerprint.set(Some(fingerprint));
         }
         self.sidebar_rows_snapshot.borrow().clone()
@@ -1789,6 +1849,11 @@ impl Michelle {
     ) -> Div {
         let theme = Theme::current(cx);
         let collapsed = self.sidebar_collapsed_groups.contains(&group);
+        let working = collapsed
+            && self
+                .sidebar_working_headers
+                .borrow()
+                .contains(&SidebarRow::Header(group));
         let group_key = group.element_key();
         let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
         let header_focus = self
@@ -1924,6 +1989,19 @@ impl Michelle {
                     .child(div().flex_1()),
             )
             .when_some(compose, |element, compose| element.child(compose))
+            .when(working, |element| {
+                element.child(
+                    div()
+                        .ml(px(6.0))
+                        .w(px(14.0))
+                        .flex_none()
+                        .child(motion::spin_slow(icon(
+                            "icons/loader-circle.svg",
+                            14.0,
+                            theme.text,
+                        ))),
+                )
+            })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.toggle_sidebar_group(group, cx);
             }))
@@ -2039,6 +2117,11 @@ impl Michelle {
         let collapsed = group.map_or(self.state.sidebar_projects_collapsed, |group| {
             group.collapsed
         });
+        let working = collapsed
+            && self
+                .sidebar_working_headers
+                .borrow()
+                .contains(&SidebarRow::Collection(id));
         let menu = self.menu_handle(format!("project-collection-{id:?}"), cx);
         let keyboard_menu = menu.clone();
         let group_name = SharedString::from(format!("project-collection-header-{id:?}"));
@@ -2094,6 +2177,13 @@ impl Michelle {
                         |icon| icon.visible(),
                     ),
             )
+            .when(working, |header| {
+                header.child(motion::spin_slow(icon(
+                    "icons/loader-circle.svg",
+                    14.0,
+                    theme.text,
+                )))
+            })
             .when(!renaming, |header| {
                 header
                     .track_focus(menu.trigger_focus_handle())
@@ -3626,6 +3716,66 @@ mod tests {
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
         );
+    }
+
+    #[test]
+    fn working_headers_include_hidden_tasks_and_clear_when_they_settle() {
+        let today = Local::now().date_naive();
+        let root = Path::new("/tmp/.michelle/projects");
+        let project = Uuid::from_u128(1);
+        let projectless = Uuid::from_u128(2);
+        let collection = Uuid::from_u128(3);
+        let mut state = PersistedState::empty();
+        state.sidebar_grouping = SidebarGrouping::Project;
+        state.sidebar_collapsed_projects.insert(project);
+        state.sidebar_projects_collapsed = true;
+        state.projects.push(Project {
+            id: projectless,
+            name: "Task".into(),
+            path: root.join("task"),
+            created_at: 0,
+        });
+        state.sidebar_project_groups.push(SidebarProjectGroup {
+            id: collection,
+            name: "Work".into(),
+            projects: vec![project],
+            collapsed: true,
+        });
+        for (project, status) in [
+            (project, SessionStatus::Working),
+            (projectless, SessionStatus::Connecting),
+            (Uuid::from_u128(4), SessionStatus::Waiting),
+        ] {
+            let mut session = AgentSession::new(project, ProviderKind::Codex);
+            session.status = status;
+            session.detail_loaded = false;
+            state.sessions.push(session);
+        }
+        let mut draft = AgentSession::new(Uuid::from_u128(5), ProviderKind::Codex);
+        draft.status = SessionStatus::Connecting;
+        state.sessions.push(draft);
+        assert_eq!(
+            sidebar_working_headers(&state, today, Some(root)),
+            HashSet::from([
+                SidebarRow::Header(SidebarGroup::Project(project)),
+                SidebarRow::Header(SidebarGroup::Projectless),
+                SidebarRow::Collection(Some(collection)),
+                SidebarRow::Collection(None),
+            ])
+        );
+        state.sidebar_grouping = SidebarGrouping::Updated;
+        assert_eq!(
+            sidebar_working_headers(&state, today, Some(root)),
+            HashSet::from([SidebarRow::Header(SidebarGroup::Updated(
+                SessionDateGroup::Today
+            ))])
+        );
+        for session in &mut state.sessions {
+            session.status = SessionStatus::Idle;
+        }
+        assert!(sidebar_working_headers(&state, today, Some(root)).is_empty());
+        state.sidebar_grouping = SidebarGrouping::Project;
+        assert!(sidebar_working_headers(&state, today, Some(root)).is_empty());
     }
 
     #[test]
