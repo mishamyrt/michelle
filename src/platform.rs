@@ -1,6 +1,14 @@
 use gpui::Window;
 
 #[cfg(target_os = "macos")]
+mod sidecar;
+#[cfg(target_os = "macos")]
+pub use sidecar::configure_touch_scrolling;
+
+#[cfg(not(target_os = "macos"))]
+pub fn configure_touch_scrolling(_: &mut Window, _: &mut gpui::App) {}
+
+#[cfg(target_os = "macos")]
 pub fn show_about_panel() {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSApplication;

@@ -353,6 +353,7 @@ pub fn run() {
                         crate::theme::Theme::current(cx).is_dark,
                         crate::theme::Theme::current(cx).sidebar,
                     );
+                    crate::platform::configure_touch_scrolling(window, cx);
                     cx.activate(true);
                 })
                 .ok();
