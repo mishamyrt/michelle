@@ -1,5 +1,7 @@
+use std::sync::LazyLock;
+
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc};
-use gpui::{ClickEvent, KeyBinding, KeyboardButton, actions};
+use gpui::{ClickEvent, FontFeatures, KeyBinding, KeyboardButton, actions};
 use michelle_client::persistence::SidebarProjectGroup;
 
 use super::*;
@@ -210,6 +212,9 @@ const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 6.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 34.0;
 const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
+
+static TABULAR_NUMBERS: LazyLock<FontFeatures> =
+    LazyLock::new(|| FontFeatures(Arc::new(vec![("tnum".into(), 1)])));
 
 /// The session row's trailing time: how long the live turn has been working,
 /// or how long ago the agent last replied. A session that has never replied
@@ -3131,6 +3136,7 @@ impl Michelle {
                                 div()
                                     .flex_none()
                                     .text_size(sp(12.5))
+                                    .font_features(TABULAR_NUMBERS.clone())
                                     .text_color(if session.is_busy() {
                                         theme.text_tertiary
                                     } else {
