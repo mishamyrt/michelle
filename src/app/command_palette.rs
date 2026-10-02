@@ -1777,7 +1777,6 @@ impl Michelle {
                                 .items_center()
                                 .gap(px(7.0))
                                 .child(provider_mark(
-                                    &theme,
                                     provider,
                                     13.0,
                                     provider_color(&theme, provider),
@@ -1808,7 +1807,6 @@ impl Michelle {
                                 .hover(|button| button.bg(theme.overlay))
                                 .active(|button| button.opacity(0.82))
                                 .child(provider_mark(
-                                    &theme,
                                     provider,
                                     13.0,
                                     provider_color(&theme, provider),
@@ -1854,12 +1852,12 @@ impl Michelle {
                     PaletteIcon::Asset(_) => theme.text_secondary,
                     PaletteIcon::Provider(provider) => provider_color(&theme, provider),
                 };
-                // A provider row renders through `provider_mark` so OpenCode 2
-                // keeps its badge; an asset row stays a plain tinted icon.
+                // A provider row renders through `provider_mark`; an asset row
+                // stays a plain tinted icon.
                 let row_mark = match item.icon {
                     PaletteIcon::Asset(path) => icon(path, 16.0, icon_color).into_any_element(),
                     PaletteIcon::Provider(provider) => {
-                        provider_mark(&theme, provider, 16.0, icon_color).into_any_element()
+                        provider_mark(provider, 16.0, icon_color).into_any_element()
                     }
                 };
                 let importing = match &item.action {

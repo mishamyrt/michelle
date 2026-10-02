@@ -76,7 +76,7 @@ settings.daemon: Демон
 settings.computer_use: Управление компьютером
 settings.general_keywords: основные локальные проекты диалоги приватность математика latex формулы выражения general local privacy math
 settings.appearance_keywords: внешний вид тема цветовая схема системная светлая тёмная язык русский английский шрифт размер текст редактор appearance theme color scheme language russian english font
-settings.providers_keywords: провайдеры агенты модели cli версия установка обнаружение claude codex cursor opencode opencode2 amp grok pi providers agents
+settings.providers_keywords: провайдеры агенты модели cli версия установка обнаружение claude codex cursor opencode amp grok pi providers agents
 settings.skills: Навыки
 settings.skills_keywords: навыки библиотека агент выключить включить удалить общие skills skill claude codex cursor opencode pi amp shared
 settings.usage_keywords: использование токены стоимость расходы кеш день график модели история usage tokens cost cache claude codex
@@ -207,7 +207,7 @@ providers.checked_just_now: Проверено только что
 providers.checked_minutes_ago: "Проверено %{count} мин назад"
 providers.checked_hours_ago: "Проверено %{count} ч назад"
 computer_use.allow_apps: Разрешить Michelle управлять приложениями
-computer_use.availability: Управление компьютером доступно с Codex, OpenCode, OpenCode 2, Grok и Pi
+computer_use.availability: Управление компьютером доступно с Codex, OpenCode, Grok и Pi
 computer_use.desktop_access: Доступ к рабочему столу
 computer_use.windows_access_description: Управление приложениями в текущей сессии Windows. Windows может ограничивать доступ к приложениям с повышенными правами и защищённым рабочим столам.
 computer_use.linux_access_description: Управление приложениями в текущей сессии Linux. Захват экрана и ввод зависят от композитора и служб доступности.
@@ -411,6 +411,8 @@ activity.compacting_context: Сжатие контекста
 activity.compacted_context: Контекст сжат
 activity.compaction_failed: Не удалось сжать контекст
 activity.provider_retrying: Повторная отправка запроса
+activity.provider_service_waiting: Ожидаем сервис %{provider}
+activity.provider_service_reconnected: Подключились к сервису %{provider}
 activity.background_shell: Фоновая оболочка
 activity.output_truncated: "\n\n… вывод обрезан"
 activity.thought: Рассуждение

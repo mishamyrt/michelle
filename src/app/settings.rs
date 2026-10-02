@@ -1686,7 +1686,6 @@ impl Michelle {
                         .items_center()
                         .justify_center()
                         .child(provider_mark(
-                            &theme,
                             kind,
                             16.0,
                             provider_color(&theme, kind).opacity(if installed { 1.0 } else { 0.5 }),
