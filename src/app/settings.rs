@@ -2491,9 +2491,6 @@ impl Michelle {
         self.refresh_command_palette_localized_text(cx);
         self.refresh_file_search_localized_text(cx);
         self.refresh_transcript_search_localized_text(cx);
-        for browser in self.right_panel_browsers.values() {
-            browser.update(cx, |browser, cx| browser.refresh_localized_text(cx));
-        }
         for terminal in self.right_panel_terminals.values() {
             terminal.update(cx, |terminal, cx| terminal.refresh_localized_text(cx));
         }

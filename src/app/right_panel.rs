@@ -860,10 +860,6 @@ fn read_right_panel_file(
 }
 
 impl RightPanelSurface {
-    fn new_browser() -> Self {
-        Self::Browser(Uuid::new_v4())
-    }
-
     pub(super) fn new_terminal() -> Self {
         Self::Terminal(Uuid::new_v4())
     }
@@ -875,16 +871,8 @@ impl RightPanelSurface {
         }
     }
 
-    fn browser_id(&self) -> Option<Uuid> {
-        match self {
-            Self::Browser(id) => Some(*id),
-            _ => None,
-        }
-    }
-
     fn label(&self) -> String {
         match self {
-            Self::Browser(_) => tr!("right_panel.browser"),
             Self::Terminal(_) => tr!("right_panel.terminal"),
             Self::BackgroundWork { key, title } => {
                 if title.is_empty() {
@@ -905,7 +893,6 @@ impl RightPanelSurface {
 
     fn icon_path(&self) -> &'static str {
         match self {
-            Self::Browser(_) => "icons/globe.svg",
             Self::Terminal(_) => "icons/terminal.svg",
             Self::BackgroundWork { key, .. } => work_kind_icon(key.kind),
             Self::Files => "icons/folder.svg",
@@ -945,7 +932,7 @@ fn reusable_surface_index(
     requested: &RightPanelSurface,
 ) -> Option<usize> {
     match requested {
-        RightPanelSurface::Browser(_) | RightPanelSurface::Terminal(_) => None,
+        RightPanelSurface::Terminal(_) => None,
         RightPanelSurface::BackgroundWork { key, .. } => surfaces.iter().position(|surface| {
             matches!(surface, RightPanelSurface::BackgroundWork { key: candidate, .. } if candidate == key)
         }),
@@ -1620,24 +1607,18 @@ mod tests {
 
     #[test]
     fn only_reuses_single_instance_surface_tabs() {
-        let browser = RightPanelSurface::new_browser();
         let terminal = RightPanelSurface::new_terminal();
         let background = RightPanelSurface::BackgroundWork {
             key: BackgroundWorkKey::new(BackgroundWorkKind::Process, "process-1"),
             title: "Process one".into(),
         };
         let surfaces = vec![
-            browser,
             terminal,
             background,
             RightPanelSurface::Files,
             RightPanelSurface::Diff,
         ];
 
-        assert_eq!(
-            reusable_surface_index(&surfaces, &RightPanelSurface::new_browser()),
-            None
-        );
         assert_eq!(
             reusable_surface_index(&surfaces, &RightPanelSurface::new_terminal()),
             None
@@ -1650,15 +1631,15 @@ mod tests {
                     title: "Renamed process".into(),
                 },
             ),
-            Some(2)
+            Some(1)
         );
         assert_eq!(
             reusable_surface_index(&surfaces, &RightPanelSurface::Files),
-            Some(3)
+            Some(2)
         );
         assert_eq!(
             reusable_surface_index(&surfaces, &RightPanelSurface::Diff),
-            Some(4)
+            Some(3)
         );
     }
 
@@ -1814,10 +1795,8 @@ impl Michelle {
             self.refresh_right_panel_working_tree(cx);
         }
         self.ensure_right_panel_terminals(cx);
-        self.retain_right_panel_browsers();
         if self.right_panel_visible {
             self.request_active_terminal_focus();
-            self.request_active_browser_focus();
         }
     }
 
@@ -1833,9 +1812,6 @@ impl Michelle {
             for surface in &state.surfaces {
                 if let Some(terminal_id) = surface.terminal_id() {
                     self.right_panel_terminals.remove(&terminal_id);
-                }
-                if let Some(browser_id) = surface.browser_id() {
-                    self.right_panel_browsers.remove(&browser_id);
                 }
             }
         }
@@ -1906,12 +1882,6 @@ impl Michelle {
             .and_then(RightPanelSurface::terminal_id);
     }
 
-    pub(super) fn request_active_browser_focus(&mut self) {
-        self.right_panel_pending_browser_focus = self
-            .active_right_panel_surface()
-            .and_then(RightPanelSurface::browser_id);
-    }
-
     /// The file the active editor surface is showing, whether via a File tab
     /// or the Files browser's selection — regardless of whether the panel is
     /// currently visible, which is a per-caller decision: save works on a
@@ -1974,8 +1944,6 @@ impl Michelle {
         if let Some(terminal_id) = surface.terminal_id() {
             self.ensure_right_panel_terminal(terminal_id, cx);
         }
-        // Browser views are created on the surface's first render, which has
-        // the `Window` their webview must attach to.
         let index = match reusable_index {
             Some(index) => index,
             None => {
@@ -1986,7 +1954,6 @@ impl Michelle {
         self.right_panel_active_surface = Some(index);
         self.reveal_right_panel_tab(index);
         self.request_active_terminal_focus();
-        self.request_active_browser_focus();
         self.set_right_panel_visible(true, cx);
         cx.notify();
     }
@@ -2075,9 +2042,6 @@ impl Michelle {
         if let Some(terminal_id) = self.right_panel_surfaces[index].terminal_id() {
             self.right_panel_terminals.remove(&terminal_id);
         }
-        if let Some(browser_id) = self.right_panel_surfaces[index].browser_id() {
-            self.right_panel_browsers.remove(&browser_id);
-        }
         self.right_panel_surfaces.remove(index);
         self.right_panel_active_surface = if self.right_panel_surfaces.is_empty() {
             None
@@ -2092,11 +2056,9 @@ impl Michelle {
         if let Some(active) = self.right_panel_active_surface {
             self.reveal_right_panel_tab(active);
             self.request_active_terminal_focus();
-            self.request_active_browser_focus();
         } else {
             self.right_panel_pending_tab_reveal = None;
             self.right_panel_pending_terminal_focus = None;
-            self.right_panel_pending_browser_focus = None;
             self.set_right_panel_visible(false, cx);
         }
         cx.notify();
@@ -2192,17 +2154,6 @@ impl Michelle {
             Some(RightPanelSurface::File(path)) => self
                 .render_right_panel_file(path, width, window, cx)
                 .into_any_element(),
-            Some(RightPanelSurface::Browser(browser_id)) => {
-                let browser = self.ensure_right_panel_browser(browser_id, window, cx);
-                if self
-                    .right_panel_pending_browser_focus
-                    .take_if(|pending| *pending == browser_id)
-                    .is_some()
-                {
-                    browser.update(cx, |view, cx| view.focus_default(window, cx));
-                }
-                browser.into_any_element()
-            }
         };
 
         div()
@@ -2224,97 +2175,6 @@ impl Michelle {
                 PanelResizeTarget::RightPanel,
                 cx,
             ))
-    }
-
-    fn ensure_right_panel_browser(
-        &mut self,
-        browser_id: Uuid,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Entity<crate::browser::BrowserView> {
-        if let Some(browser) = self.right_panel_browsers.get(&browser_id) {
-            return browser.clone();
-        }
-        let browser = cx.new(|cx| crate::browser::BrowserView::new(window, cx));
-        // Tab titles and toolbar state live on the browser entity; the panel
-        // chrome re-renders when they move.
-        cx.observe(&browser, |_, _, cx| cx.notify()).detach();
-        self.right_panel_browsers
-            .insert(browser_id, browser.clone());
-        browser
-    }
-
-    /// Drop browser views whose tab no longer exists in any session.
-    pub(super) fn retain_right_panel_browsers(&mut self) {
-        let retained_browser_ids = self
-            .right_panel_surfaces
-            .iter()
-            .filter_map(RightPanelSurface::browser_id)
-            .chain(self.right_panel_session_states.values().flat_map(|state| {
-                state
-                    .surfaces
-                    .iter()
-                    .filter_map(RightPanelSurface::browser_id)
-            }))
-            .collect::<HashSet<_>>();
-        self.right_panel_browsers
-            .retain(|browser_id, _| retained_browser_ids.contains(browser_id));
-    }
-
-    /// Whether any GPUI overlay that could float above the right panel is
-    /// open. The native webview always draws over GPUI, so while this holds
-    /// the live page swaps for a frozen snapshot.
-    fn any_overlay_open(&self, cx: &App) -> bool {
-        self.menus.borrow().values().any(ContextMenuHandle::is_open)
-            || self.selected_runtime().is_some_and(|runtime| {
-                runtime.computer_use_previews.iter().any(|preview| {
-                    preview.visible
-                        && preview.target.is_some()
-                        && preview.phase != ComputerUsePhase::AwaitingApproval
-                })
-            })
-            || self.command_palette.is_open()
-            || self.task_switcher.is_open()
-            || self.commit_dialog.is_some()
-            || self.image_preview.is_some()
-            || self.composer.read(cx).context_menu_open(cx)
-            || self
-                .right_panel_browsers
-                .values()
-                .any(|browser| browser.read(cx).overlay_open(cx))
-    }
-
-    /// Once per frame, from the very top of the app's render: push down to
-    /// every browser whether its native view belongs on screen. This is the
-    /// single authority — tab switches, panel toggles, session switches, the
-    /// settings page and overlay menus all funnel through here, so a webview
-    /// can never linger over unrelated UI.
-    pub(super) fn sync_browser_webviews(&mut self, cx: &mut Context<Self>) {
-        if self.right_panel_browsers.is_empty() {
-            return;
-        }
-        // With the scene overlay compositing GPUI's deferred draws above
-        // native views, open menus never occlude the webview — the snapshot
-        // swap is purely the fallback for a window where enabling it failed.
-        let overlay_open = !self.scene_overlay_enabled && self.any_overlay_open(cx);
-        // A webview composites above the GPUI scene, so the panel's clip does
-        // not apply to it: shown mid-slide it would hang over the transcript
-        // at full width. Keep it down until the panel has finished moving.
-        let active_browser = if self.settings_page.is_none()
-            && self.right_panel_visible
-            && self.right_panel_slide.is_none()
-        {
-            self.active_right_panel_surface()
-                .and_then(RightPanelSurface::browser_id)
-        } else {
-            None
-        };
-        for (browser_id, browser) in &self.right_panel_browsers {
-            let surface_visible = active_browser == Some(*browser_id);
-            browser.update(cx, |view, cx| {
-                view.sync_native_state(surface_visible, overlay_open, cx);
-            });
-        }
     }
 
     fn ensure_right_panel_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
@@ -2383,18 +2243,10 @@ impl Michelle {
         for (index, surface) in self.right_panel_surfaces.iter().cloned().enumerate() {
             let active = active_surface == Some(index);
             let dirty = self.right_panel_surface_is_dirty(&surface);
-            let label = SharedString::from(match &surface {
-                // Browser tabs read like browser tabs: the page title once
-                // known, the address until then.
-                RightPanelSurface::Browser(browser_id) => self
-                    .right_panel_browsers
-                    .get(browser_id)
-                    .and_then(|browser| browser.read(cx).tab_label())
-                    .unwrap_or_else(|| surface.label()),
-                _ => {
-                    right_panel_tab_label(&surface, self.right_panel_files_selected_path.as_deref())
-                }
-            });
+            let label = SharedString::from(right_panel_tab_label(
+                &surface,
+                self.right_panel_files_selected_path.as_deref(),
+            ));
             let icon_path =
                 right_panel_tab_icon(&surface, self.right_panel_files_selected_path.as_deref());
             let uses_file_icon = matches!(&surface, RightPanelSurface::File(_))
@@ -2528,7 +2380,6 @@ impl Michelle {
             let weak = cx.entity().downgrade();
             let existing_surfaces = self.right_panel_surfaces.clone();
             let options = [
-                RightPanelSurface::new_browser(),
                 RightPanelSurface::new_terminal(),
                 RightPanelSurface::Files,
                 RightPanelSurface::Diff,
@@ -2618,24 +2469,16 @@ impl Michelle {
                             .mt(px(18.0))
                             .w_full()
                             .flex()
+                            .flex_col()
+                            .tab_index(0)
+                            .tab_group()
+                            .tab_stop(false)
                             .gap(px(8.0))
-                            .child(self.render_right_panel_card(
-                                RightPanelSurface::new_browser(),
-                                tr!("right_panel.browser_description"),
-                                cx,
-                            ))
                             .child(self.render_right_panel_card(
                                 RightPanelSurface::new_terminal(),
                                 tr!("right_panel.terminal_description"),
                                 cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .mt(px(8.0))
-                            .w_full()
-                            .flex()
-                            .gap(px(8.0))
+                            ))
                             .child(self.render_right_panel_card(
                                 RightPanelSurface::Files,
                                 tr!("right_panel.files_description"),
@@ -2659,13 +2502,16 @@ impl Michelle {
         let theme = Theme::current(cx);
         let icon_path = surface.icon_path();
         let label = surface.label();
+        let id = format!("right-panel-card-{}", label.to_lowercase());
+        let focus = self.transcript_control_focus(id.clone(), cx);
+        let keyboard_surface = surface.clone();
         div()
-            .id(SharedString::from(format!(
-                "right-panel-card-{}",
-                label.to_lowercase()
-            )))
+            .id(SharedString::from(id))
+            .track_focus(&focus)
+            .tab_index(0)
             .h(sp(112.0))
-            .flex_1()
+            .w_full()
+            .flex_none()
             .min_w_0()
             .p(sp(14.0))
             .rounded(px(8.0))
@@ -2676,6 +2522,7 @@ impl Michelle {
             .flex_col()
             .items_start()
             .cursor_default()
+            .focus_visible(|style| style.border_color(theme.accent))
             .hover(|element| element.bg(theme.raised).border_color(theme.text_ghost))
             .active(|element| element.bg(theme.overlay_strong))
             .child(icon(icon_path, 18.0, theme.text_secondary))
@@ -2702,6 +2549,12 @@ impl Michelle {
                     .text_overflow(gpui::TextOverflow::Truncate("...".into()))
                     .child(description),
             )
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.open_right_panel_surface(keyboard_surface.clone(), cx);
+                    cx.stop_propagation();
+                }
+            }))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.open_right_panel_surface(surface.clone(), cx);
             }))

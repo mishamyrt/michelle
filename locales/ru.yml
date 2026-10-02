@@ -740,14 +740,12 @@ session.rewind_title: "%{title} (откат)"
 session.rewound: "Выполнен откат к началу шага %{turn}"
 session.rewound_with_stale_refs: "Выполнен откат к началу шага %{turn}. Остались устаревшие ссылки: %{error}"
 
-right_panel.browser: Браузер
 right_panel.terminal: Терминал
 right_panel.files: Файлы
 right_panel.diff: Изменения
 right_panel.toggle: Показать или скрыть правую панель
 right_panel.open_surface: Открыть инструмент
 right_panel.choose_surface: Выберите содержимое правой панели
-right_panel.browser_description: Открыть локальное приложение или URL
 right_panel.terminal_description: Запустить оболочку в рабочей папке
 right_panel.files_description: Просмотреть файлы рабочей папки
 right_panel.diff_description: Просмотреть изменения файлов
@@ -909,15 +907,6 @@ diff.rows_hidden: "Скрыто строк: %{count} · откройте «Из�
 terminal.transport_failed: Ошибка соединения с терминалом
 terminal.no_workspace_description: Выберите задачу перед открытием терминала.
 terminal.process_exited: Процесс завершён
-browser.back: "Назад (%{shortcut})"
-browser.forward: "Вперёд (%{shortcut})"
-browser.stop_loading: Остановить загрузку (Esc)
-browser.reload: "Обновить (%{shortcut})"
-browser.open_external: Открыть в браузере по умолчанию
-browser.browse_web: Просмотр интернета
-browser.start_hint: "Введите URL или поисковый запрос выше — %{shortcut} переводит фокус в адресную строку"
-browser.unavailable: Браузер недоступен
-browser.unavailable_on_platform: Встроенный браузер пока недоступен на этой платформе
 find.bad_pattern: Некорректное выражение
 find.no_results: Ничего не найдено
 find.result_count: "%{current} из %{total}"

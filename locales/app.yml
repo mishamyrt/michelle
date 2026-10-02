@@ -1490,8 +1490,6 @@ session.rewound:
 session.rewound_with_stale_refs:
   en: "Rewound to before turn %{turn}; stale refs remain: %{error}"
 
-right_panel.browser:
-  en: Browser
 right_panel.terminal:
   en: Terminal
 right_panel.files:
@@ -1504,8 +1502,6 @@ right_panel.open_surface:
   en: Open a surface
 right_panel.choose_surface:
   en: Choose what to show in the right panel
-right_panel.browser_description:
-  en: Open a local app or URL
 right_panel.terminal_description:
   en: Start a shell in this workspace
 right_panel.files_description:
@@ -1830,25 +1826,6 @@ terminal.no_workspace_description:
   en: Select a task before opening a terminal.
 terminal.process_exited:
   en: Process exited
-
-browser.back:
-  en: Back (%{shortcut})
-browser.forward:
-  en: Forward (%{shortcut})
-browser.stop_loading:
-  en: Stop loading (Esc)
-browser.reload:
-  en: Reload (%{shortcut})
-browser.open_external:
-  en: Open in default browser
-browser.browse_web:
-  en: Browse the web
-browser.start_hint:
-  en: Enter a URL or search above — %{shortcut} focuses the address bar
-browser.unavailable:
-  en: Browser unavailable
-browser.unavailable_on_platform:
-  en: The browser surface is not available on this platform yet
 
 find.bad_pattern:
   en: Bad pattern

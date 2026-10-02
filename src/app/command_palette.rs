@@ -816,7 +816,7 @@ impl Michelle {
                 "icons/panel-right.svg",
                 Some(crate::platform::primary_shortcut("⇧⌘B", "Ctrl+Shift+B")),
                 PaletteAction::ToggleRightPanel,
-                "toggle show hide right panel files diff terminal browser",
+                "toggle show hide right panel files diff terminal",
                 next(),
             ),
         ]);

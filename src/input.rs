@@ -818,12 +818,6 @@ impl TextInput {
         cx.notify();
     }
 
-    /// Whether this field's right-click menu is open. The browser surface
-    /// treats that as an overlay above its native webview.
-    pub fn context_menu_open(&self) -> bool {
-        self.context_menu.is_open()
-    }
-
     fn context_menu_preserves_visual_focus(&self) -> bool {
         self.external_context_menu_focus_holds > 0
     }
@@ -3056,11 +3050,6 @@ impl ComposerInput {
         self.input.update(cx, |input, cx| {
             input.release_visual_focus_for_context_menu(window, cx)
         });
-    }
-
-    /// Whether the embedded field's right-click menu is open.
-    pub fn context_menu_open(&self, cx: &App) -> bool {
-        self.input.read(cx).context_menu_open()
     }
 }
 

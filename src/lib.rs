@@ -32,7 +32,6 @@ macro_rules! tr_cow {
 
 mod app;
 mod assets;
-mod browser;
 mod computer_use;
 pub mod daemon;
 mod driver;
@@ -95,19 +94,7 @@ actions!(
         ToggleFindCaseSensitive,
         ToggleFindWholeWord,
         ToggleFindRegex,
-        ReplaceAllMatches,
-        BrowserBack,
-        BrowserForward,
-        BrowserReload,
-        BrowserHardReload,
-        BrowserStop,
-        BrowserDevtools,
-        FocusBrowserAddress,
-        BrowserAddressCancel,
-        WebviewCopy,
-        WebviewCut,
-        WebviewPaste,
-        WebviewSelectAll
+        ReplaceAllMatches
     ]
 );
 
@@ -282,24 +269,6 @@ pub fn run() {
                 KeyBinding::new("secondary-alt-r", ToggleFindRegex, Some("FileEditorPane")),
                 KeyBinding::new("shift-enter", FindPrevious, Some("FindBar")),
                 KeyBinding::new("secondary-alt-enter", ReplaceAllMatches, Some("FindBar")),
-                // Browser surface. Deeper than "Michelle", so while focus is on the
-                // page or its address bar the browser reads the platform's
-                // conventional navigation shortcuts; the same keys elsewhere
-                // keep their app meanings. The clipboard trio is rebound
-                // because GPUI's window view claims key equivalents before
-                // AppKit can walk the responder chain into the webview.
-                KeyBinding::new("secondary-l", FocusBrowserAddress, Some("Browser")),
-                KeyBinding::new("secondary-r", BrowserReload, Some("Browser")),
-                KeyBinding::new("secondary-shift-r", BrowserHardReload, Some("Browser")),
-                KeyBinding::new("secondary-[", BrowserBack, Some("Browser")),
-                KeyBinding::new("secondary-]", BrowserForward, Some("Browser")),
-                KeyBinding::new("escape", BrowserStop, Some("Browser")),
-                KeyBinding::new("secondary-alt-i", BrowserDevtools, Some("Browser")),
-                KeyBinding::new("secondary-c", WebviewCopy, Some("Browser")),
-                KeyBinding::new("secondary-x", WebviewCut, Some("Browser")),
-                KeyBinding::new("secondary-v", WebviewPaste, Some("Browser")),
-                KeyBinding::new("secondary-a", WebviewSelectAll, Some("Browser")),
-                KeyBinding::new("escape", BrowserAddressCancel, Some("BrowserAddress")),
             ]);
 
             cx.on_action(|_: &Quit, cx| cx.quit());

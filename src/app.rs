@@ -51,7 +51,6 @@ use crate::ui::menu::{
 use crate::ui::scrollbar::{self, ScrollbarState};
 use crate::ui::tooltip::Tooltip;
 
-use crate::browser::BrowserView;
 use crate::persistence::{
     ComposerDraftStore, ComposerDrafts, DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH,
     PersistedState, PersistedWindowState, SidebarGrouping, SidebarOrdering, StateStore,
@@ -515,7 +514,6 @@ fn fitted_panel_widths(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RightPanelSurface {
-    Browser(Uuid),
     Terminal(Uuid),
     BackgroundWork {
         key: BackgroundWorkKey,
@@ -1401,15 +1399,6 @@ pub struct Michelle {
     /// since the event handler has no `Context` to refresh them itself.
     workspace_queries_stale: bool,
     right_panel_terminals: HashMap<Uuid, Entity<TerminalView>>,
-    right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
-    /// A Browser surface was just opened; the next right panel render moves
-    /// focus into its address bar.
-    right_panel_pending_browser_focus: Option<Uuid>,
-    /// GPUI is compositing deferred draws on a plane above native views, so
-    /// menus render over the live webview and no snapshot occlusion is needed.
-    /// When the overlay could not be enabled, the browser falls back to
-    /// swapping in frozen page pixels while an overlay is open.
-    scene_overlay_enabled: bool,
     settings_page: Option<SettingsPage>,
     /// The Skills page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
@@ -2189,17 +2178,6 @@ impl Michelle {
                 window.refresh();
             }
         });
-        // Enable GPUI's experimental overlay plane so deferred draws (menus,
-        // tooltips, popovers) composite above native content — without it the
-        // browser surface would cover them.
-        //
-        // Both backends of the pinned fork implement it, and both browser
-        // hosts render somewhere it can reach: a sibling NSView below GPUI's
-        // overlay layer on macOS, a DirectComposition visual between GPUI's
-        // base and overlay planes on Windows. When it is unavailable the
-        // surface falls back to freezing the page to a bitmap while an
-        // overlay is open.
-        let scene_overlay_enabled = window.enable_scene_overlay().is_ok();
         let entity = cx.new(|cx| {
             let settings_focus = cx.focus_handle();
             let onboarding_add_project_focus = cx.focus_handle();
@@ -2251,8 +2229,7 @@ impl Michelle {
             })
             .detach();
 
-            // A closed surface can take the window's focus down with it —
-            // closing a browser tab drops the focused address input — and
+            // A closed surface can take the window's focus down with it, and
             // with nothing focused, action availability walks only the root
             // dispatch node, so every app menu item greys out. When focus
             // dies with its element, send it home to the composer, the way
@@ -2819,9 +2796,6 @@ impl Michelle {
                 working_trees: QueryCache::new(MAX_CACHED_WORKSPACES),
                 workspace_queries_stale: false,
                 right_panel_terminals: HashMap::new(),
-                right_panel_browsers: HashMap::new(),
-                right_panel_pending_browser_focus: None,
-                scene_overlay_enabled,
                 settings_page: None,
                 skills_catalog: None,
                 skills_scan_generation: 0,
