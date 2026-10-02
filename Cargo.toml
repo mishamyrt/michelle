@@ -25,8 +25,8 @@ base64 = "0.22"
 chrono = "0.4"
 crossbeam-channel = "0.5"
 dirs = "6.0"
-gpui = { git = "https://github.com/egoist/zed", rev = "f9bad8941ea813982d6dfb10c0377ebf7716b3e7" }
-gpui_platform = { git = "https://github.com/egoist/zed", rev = "f9bad8941ea813982d6dfb10c0377ebf7716b3e7", features = [
+gpui = { git = "https://github.com/zed-industries/zed", rev = "c83abe7d0e060de08db386fbf86f7e95bfe6cb09" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "c83abe7d0e060de08db386fbf86f7e95bfe6cb09", features = [
   "font-kit",
 ] }
 parking_lot = "0.12"
@@ -60,7 +60,7 @@ nucleo-matcher = "0.3.1"
 # happens instead of coalescing into the display link's next one — a panel
 # resize drew once per mouse-move event rather than once per displayed frame.
 [dev-dependencies]
-gpui = { git = "https://github.com/egoist/zed", rev = "f9bad8941ea813982d6dfb10c0377ebf7716b3e7", features = [
+gpui = { git = "https://github.com/zed-industries/zed", rev = "c83abe7d0e060de08db386fbf86f7e95bfe6cb09", features = [
   "test-support",
 ] }
 

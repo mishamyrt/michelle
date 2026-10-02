@@ -8,7 +8,7 @@ text and fast-reasoning streams.
 
 The one-line model: **CPU ≈ redraw rate × visible element count.** GPUI
 rebuilds and lays out every visible element on every frame a view renders —
-[`list()`](https://github.com/egoist/zed) re-renders and `layout_as_root`s
+[`list()`](https://github.com/zed-industries/zed) re-renders and `layout_as_root`s
 every visible row per frame, cached heights only spare the overdraw — so every
 rule below either bounds how often frames happen or how much is visible inside
 one.
@@ -27,7 +27,7 @@ price:
 
 The root `Michelle` view re-renders on every frame regardless of what is dirty, so
 it must stay thin: the sidebar, transcript, and right panel are `MichellePane`
-islands ([src/app.rs](../src/app.rs)) embedded with the fork's
+islands ([src/app.rs](../src/app.rs)) embedded with GPUI's
 `Entity::cached`. Each pane observes the root — any root notify still
 re-renders every island, so caching can never show stale state — while a
 notify targeted at one pane (the pulse clock leases `window.current_view()`)
