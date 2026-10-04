@@ -165,7 +165,7 @@ fn session_group_header(theme: &Theme) -> Div {
         .items_center()
         .text_size(sp(13.5))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme.text_secondary)
+        .text_color(theme.text_tertiary)
 }
 
 fn sidebar_collection_rename_target(id: Option<Uuid>, event: &ClickEvent) -> Option<Uuid> {
@@ -1381,7 +1381,7 @@ impl Michelle {
                     .min_w_0()
                     .truncate()
                     .text_size(sp(13.0))
-                    .text_color(theme.text_secondary)
+                    .text_color(theme.text)
                     .child(label),
             )
     }
@@ -2305,6 +2305,7 @@ impl Michelle {
                             .items_center()
                             .gap(px(2.0))
                             .child(div().min_w_0().truncate().child(label.clone()))
+                            .text_color(theme.text)
                             .when_some(updated_chevron, |element, chevron| element.child(chevron)),
                     )
                     .child(div().flex_1()),
