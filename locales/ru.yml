@@ -229,26 +229,19 @@ common.remove: Удалить
 common.rename: Переименовать
 session.new_task: Новая задача
 
-sidebar.today: Сегодня
 sidebar.search: Поиск
 sidebar.options: Настройки боковой панели
-sidebar.grouping: Группировка
-sidebar.grouping_project: По проекту
-sidebar.grouping_updated: По обновлению
 sidebar.ordering: Порядок
 sidebar.ordering_newest: Сначала новые
 sidebar.ordering_oldest: Сначала старые
 sidebar.ordering_manual: Вручную
 sidebar.projects: Проекты
+sidebar.chats: Чаты
 sidebar.new_group: Новая группа
 sidebar.new_group_name: Новая группа
 sidebar.move_to_group: Переместить в группу
+sidebar.move_to_project: Переместить в проект
 sidebar.show_more: Показать ещё
-sidebar.yesterday: Вчера
-sidebar.this_week: На этой неделе
-sidebar.this_month: В этом месяце
-sidebar.this_year: В этом году
-sidebar.more: Ещё
 sidebar.working: "Работает %{elapsed}"
 sidebar.just_now: только что
 sidebar.minutes_ago: "%{count} мин"
@@ -1082,3 +1075,5 @@ usage_error.curl_did_not_finish: curl не завершился
 usage_error.curl_failed: "Ошибка curl: %{error}"
 usage_error.unknown_error: неизвестная ошибка
 usage_error.curl_no_status: curl не вернул строку статуса HTTP
+
+errors.move_chat: "Не удалось перенести чат: %{error}"

@@ -122,7 +122,9 @@ impl Michelle {
                 })
                 .await;
             let _ = michelle.update(cx, |michelle, cx| {
-                michelle.session_hydrations.remove(&session_id);
+                if !michelle.session_hydrations.remove(&session_id) {
+                    return;
+                }
                 match result {
                     Ok(session) => {
                         let replaced = if let Some(existing) = michelle

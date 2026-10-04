@@ -35,16 +35,7 @@ const APP_STATE_VERSION: u32 = 1;
 pub const DEFAULT_SIDEBAR_WIDTH: f32 = 252.0;
 pub const DEFAULT_RIGHT_PANEL_WIDTH: f32 = 460.0;
 
-/// How the desktop groups task history in the sidebar.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SidebarGrouping {
-    Project,
-    #[default]
-    Updated,
-}
-
-/// Direction of task history inside the sidebar's current grouping.
+/// Direction of task history inside each sidebar project.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SidebarOrdering {
@@ -338,8 +329,6 @@ struct AppState {
     #[serde(default = "default_sidebar_width")]
     sidebar_width: f32,
     #[serde(default)]
-    sidebar_grouping: SidebarGrouping,
-    #[serde(default)]
     sidebar_ordering: SidebarOrdering,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     sidebar_session_order: Vec<Uuid>,
@@ -405,8 +394,6 @@ pub struct PersistedState {
     pub right_panel_visible: bool,
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: f32,
-    #[serde(default)]
-    pub sidebar_grouping: SidebarGrouping,
     #[serde(default)]
     pub sidebar_ordering: SidebarOrdering,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -578,7 +565,6 @@ impl PersistedState {
             sidebar_visible: true,
             right_panel_visible: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
-            sidebar_grouping: SidebarGrouping::Updated,
             sidebar_ordering: SidebarOrdering::Newest,
             sidebar_session_order: Vec::new(),
             sidebar_project_order: Vec::new(),
@@ -723,7 +709,6 @@ impl PersistedState {
             sidebar_visible: self.sidebar_visible,
             right_panel_visible: self.right_panel_visible,
             sidebar_width: self.sidebar_width,
-            sidebar_grouping: self.sidebar_grouping,
             sidebar_ordering: self.sidebar_ordering,
             sidebar_session_order: self.sidebar_session_order.clone(),
             sidebar_project_order: self.sidebar_project_order.clone(),
@@ -761,7 +746,6 @@ impl PersistedState {
         self.sidebar_visible = app_state.sidebar_visible;
         self.right_panel_visible = app_state.right_panel_visible;
         self.sidebar_width = app_state.sidebar_width;
-        self.sidebar_grouping = app_state.sidebar_grouping;
         self.sidebar_ordering = app_state.sidebar_ordering;
         self.sidebar_session_order = app_state.sidebar_session_order;
         self.sidebar_project_order = app_state.sidebar_project_order;
@@ -1380,7 +1364,6 @@ mod tests {
     fn legacy_app_state_defaults_sidebar_presentation() {
         let state: AppState = serde_json::from_str(r#"{"app_state_version":1}"#).unwrap();
 
-        assert_eq!(state.sidebar_grouping, SidebarGrouping::Updated);
         assert_eq!(state.sidebar_ordering, SidebarOrdering::Newest);
         assert!(state.sidebar_session_order.is_empty());
         assert!(state.sidebar_project_order.is_empty());
@@ -1388,6 +1371,27 @@ mod tests {
         assert!(!state.sidebar_projects_collapsed);
         assert!(state.sidebar_collapsed_projects.is_empty());
         assert_eq!(state.last_runtime_mode, RuntimeMode::FullAccess);
+    }
+
+    #[test]
+    fn legacy_sidebar_grouping_is_ignored_without_losing_presentation() {
+        for grouping in ["updated", "project"] {
+            let saved = serde_json::json!({
+                "app_state_version": 1,
+                "sidebar_grouping": grouping,
+                "sidebar_ordering": "manual",
+                "sidebar_projects_collapsed": true,
+            });
+            let state: AppState = serde_json::from_value(saved).unwrap();
+            assert_eq!(state.sidebar_ordering, SidebarOrdering::Manual);
+            assert!(state.sidebar_projects_collapsed);
+            assert!(
+                serde_json::to_value(state)
+                    .unwrap()
+                    .get("sidebar_grouping")
+                    .is_none()
+            );
+        }
     }
 
     #[test]

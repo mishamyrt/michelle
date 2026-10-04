@@ -799,6 +799,7 @@ fn command_targets_runtime(command: &Command) -> bool {
             | Command::CloseTerminal
             | Command::CloseSession
             | Command::RemoveSession
+            | Command::MoveSessionToProject { .. }
     )
 }
 
@@ -827,9 +828,17 @@ fn run_runtime_mailbox(
         );
         let closes_runtime = matches!(
             &dispatched.request.command,
-            Command::CloseSession | Command::CloseTerminal | Command::RemoveSession
+            Command::CloseSession
+                | Command::CloseTerminal
+                | Command::RemoveSession
+                | Command::MoveSessionToProject { .. }
         );
         let removes_session = matches!(&dispatched.request.command, Command::RemoveSession);
+        let replaces_runtime = removes_session
+            || matches!(
+                &dispatched.request.command,
+                Command::MoveSessionToProject { .. }
+            );
         let handled = handle_request(
             dispatched.request,
             dispatched.outgoing,
@@ -854,10 +863,10 @@ fn run_runtime_mailbox(
                 // that survived its previous actor worker.
                 active_runtime_id = Some(*attached_runtime_id);
             } else if closes_runtime {
-                if (removes_session || active_runtime_id == Some(runtime_id))
+                if (replaces_runtime || active_runtime_id == Some(runtime_id))
                     && matches!(&handled.outcome, ResponseOutcome::Ok { .. })
                 {
-                    hub.end_runtime(session_id, (!removes_session).then_some(runtime_id));
+                    hub.end_runtime(session_id, (!replaces_runtime).then_some(runtime_id));
                     active_runtime_id = None;
                 }
             } else if active_runtime_id.is_none()
@@ -1001,6 +1010,7 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
             projects: projects.clone(),
         },
         Command::RemoveSession
+        | Command::MoveSessionToProject { .. }
         | Command::ForkSessionFromResponse { .. }
         | Command::RewindSessionToMessage { .. } => TaskCatalogAction::Changed,
         _ => TaskCatalogAction::None,

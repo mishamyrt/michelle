@@ -2703,6 +2703,7 @@ impl Michelle {
         if self.runtimes.contains_key(&session_id)
             || self.goal_runtime_starts.contains(&session_id)
             || self.submission_preparations.contains(&session_id)
+            || self.sidebar_session_moves.contains(&session_id)
         {
             // An installed or installing runtime picks the queue up when the
             // install path drains pending goal operations.
@@ -3121,7 +3122,9 @@ impl Michelle {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
-        if self.response_fork_preparations.contains_key(&session_id) {
+        if self.response_fork_preparations.contains_key(&session_id)
+            || self.sidebar_session_moves.contains(&session_id)
+        {
             return;
         }
         let selected = self.state.selected_session == Some(session_id);

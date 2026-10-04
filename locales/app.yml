@@ -459,18 +459,10 @@ common.rename:
 session.new_task:
   en: New task
 
-sidebar.today:
-  en: Today
 sidebar.search:
   en: Search
 sidebar.options:
   en: Sidebar options
-sidebar.grouping:
-  en: Grouping
-sidebar.grouping_project:
-  en: Project
-sidebar.grouping_updated:
-  en: Updated
 sidebar.ordering:
   en: Ordering
 sidebar.ordering_newest:
@@ -481,24 +473,18 @@ sidebar.ordering_manual:
   en: Manual
 sidebar.projects:
   en: Projects
+sidebar.chats:
+  en: Chats
 sidebar.new_group:
   en: New Group
 sidebar.new_group_name:
   en: New group
 sidebar.move_to_group:
   en: Move to Group
+sidebar.move_to_project:
+  en: Move to Project
 sidebar.show_more:
   en: Show more
-sidebar.yesterday:
-  en: Yesterday
-sidebar.this_week:
-  en: This Week
-sidebar.this_month:
-  en: This Month
-sidebar.this_year:
-  en: This Year
-sidebar.more:
-  en: More
 sidebar.working:
   en: Working for %{elapsed}
 sidebar.just_now:
@@ -2183,3 +2169,6 @@ usage_error.unknown_error:
   en: unknown error
 usage_error.curl_no_status:
   en: curl returned no HTTP status line
+
+errors.move_chat:
+  en: "Could not move chat: %{error}"

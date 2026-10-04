@@ -178,6 +178,10 @@ pub enum Command {
     /// merge-only so a stale client snapshot cannot delete tasks another
     /// client just created.
     RemoveSession,
+    /// Move an idle projectless chat into an ordinary project's checkout.
+    MoveSessionToProject {
+        project_id: Uuid,
+    },
     HydrateSession {
         session_id: Uuid,
     },

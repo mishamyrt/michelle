@@ -20,7 +20,7 @@ use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     ActivityKind, AgentSession, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption,
-    Project, ProviderKind, ProviderResumeCursor, SessionStatus,
+    Project, ProviderKind, ProviderResumeCursor, SessionStatus, SessionWorkspace, unix_time,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -60,6 +60,62 @@ pub struct MichelleBackend {
 }
 
 impl MichelleBackend {
+    fn move_session_to_project(
+        &self,
+        session_id: Uuid,
+        project_id: Uuid,
+    ) -> anyhow::Result<AgentSession> {
+        let mut state = self.task_state.lock();
+        if !state
+            .projects
+            .iter()
+            .any(|project| project.id == project_id && !project.is_projectless())
+        {
+            bail!("the destination project no longer exists");
+        }
+        let index = state
+            .sessions
+            .iter()
+            .position(|session| session.id == session_id)
+            .ok_or_else(|| anyhow!("the chat no longer exists"))?;
+        let previous_project = state.sessions[index].project_id;
+        if !state
+            .projects
+            .iter()
+            .any(|project| project.id == previous_project && project.is_projectless())
+        {
+            bail!("only a projectless chat can be moved into a project");
+        }
+        self.task_store.hydrate(&mut state.sessions[index])?;
+        if state.sessions[index].is_busy() {
+            bail!("wait for the chat to finish working before moving it");
+        }
+
+        // The next prompt must start a provider in the destination checkout.
+        let removed = self.sessions.lock().remove(&session_id);
+        drop(removed);
+        let session = &mut state.sessions[index];
+        session.project_id = project_id;
+        session.workspace = SessionWorkspace::Local;
+        session.runtime_event_cursor = None;
+        session.updated_at = unix_time().max(session.updated_at.saturating_add(1));
+        let moved = session.clone();
+        if !state
+            .sessions
+            .iter()
+            .any(|session| session.project_id == previous_project)
+        {
+            state
+                .projects
+                .retain(|project| project.id != previous_project);
+        }
+        state.mark_session_dirty(session_id);
+        self.task_store.save(&mut state)?;
+        let pinned = self.sessions.lock().keys().copied().collect();
+        trim_resident_transcripts(&mut state, &pinned);
+        Ok(moved)
+    }
+
     pub fn new(settings: DaemonSettingsStore, task_store: StateStore) -> anyhow::Result<Self> {
         let mut task_state = task_store
             .load()
@@ -461,6 +517,9 @@ impl Backend for MichelleBackend {
                 drop(removed);
                 Ok(ResponsePayload::Ack)
             }
+            Command::MoveSessionToProject { project_id } => Ok(ResponsePayload::Session {
+                session: Some(self.move_session_to_project(session_id, project_id)?),
+            }),
             Command::HydrateSession { session_id } => {
                 // Live runtimes stay resident; everything else is trimmed to
                 // the recency window once the response is built.
@@ -1790,6 +1849,7 @@ fn handle_driver_command(
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
+        | Command::MoveSessionToProject { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
         | Command::ListProviderSessions { .. }
@@ -2105,6 +2165,103 @@ struct TurnFinishedWire {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moving_a_projectless_chat_preserves_history_and_restarts_in_the_project() {
+        struct IdleDriver;
+        impl driver::DriverControl for IdleDriver {
+            fn prompt(&self, _: String) {}
+            fn cancel(&self) {}
+            fn respond(&self, _: String, _: String) {}
+            fn rollback(&self, _: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
+                Ok(None)
+            }
+        }
+
+        let directory = std::env::temp_dir().join(format!("michelle-move-chat-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let database = directory.join("state.sqlite");
+        let backend = MichelleBackend::new(
+            DaemonSettingsStore::open(directory.join("daemon.json")).unwrap(),
+            StateStore::new(database.clone()),
+        )
+        .unwrap();
+        let source = Project::from_path(crate::projectless::workspace_root().unwrap().join("chat"));
+        let target = Project::from_path(directory.join("project"));
+        let mut session = AgentSession::new(source.id, ProviderKind::Codex);
+        session.begin_turn("keep this conversation");
+        session.push_message(crate::model::MessageRole::Assistant, "original reply");
+        session.finish_active_turn(crate::model::TurnStatus::Completed);
+        session.provider_cursor = Some(ProviderResumeCursor::Codex {
+            thread_id: "original-thread".into(),
+        });
+        let id = session.id;
+        let message_ids = session
+            .messages
+            .iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>();
+        let cursor = session.provider_cursor.clone();
+        {
+            let mut state = backend.task_state.lock();
+            state.projects = vec![source.clone(), target.clone()];
+            state.sessions = vec![session];
+            state.mark_session_dirty(id);
+            backend.task_store.save(&mut state).unwrap();
+            state.sessions[0].release_transcript();
+        }
+        let driver = Arc::new(IdleDriver);
+        backend.sessions.lock().insert(
+            id,
+            (Uuid::new_v4(), DriverHandle::from_control(driver.clone())),
+        );
+        for status in [
+            SessionStatus::Working,
+            SessionStatus::Waiting,
+            SessionStatus::Background,
+        ] {
+            backend.task_state.lock().sessions[0].status = status;
+            assert!(backend.move_session_to_project(id, target.id).is_err());
+            assert!(backend.sessions.lock().contains_key(&id));
+            assert_eq!(backend.task_state.lock().sessions[0].project_id, source.id);
+        }
+        backend.task_state.lock().sessions[0].status = SessionStatus::Idle;
+        assert!(backend.move_session_to_project(id, Uuid::nil()).is_err());
+        assert!(backend.move_session_to_project(id, source.id).is_err());
+        let moved = backend.move_session_to_project(id, target.id).unwrap();
+        assert_eq!(moved.project_id, target.id);
+        assert_eq!(moved.workspace, SessionWorkspace::Local);
+        assert_eq!(moved.provider_cursor, cursor);
+        assert_eq!(
+            moved
+                .messages
+                .iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>(),
+            message_ids
+        );
+        assert_eq!(moved.turns.len(), 1);
+        assert_eq!(moved.workspace.path().unwrap_or(&target.path), target.path);
+        assert!(!backend.sessions.lock().contains_key(&id));
+        assert_eq!(Arc::strong_count(&driver), 1);
+        assert!(backend.move_session_to_project(id, target.id).is_err());
+        drop(backend);
+
+        let store = StateStore::new(database);
+        let mut restored = store.load().unwrap();
+        store.hydrate(&mut restored.sessions[0]).unwrap();
+        assert_eq!(restored.sessions[0].project_id, target.id);
+        assert_eq!(restored.sessions[0].provider_cursor, cursor);
+        assert_eq!(restored.sessions[0].messages.len(), message_ids.len());
+        assert!(
+            !restored
+                .projects
+                .iter()
+                .any(|project| project.id == source.id)
+        );
+        drop(store);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn stale_runtime_projection_keeps_newer_transcript_cursor() {

@@ -53,7 +53,7 @@ use crate::ui::tooltip::Tooltip;
 
 use crate::persistence::{
     ComposerDraftStore, ComposerDrafts, DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH,
-    PersistedState, PersistedWindowState, SidebarGrouping, SidebarOrdering, StateStore,
+    PersistedState, PersistedWindowState, SidebarOrdering, StateStore,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -1463,6 +1463,8 @@ pub struct Michelle {
     /// Fingerprint + snapshot pair backing `sidebar_rows_cached`.
     sidebar_rows_fingerprint: Cell<Option<u64>>,
     sidebar_rows_snapshot: RefCell<Rc<Vec<SidebarRow>>>,
+    sidebar_projectless_projects: RefCell<HashSet<Uuid>>,
+    sidebar_session_moves: HashSet<Uuid>,
     sidebar_drag_preview: Rc<RefCell<Option<sidebar::SidebarDragPreview>>>,
     sidebar_reorder_animation: RefCell<Option<sidebar::SidebarReorderAnimation>>,
     sidebar_working_headers: RefCell<HashSet<SidebarRow>>,
@@ -2841,6 +2843,8 @@ impl Michelle {
                 sidebar_row_cache: RefCell::new(Vec::new()),
                 sidebar_rows_fingerprint: Cell::new(None),
                 sidebar_rows_snapshot: RefCell::new(Rc::new(Vec::new())),
+                sidebar_projectless_projects: RefCell::new(HashSet::new()),
+                sidebar_session_moves: HashSet::new(),
                 sidebar_drag_preview: Rc::default(),
                 sidebar_reorder_animation: RefCell::new(None),
                 sidebar_working_headers: RefCell::new(HashSet::new()),
