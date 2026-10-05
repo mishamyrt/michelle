@@ -1155,7 +1155,7 @@ fn render_menu_item(
             })
             .child(div().flex_1().min_w_0().truncate().child(label))
             .when(selected, |element| {
-                element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
+                element.child(icon("checkmark", 11.0, theme.text_tertiary))
             });
             track_pointer_highlight(entry, index, in_submenu, disabled, handle).into_any_element()
         }
@@ -1171,7 +1171,7 @@ fn render_menu_item(
                 return row(index, highlighted, theme, handle, None)
                     .text_color(theme.text_ghost)
                     .child(div().flex_1().min_w_0().truncate().child(label))
-                    .child(icon("icons/chevron-right.svg", 10.0, theme.text_ghost))
+                    .child(icon("chevron.right", 10.0, theme.text_ghost))
                     .into_any_element();
             }
             let hover = theme.overlay;
@@ -1201,7 +1201,7 @@ fn render_menu_item(
                             .child(value),
                     )
                 })
-                .child(icon("icons/chevron-right.svg", 10.0, theme.text_tertiary))
+                .child(icon("chevron.right", 10.0, theme.text_tertiary))
                 .into_any_element()
         }
         MenuItem::Custom { render, on_click } => {

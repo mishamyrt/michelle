@@ -1,5 +1,5 @@
 use gpui::{
-    AnyElement, App, Context, Div, ElementId, Hsla, Img, InteractiveElement, Interactivity,
+    AnyElement, App, Context, Div, ElementId, Hsla, InteractiveElement, Interactivity,
     KeyDownEvent, ParentElement, PathBuilder, Pixels, RenderOnce, ScrollHandle, SharedString,
     Stateful, StyleRefinement, Styled, Svg, Window, canvas, div, img, point, prelude::*, px, rgb,
     svg,
@@ -15,28 +15,34 @@ pub mod tooltip;
 use crate::model::{ActivityKind, ProviderKind, SessionStatus};
 use crate::theme::{Theme, sp};
 
-/// A monochrome icon from the embedded set, tinted via text color. Sized in
+/// A monochrome system symbol (or brand mark), tinted via text color. Sized in
 /// `sp` so icons keep pace with the chrome text they sit beside when the UI
 /// font size setting moves.
-pub fn icon(path: &'static str, size: f32, color: Hsla) -> Svg {
+pub fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg()
-        .path(path)
+        .path(name)
         .w(sp(size))
         .h(sp(size))
         .flex_none()
         .text_color(color)
 }
 
-/// A polychrome file icon rendered as an image so the SVG's authored colors
-/// are preserved. GPUI's `svg()` element intentionally renders an alpha mask
-/// tinted with one text color.
-pub fn file_icon(path: &'static str, size: f32) -> Img {
-    img(path).w(sp(size)).h(sp(size)).flex_none()
+/// File symbols follow the theme; language and tool marks keep authored colors.
+pub fn file_icon(name: &'static str, size: f32, color: Hsla) -> AnyElement {
+    if name.starts_with("icons/") {
+        img(name)
+            .w(sp(size))
+            .h(sp(size))
+            .flex_none()
+            .into_any_element()
+    } else {
+        icon(name, size, color).into_any_element()
+    }
 }
 
 /// A compact ghost icon button: the only button shape outside the composer's
 /// bespoke send control.
-pub fn icon_button(id: impl Into<ElementId>, path: &'static str, theme: Theme) -> Stateful<Div> {
+pub fn icon_button(id: impl Into<ElementId>, name: &'static str, theme: Theme) -> Stateful<Div> {
     div()
         .id(id)
         .size(px(22.0))
@@ -47,7 +53,7 @@ pub fn icon_button(id: impl Into<ElementId>, path: &'static str, theme: Theme) -
         .cursor_default()
         .hover(|element| element.bg(theme.overlay))
         .active(|element| element.bg(theme.overlay_strong))
-        .child(icon(path, 13.0, theme.text_tertiary))
+        .child(icon(name, 13.0, theme.text_tertiary))
 }
 
 /// Keeps a wheel gesture in a nested scrollable while it can consume the
@@ -220,15 +226,15 @@ pub fn status_color(theme: &Theme, status: SessionStatus) -> Hsla {
 
 pub fn activity_icon(kind: ActivityKind) -> &'static str {
     match kind {
-        ActivityKind::Reasoning => "icons/sparkle.svg",
-        ActivityKind::Command => "icons/terminal.svg",
-        ActivityKind::FileChange => "icons/pencil.svg",
-        ActivityKind::FileRead => "icons/file.svg",
-        ActivityKind::FileSearch => "icons/search.svg",
-        ActivityKind::FileList => "icons/folder.svg",
-        ActivityKind::Search => "icons/search.svg",
-        ActivityKind::Plan => "icons/list.svg",
-        ActivityKind::Tool => "icons/wrench.svg",
+        ActivityKind::Reasoning => "sparkles",
+        ActivityKind::Command => "terminal",
+        ActivityKind::FileChange => "pencil",
+        ActivityKind::FileRead => "doc",
+        ActivityKind::FileSearch => "magnifyingglass",
+        ActivityKind::FileList => "folder",
+        ActivityKind::Search => "magnifyingglass",
+        ActivityKind::Plan => "list.bullet",
+        ActivityKind::Tool => "wrench.and.screwdriver",
     }
 }
 
@@ -384,7 +390,7 @@ impl RenderOnce for MenuChip {
                     .child(self.label),
             )
             .when(self.caret, |element| {
-                element.child(icon("icons/chevron-down.svg", 10.5, theme.text_ghost))
+                element.child(icon("chevron.down", 10.5, theme.text_ghost))
             })
     }
 }
@@ -484,50 +490,19 @@ mod tests {
     }
 
     #[test]
-    fn every_referenced_icon_is_embedded() {
+    fn every_referenced_icon_is_available() {
         use crate::assets::Assets;
-        use crate::model::{ActivityKind, ProviderKind};
+        use crate::model::{ActivityKind, ProviderKind, RuntimeMode};
         use gpui::AssetSource;
 
-        let mut paths = vec![
-            "icons/panel-left.svg",
-            "icons/plus.svg",
-            "icons/arrow-left.svg",
-            "icons/arrow-right.svg",
-            "icons/arrow-up.svg",
-            "icons/stop.svg",
-            "icons/check.svg",
-            "icons/copy.svg",
-            "icons/rewind.svg",
-            "icons/fork.svg",
-            "icons/git-branch.svg",
-            "icons/chart-column.svg",
-            "icons/chevron-down.svg",
-            "icons/chevron-right.svg",
-            "icons/chevron-up.svg",
-            "icons/chevrons-up-down.svg",
-            "icons/folder.svg",
-            "icons/folder-new.svg",
-            "icons/laptop.svg",
-            "icons/file-diff.svg",
-            "icons/globe.svg",
-            "icons/hourglass.svg",
-            "icons/alert.svg",
-            "icons/lock.svg",
-            "icons/lock-open.svg",
-            "icons/star.svg",
-            "icons/star-filled.svg",
-            "icons/sparkle.svg",
-            "icons/zap.svg",
-            "icons/panel-right.svg",
-            "icons/x.svg",
-            "icons/bot.svg",
-            "icons/rotate-cw.svg",
-            "icons/package.svg",
-            "icons/trash.svg",
-        ];
+        let assets = Assets::default();
+        assets.prepare_system_icons().unwrap();
+        let mut paths = assets.list("").unwrap();
         for provider in ProviderKind::ALL {
-            paths.push(provider_icon(provider));
+            paths.push(provider_icon(provider).into());
+        }
+        for mode in RuntimeMode::ACCESS_OPTIONS {
+            paths.push(mode.icon().into());
         }
         for kind in [
             ActivityKind::Reasoning,
@@ -540,12 +515,12 @@ mod tests {
             ActivityKind::Plan,
             ActivityKind::Tool,
         ] {
-            paths.push(activity_icon(kind));
+            paths.push(activity_icon(kind).into());
         }
         for path in paths {
             assert!(
-                Assets.load(path).unwrap().is_some(),
-                "missing embedded icon: {path}"
+                assets.load(&path).unwrap().is_some(),
+                "missing icon: {path}"
             );
         }
     }

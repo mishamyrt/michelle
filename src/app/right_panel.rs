@@ -182,10 +182,10 @@ fn review_diff_gap_icon_path(direction: crate::review_diff::ExpansionDirection) 
         // Pierre's direction attributes and rendered chevrons are inverted by
         // CSS. Michelle names the data operation directly, so encode the resulting
         // visual here: reveal-from-start points down; reveal-from-end points up.
-        crate::review_diff::ExpansionDirection::Start => "icons/chevron-down.svg",
-        crate::review_diff::ExpansionDirection::End => "icons/chevron-up.svg",
+        crate::review_diff::ExpansionDirection::Start => "chevron.down",
+        crate::review_diff::ExpansionDirection::End => "chevron.up",
         crate::review_diff::ExpansionDirection::Both
-        | crate::review_diff::ExpansionDirection::All => "icons/chevrons-up-down.svg",
+        | crate::review_diff::ExpansionDirection::All => "chevron.up.chevron.down",
     }
 }
 
@@ -501,12 +501,12 @@ fn review_diff_flat_text(line: &crate::review_diff::Line, theme: &Theme) -> md::
 fn file_icon_for_name(name: &str) -> &'static str {
     let name = name.to_ascii_lowercase();
     let named_icon = if name.starts_with("readme") {
-        Some("icons/file-types/readme.svg")
+        Some("doc.text")
     } else if name.starts_with("license")
         || name.starts_with("licence")
         || name.starts_with("copying")
     {
-        Some("icons/file-types/certificate.svg")
+        Some("checkmark.seal")
     } else if name.starts_with("dockerfile") || name.starts_with("compose.") {
         Some("icons/file-types/docker.svg")
     } else if name == "cmakelists.txt" || name.starts_with("cmake.") {
@@ -545,7 +545,7 @@ fn file_icon_for_name(name: &str) -> &'static str {
     } else if name == ".editorconfig" {
         Some("icons/file-types/editorconfig.svg")
     } else if name.starts_with(".env") {
-        Some("icons/file-types/settings.svg")
+        Some("gearshape")
     } else if name.starts_with(".prettier") || name.starts_with("prettier.config.") {
         Some("icons/file-types/prettier.svg")
     } else if name.starts_with(".eslint") || name.starts_with("eslint.config.") {
@@ -645,24 +645,18 @@ fn file_icon_for_name(name: &str) -> &'static str {
         "scss" | "sass" => "icons/file-types/sass.svg",
         "json" | "jsonc" | "jsonl" => "icons/file-types/json.svg",
         "yaml" | "yml" => "icons/file-types/yaml.svg",
-        "toml" | "ini" | "cfg" | "conf" | "config" => "icons/file-types/settings.svg",
+        "toml" | "ini" | "cfg" | "conf" | "config" => "gearshape",
         "xml" | "xsl" | "plist" => "icons/file-types/xml.svg",
-        "md" | "mdx" | "markdown" => "icons/file-types/markdown.svg",
-        "sh" | "bash" | "zsh" | "fish" => "icons/file-types/console.svg",
+        "md" | "mdx" | "markdown" => "doc.richtext",
+        "sh" | "bash" | "zsh" | "fish" => "terminal",
         "ps1" | "psm1" => "icons/file-types/powershell.svg",
-        "sql" | "db" | "sqlite" | "sqlite3" | "csv" | "xls" | "xlsx" => {
-            "icons/file-types/database.svg"
-        }
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "ico" | "tiff" => {
-            "icons/file-types/image.svg"
-        }
-        "svg" => "icons/file-types/svg.svg",
-        "pdf" => "icons/file-types/pdf.svg",
-        "mp3" | "wav" | "flac" | "ogg" | "m4a" => "icons/file-types/audio.svg",
-        "mp4" | "mov" | "avi" | "webm" | "mkv" => "icons/file-types/video.svg",
-        "zip" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" | "tar" | "jar" => {
-            "icons/file-types/zip.svg"
-        }
+        "sql" | "db" | "sqlite" | "sqlite3" | "csv" | "xls" | "xlsx" => "externaldrive",
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "ico" | "tiff" => "photo",
+        "svg" => "photo",
+        "pdf" => "doc.richtext",
+        "mp3" | "wav" | "flac" | "ogg" | "m4a" => "waveform",
+        "mp4" | "mov" | "avi" | "webm" | "mkv" => "film",
+        "zip" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" | "tar" | "jar" => "doc.zipper",
         "wasm" | "wat" => "icons/file-types/webassembly.svg",
         "svelte" => "icons/file-types/svelte.svg",
         "vue" => "icons/file-types/vue.svg",
@@ -687,15 +681,15 @@ fn file_icon_for_name(name: &str) -> &'static str {
         "pug" | "jade" => "icons/file-types/pug.svg",
         "scala" | "sbt" | "sc" => "icons/file-types/scala.svg",
         "sol" => "icons/file-types/solidity.svg",
-        "tex" | "sty" | "cls" => "icons/file-types/tex.svg",
+        "tex" | "sty" | "cls" => "function",
         "xaml" => "icons/file-types/xaml.svg",
         "zig" => "icons/file-types/zig.svg",
         "nix" => "icons/file-types/nix.svg",
         "proto" => "icons/file-types/proto.svg",
-        "diff" | "patch" => "icons/file-types/diff.svg",
-        "exe" | "dll" | "so" | "dylib" => "icons/file-types/exe.svg",
-        "lock" => "icons/file-types/lock.svg",
-        _ => "icons/file-types/file.svg",
+        "diff" | "patch" => "doc.text",
+        "exe" | "dll" | "so" | "dylib" => "app.badge",
+        "lock" => "lock",
+        _ => "doc",
     }
 }
 
@@ -893,10 +887,10 @@ impl RightPanelSurface {
 
     fn icon_path(&self) -> &'static str {
         match self {
-            Self::Terminal(_) => "icons/terminal.svg",
+            Self::Terminal(_) => "terminal",
             Self::BackgroundWork { key, .. } => work_kind_icon(key.kind),
-            Self::Files => "icons/folder.svg",
-            Self::Diff => "icons/file-diff.svg",
+            Self::Files => "folder",
+            Self::Diff => "doc.text",
             Self::File(path) => file_icon_for_path(path),
         }
     }
@@ -1196,15 +1190,15 @@ mod tests {
 
         assert_eq!(
             review_diff_gap_icon_path(ExpansionDirection::Start),
-            "icons/chevron-down.svg"
+            "chevron.down"
         );
         assert_eq!(
             review_diff_gap_icon_path(ExpansionDirection::End),
-            "icons/chevron-up.svg"
+            "chevron.up"
         );
         assert_eq!(
             review_diff_gap_icon_path(ExpansionDirection::Both),
-            "icons/chevrons-up-down.svg"
+            "chevron.up.chevron.down"
         );
     }
 
@@ -1537,10 +1531,7 @@ mod tests {
             file_icon_for_name("Panel.tsx"),
             "icons/file-types/react.svg"
         );
-        assert_eq!(
-            file_icon_for_name("README.md"),
-            "icons/file-types/readme.svg"
-        );
+        assert_eq!(file_icon_for_name("README.md"), "doc.text");
         assert_eq!(
             file_icon_for_name("Dockerfile.dev"),
             "icons/file-types/docker.svg"
@@ -1554,10 +1545,7 @@ mod tests {
             file_icon_for_name("vite.config.ts"),
             "icons/file-types/vite.svg"
         );
-        assert_eq!(
-            file_icon_for_name("unknown.data"),
-            "icons/file-types/file.svg"
-        );
+        assert_eq!(file_icon_for_name("unknown.data"), "doc");
     }
 
     #[test]
@@ -2095,7 +2083,7 @@ impl Michelle {
             .cursor_default()
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
-            .child(icon("icons/panel-right.svg", 14.0, theme.text_tertiary))
+            .child(icon("sidebar.right", 14.0, theme.text_tertiary))
             .tooltip(|window, cx| Tooltip::new(tr!("right_panel.toggle")).build(window, cx))
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
@@ -2275,7 +2263,7 @@ impl Michelle {
                         element.hover(|element| element.bg(theme.overlay))
                     })
                     .child(if uses_file_icon {
-                        file_icon(icon_path, 13.0).into_any_element()
+                        file_icon(icon_path, 13.0, theme.text_secondary).into_any_element()
                     } else {
                         icon(icon_path, 13.0, theme.text_secondary).into_any_element()
                     })
@@ -2320,7 +2308,7 @@ impl Michelle {
                             .items_center()
                             .justify_center()
                             .hover(|element| element.bg(theme.overlay_strong))
-                            .child(icon("icons/x.svg", 10.0, theme.text_tertiary))
+                            .child(icon("xmark", 10.0, theme.text_tertiary))
                             .on_click(move |_, _, cx| {
                                 cx.stop_propagation();
                                 let _ = close_weak.update(cx, |this, cx| {
@@ -2392,7 +2380,7 @@ impl Michelle {
                         cx.stop_propagation();
                     })
                     .child(dropdown_menu(
-                        icon_button("add-right-panel-surface", "icons/plus.svg", theme),
+                        icon_button("add-right-panel-surface", "plus", theme),
                         "add-right-panel-surface-menu",
                         &handle,
                         MenuAlign::BelowRight,
@@ -2615,9 +2603,9 @@ impl Michelle {
                 .child(if is_dir {
                     icon(
                         if entry.expanded {
-                            "icons/chevron-down.svg"
+                            "chevron.down"
                         } else {
-                            "icons/chevron-right.svg"
+                            "chevron.right"
                         },
                         10.0,
                         theme.text_ghost,
@@ -2627,7 +2615,7 @@ impl Michelle {
                     div().w(px(10.0)).h(px(10.0)).flex_none().into_any_element()
                 })
                 .when_some(entry.file_icon, |element, file_icon_path| {
-                    element.child(file_icon(file_icon_path, 14.0))
+                    element.child(file_icon(file_icon_path, 14.0, theme.text_secondary))
                 })
                 .child(
                     div()
@@ -2669,7 +2657,7 @@ impl Michelle {
                     .gap(px(8.0))
                     .border_b_1()
                     .border_color(theme.border)
-                    .child(icon("icons/folder.svg", 13.0, theme.text_tertiary))
+                    .child(icon("folder", 13.0, theme.text_tertiary))
                     .child(
                         div()
                             .min_w_0()
@@ -2732,9 +2720,9 @@ impl Michelle {
         let preview_toggle = is_markdown.then(|| {
             let focus = self.transcript_control_focus("file-markdown-preview-toggle", cx);
             let (icon_path, label) = if preview {
-                ("icons/pencil.svg", tr!("files.edit_markdown_source"))
+                ("pencil", tr!("files.edit_markdown_source"))
             } else {
-                ("icons/eye.svg", tr!("files.preview_markdown"))
+                ("eye", tr!("files.preview_markdown"))
             };
             div()
                 .id("file-markdown-preview-toggle")
@@ -2776,7 +2764,11 @@ impl Michelle {
                     .gap(px(8.0))
                     .border_b_1()
                     .border_color(theme.border)
-                    .child(file_icon(file_icon_for_path(&relative_path), 13.0))
+                    .child(file_icon(
+                        file_icon_for_path(&relative_path),
+                        13.0,
+                        theme.text_secondary,
+                    ))
                     .child(
                         div()
                             .min_w_0()
@@ -3478,9 +3470,9 @@ impl Michelle {
             });
         let refresh_focus = self.transcript_control_focus("right-panel-diff-refresh", cx);
         let refresh_icon: AnyElement = if self.right_panel_diff_loading {
-            motion::spin(icon("icons/loader-circle.svg", 12.0, theme.text_tertiary))
+            motion::spin(icon("arrow.clockwise", 12.0, theme.text_tertiary))
         } else {
-            icon("icons/rotate-cw.svg", 12.0, theme.text_tertiary).into_any_element()
+            icon("arrow.clockwise", 12.0, theme.text_tertiary).into_any_element()
         };
         let refresh = div()
             .id("right-panel-diff-refresh")
@@ -3651,7 +3643,11 @@ impl Michelle {
             .border_color(theme.border)
             .bg(theme.surface)
             .when(sticky, |header| header.block_mouse_except_scroll())
-            .child(file_icon(file_icon_for_path(&file.path), 14.0))
+            .child(file_icon(
+                file_icon_for_path(&file.path),
+                14.0,
+                theme.text_secondary,
+            ))
             .child(
                 div()
                     .id(SharedString::from(format!("{id_prefix}-path-{index}")))
@@ -3988,7 +3984,7 @@ impl Michelle {
                             "right-panel-diff-filter",
                             self.right_panel_diff_filter.clone(),
                         )
-                        .icon("icons/search.svg", 13.0)
+                        .icon("magnifyingglass", 13.0)
                         .w_full(),
                     ),
             )
@@ -4073,14 +4069,14 @@ impl Michelle {
                         .when(!cursor, |row| row.hover(|row| row.bg(theme.overlay)))
                         .child(icon(
                             if expanded {
-                                "icons/chevron-down.svg"
+                                "chevron.down"
                             } else {
-                                "icons/chevron-right.svg"
+                                "chevron.right"
                             },
                             10.0,
                             theme.text_ghost,
                         ))
-                        .child(icon("icons/folder.svg", 13.0, theme.text_tertiary))
+                        .child(icon("folder", 13.0, theme.text_tertiary))
                         .child(
                             div()
                                 .min_w_0()
@@ -4139,7 +4135,11 @@ impl Michelle {
                             .when(!selected && !cursor, |row| {
                                 row.hover(|row| row.bg(theme.overlay))
                             })
-                            .child(file_icon(file_icon_for_path(&path), 13.0))
+                            .child(file_icon(
+                                file_icon_for_path(&path),
+                                13.0,
+                                theme.text_secondary,
+                            ))
                             .child(
                                 div()
                                     .id(SharedString::from(format!(

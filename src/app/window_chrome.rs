@@ -194,26 +194,18 @@ fn client_window_button(
     cx: &mut Context<Michelle>,
 ) -> AnyElement {
     let (id, icon_path, label) = match button {
-        WindowButton::Minimize => (
-            "client-window-minimize",
-            "icons/window-minimize.svg",
-            tr!("window.minimize"),
-        ),
+        WindowButton::Minimize => ("client-window-minimize", "minus", tr!("window.minimize")),
         WindowButton::Maximize if is_maximized => (
             "client-window-restore",
-            "icons/window-restore.svg",
+            "macwindow.on.rectangle",
             tr!("window.restore"),
         ),
         WindowButton::Maximize => (
             "client-window-maximize",
-            "icons/window-maximize.svg",
+            "arrow.up.left.and.arrow.down.right",
             tr!("window.maximize"),
         ),
-        WindowButton::Close => (
-            "client-window-close",
-            "icons/x.svg",
-            tr!("menu.close_window"),
-        ),
+        WindowButton::Close => ("client-window-close", "xmark", tr!("menu.close_window")),
     };
     let focus = cx.focus_handle();
     let icon_color = if enabled {

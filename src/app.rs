@@ -797,7 +797,7 @@ fn traits_choice(theme: Theme, label: String, is_default: bool, selected: bool) 
                 )
             })
             .when(selected, |element| {
-                element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
+                element.child(icon("checkmark", 11.0, theme.text_tertiary))
             })
             .into_any_element()
     })

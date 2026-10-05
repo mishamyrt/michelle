@@ -344,10 +344,10 @@ impl RuntimeMode {
 
     pub fn icon(self) -> &'static str {
         match self {
-            Self::Ask => "icons/lock.svg",
-            Self::AutoAcceptEdits => "icons/pencil.svg",
-            Self::Auto => "icons/sparkle.svg",
-            Self::FullAccess => "icons/lock-open.svg",
+            Self::Ask => "lock",
+            Self::AutoAcceptEdits => "pencil",
+            Self::Auto => "sparkles",
+            Self::FullAccess => "lock.open",
         }
     }
 }

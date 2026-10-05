@@ -763,9 +763,9 @@ impl Render for SidebarDrag {
                 .gap(px(12.0))
                 .child(icon(
                     if preview.collapsed {
-                        "icons/folder.svg"
+                        "folder"
                     } else {
-                        "icons/folder-open.svg"
+                        "folder"
                     },
                     14.0,
                     theme.text_secondary,
@@ -778,11 +778,7 @@ impl Render for SidebarDrag {
                         .child(self.label.clone()),
                 )
                 .when(preview.working, |header| {
-                    header.child(motion::spin_slow(icon(
-                        "icons/loader-circle.svg",
-                        14.0,
-                        theme.text,
-                    )))
+                    header.child(motion::spin_slow(icon("arrow.clockwise", 14.0, theme.text)))
                 })
                 .into_any_element(),
         };
@@ -1077,7 +1073,7 @@ impl Michelle {
             .cursor_default()
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
-            .child(icon("icons/panel-left.svg", 14.0, theme.text_tertiary))
+            .child(icon("sidebar.left", 14.0, theme.text_tertiary))
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
             })
@@ -1157,14 +1153,14 @@ impl Michelle {
                     .gap(px(2.0))
                     .child(self.render_history_button(
                         "navigate-back",
-                        "icons/arrow-left.svg",
+                        "arrow.left",
                         !self.session_navigation.back.is_empty(),
                         true,
                         cx,
                     ))
                     .child(self.render_history_button(
                         "navigate-forward",
-                        "icons/arrow-right.svg",
+                        "arrow.right",
                         !self.session_navigation.forward.is_empty(),
                         false,
                         cx,
@@ -1214,7 +1210,7 @@ impl Michelle {
             MenuItem::new(tr!("project.new_project"), move |_, cx| {
                 let _ = project_weak.update(cx, |this, cx| this.add_project(cx));
             })
-            .icon("icons/folder-new.svg"),
+            .icon("folder.badge.plus"),
         ];
         items.push(MenuItem::new(
             tr!("sidebar.new_group"),
@@ -1270,7 +1266,7 @@ impl Michelle {
     fn render_sidebar_new_session(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         self.render_sidebar_action_row(
             "sidebar-new-session",
-            "icons/compose.svg",
+            "square.and.pencil",
             tr!("menu.new_task"),
             cx,
         )
@@ -1289,7 +1285,7 @@ impl Michelle {
         let search = self
             .render_sidebar_action_row(
                 "sidebar-search",
-                "icons/search.svg",
+                "magnifyingglass",
                 tr!("sidebar.search"),
                 cx,
             )
@@ -1339,7 +1335,7 @@ impl Michelle {
                     .hover(|element| element.bg(theme.overlay))
                     .active(|element| element.bg(theme.overlay_strong))
                     .tooltip(Tooltip::text(tr_cow!("common.settings")))
-                    .child(icon("icons/settings.svg", 14.0, theme.text_tertiary))
+                    .child(icon("gearshape", 14.0, theme.text_tertiary))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_settings_action(&OpenSettings, window, cx);
                     })),
@@ -1986,11 +1982,7 @@ impl Michelle {
             .or_insert_with(|| cx.focus_handle())
             .clone();
         let is_project = matches!(group, SidebarGroup::Project(_));
-        let folder_icon = if collapsed {
-            "icons/folder.svg"
-        } else {
-            "icons/folder-open.svg"
-        };
+        let folder_icon = if collapsed { "folder" } else { "folder" };
         let label = match group {
             SidebarGroup::Project(project_id) => self
                 .state
@@ -2042,7 +2034,7 @@ impl Michelle {
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.bg(theme.overlay_strong))
                         .tooltip(Tooltip::text(tr!("menu.new_task")))
-                        .child(icon("icons/compose.svg", 14.0, theme.text_secondary))
+                        .child(icon("square.and.pencil", 14.0, theme.text_secondary))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
@@ -2057,96 +2049,92 @@ impl Michelle {
                 )
         };
 
-        let header =
-            session_group_header(&theme)
-                .id(SharedString::from(format!(
-                    "sidebar-group-toggle-{group_key}"
-                )))
-                .track_focus(&header_focus)
-                .tab_index(0)
-                .tab_group()
-                .tab_stop(true)
-                .group(group_name)
-                .relative()
-                .w_full()
-                .rounded(px(6.0))
-                .pl(px(8.0))
-                .when(is_project, |header| header.font_weight(FontWeight::NORMAL))
-                .when(group == SidebarGroup::Projectless, |header| {
-                    header.on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                })
-                .cursor_default()
-                .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
-                .hover(|style| style.bg(theme.sidebar_item_background))
-                .active(|style| style.bg(theme.overlay_strong))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .h(px(22.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(12.0))
-                        .when(is_project, |element| {
-                            element.child(icon(folder_icon, 14.0, theme.text_secondary))
-                        })
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex()
-                                .items_center()
-                                .gap(px(2.0))
-                                .child(div().min_w_0().truncate().child(label.clone()))
-                                .text_color(if is_project {
-                                    theme.text
-                                } else {
-                                    theme.text_tertiary
-                                }),
-                        )
-                        .child(div().flex_1()),
-                )
-                .when(!is_project, |header| {
-                    header.child(
-                        icon("icons/chevron-down.svg", 14.0, theme.text_secondary).when(
-                            collapsed,
-                            |icon| {
-                                icon.with_transformation(gpui::Transformation::rotate(
-                                    gpui::percentage(0.75),
-                                ))
-                            },
-                        ),
+        let header = session_group_header(&theme)
+            .id(SharedString::from(format!(
+                "sidebar-group-toggle-{group_key}"
+            )))
+            .track_focus(&header_focus)
+            .tab_index(0)
+            .tab_group()
+            .tab_stop(true)
+            .group(group_name)
+            .relative()
+            .w_full()
+            .rounded(px(6.0))
+            .pl(px(8.0))
+            .when(is_project, |header| header.font_weight(FontWeight::NORMAL))
+            .when(group == SidebarGroup::Projectless, |header| {
+                header.on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            })
+            .cursor_default()
+            .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
+            .hover(|style| style.bg(theme.sidebar_item_background))
+            .active(|style| style.bg(theme.overlay_strong))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(22.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .when(is_project, |element| {
+                        element.child(icon(folder_icon, 14.0, theme.text_secondary))
+                    })
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap(px(2.0))
+                            .child(div().min_w_0().truncate().child(label.clone()))
+                            .text_color(if is_project {
+                                theme.text
+                            } else {
+                                theme.text_tertiary
+                            }),
                     )
-                })
-                .child(compose)
-                .when(working, |element| {
-                    element.child(div().ml(px(6.0)).w(px(14.0)).flex_none().child(
-                        motion::spin_slow(icon("icons/loader-circle.svg", 14.0, theme.text)),
-                    ))
-                })
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toggle_sidebar_group(group, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if this.sidebar_navigation_key_down(
-                        SidebarRow::Header(group),
-                        event,
-                        window,
-                        cx,
-                    ) {
-                        return;
+                    .child(div().flex_1()),
+            )
+            .when(!is_project, |header| {
+                header.child(icon("chevron.down", 14.0, theme.text_secondary).when(
+                    collapsed,
+                    |icon| {
+                        icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
+                            0.75,
+                        )))
+                    },
+                ))
+            })
+            .child(compose)
+            .when(working, |element| {
+                element.child(
+                    div()
+                        .ml(px(6.0))
+                        .w(px(14.0))
+                        .flex_none()
+                        .child(motion::spin_slow(icon("arrow.clockwise", 14.0, theme.text))),
+                )
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_sidebar_group(group, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if this.sidebar_navigation_key_down(SidebarRow::Header(group), event, window, cx) {
+                    return;
+                }
+                match event.keystroke.key.as_str() {
+                    "left" if !collapsed => {
+                        this.set_sidebar_group_collapsed(group, true, cx);
+                        cx.stop_propagation();
                     }
-                    match event.keystroke.key.as_str() {
-                        "left" if !collapsed => {
-                            this.set_sidebar_group_collapsed(group, true, cx);
-                            cx.stop_propagation();
-                        }
-                        "right" if collapsed => {
-                            this.set_sidebar_group_collapsed(group, false, cx);
-                            cx.stop_propagation();
-                        }
-                        _ => {}
+                    "right" if collapsed => {
+                        this.set_sidebar_group_collapsed(group, false, cx);
+                        cx.stop_propagation();
                     }
-                }));
+                    _ => {}
+                }
+            }));
 
         let header = self.sidebar_reorderable_row(
             header,
@@ -2320,7 +2308,7 @@ impl Michelle {
             .cursor_default()
             .child(title)
             .child(
-                icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
+                icon("chevron.down", 14.0, theme.text_secondary)
                     .flex_none()
                     .when(collapsed, |icon| {
                         icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
@@ -2336,11 +2324,7 @@ impl Michelle {
                     ),
             )
             .when(working, |header| {
-                header.child(motion::spin_slow(icon(
-                    "icons/loader-circle.svg",
-                    14.0,
-                    theme.text,
-                )))
+                header.child(motion::spin_slow(icon("arrow.clockwise", 14.0, theme.text)))
             })
             .when(interactive && !renaming, |header| {
                 header
@@ -3272,7 +3256,7 @@ impl Michelle {
                 })
             });
         let has_detail_label = detail_label.is_some();
-        let detail_icon = "icons/git-branch.svg";
+        let detail_icon = "arrow.triangle.branch";
         let rename_input = (interactive && self.session_rename == Some(session_id))
             .then(|| self.session_rename_input.clone());
         let renaming = rename_input.is_some();
@@ -3345,31 +3329,27 @@ impl Michelle {
                     .child(title)
                     .when(working, |element| {
                         element.child(motion::spin_slow(icon(
-                            "icons/loader-circle.svg",
+                            "arrow.clockwise",
                             12.0,
                             status_color(&theme, session.status),
                         )))
                     })
                     .when(session.status == SessionStatus::Background, |element| {
                         element.child(icon(
-                            "icons/hourglass.svg",
+                            "hourglass",
                             12.0,
                             status_color(&theme, session.status),
                         ))
                     })
                     .when(session.status == SessionStatus::Waiting, |element| {
                         element.child(icon(
-                            "icons/alert.svg",
+                            "exclamationmark.triangle",
                             12.0,
                             status_color(&theme, session.status),
                         ))
                     })
                     .when(session.status == SessionStatus::Failed, |element| {
-                        element.child(icon(
-                            "icons/x.svg",
-                            12.0,
-                            status_color(&theme, session.status),
-                        ))
+                        element.child(icon("xmark", 12.0, status_color(&theme, session.status)))
                     }),
             )
             .child(
@@ -3627,14 +3607,14 @@ impl Michelle {
                                     .gap(px(2.0))
                                     .child(self.render_history_button(
                                         "navigate-back",
-                                        "icons/arrow-left.svg",
+                                        "arrow.left",
                                         !self.session_navigation.back.is_empty(),
                                         true,
                                         cx,
                                     ))
                                     .child(self.render_history_button(
                                         "navigate-forward",
-                                        "icons/arrow-right.svg",
+                                        "arrow.right",
                                         !self.session_navigation.forward.is_empty(),
                                         false,
                                         cx,
@@ -3675,7 +3655,7 @@ impl Michelle {
                                 .text_size(sp(12.5))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.text_secondary)
-                                .child(icon("icons/bot.svg", 10.5, theme.text_tertiary))
+                                .child(icon("cpu", 10.5, theme.text_tertiary))
                                 .child(div().min_w_0().truncate().child(SharedString::from(label)))
                         })),
                     cx,
@@ -3711,7 +3691,7 @@ impl Michelle {
                 .justify_center()
                 .px_8()
                 .pb(px(46.0))
-                .child(icon("icons/sparkle.svg", 24.0, theme.accent))
+                .child(icon("sparkles", 24.0, theme.accent))
                 .child(
                     div()
                         .mt(px(16.0))
@@ -3784,7 +3764,7 @@ impl Michelle {
                                 .text_size(sp(12.5))
                                 .hover(|element| element.bg(theme.overlay))
                                 .active(|element| element.bg(theme.overlay_strong))
-                                .child(icon("icons/x.svg", 11.0, theme.text_tertiary))
+                                .child(icon("xmark", 11.0, theme.text_tertiary))
                                 .child(tr_cow!("project.no_project"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.create_projectless_session(cx);
@@ -3825,7 +3805,7 @@ impl Michelle {
             .justify_center()
             .px_8()
             .pb(px(52.0))
-            .child(icon("icons/sparkle.svg", 20.0, theme.accent))
+            .child(icon("sparkles", 20.0, theme.accent))
             .child(
                 div()
                     .mt(px(14.0))

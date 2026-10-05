@@ -182,10 +182,14 @@ impl MichelleApplicationExt for Application {
 pub fn run() {
     let daemon = crate::daemon::start_process()
         .unwrap_or_else(|error| panic!("failed to start Michelle daemon: {error:#}"));
+    let assets = crate::assets::Assets::default();
     gpui_platform::application()
-        .with_assets(crate::assets::Assets)
+        .with_assets(assets.clone())
         .with_main_window_reopen()
         .run(move |cx: &mut App| {
+            let system_icons = cx
+                .background_executor()
+                .spawn(async move { assets.prepare_system_icons() });
             // Linux uses this for Wayland app_id/X11 WM_CLASS and notification
             // attribution. Other platforms also benefit from one stable
             // process identity.
@@ -284,83 +288,93 @@ pub fn run() {
             })
             .detach();
 
-            let (window_bounds, display_id) = restored_window_placement(cx);
-            let window = cx
-                .open_window(
-                    WindowOptions {
-                        titlebar: Some(TitlebarOptions {
-                            title: Some(APP_NAME.into()),
-                            // Windows creates the window without `WS_CAPTION`
-                            // either way; asking for the transparent titlebar
-                            // is what extends the client area over the frame
-                            // so Michelle's own header can host the caption
-                            // buttons and drag region.
-                            appears_transparent: cfg!(any(
-                                target_os = "macos",
-                                target_os = "windows"
-                            )),
-                            traffic_light_position: cfg!(target_os = "macos")
-                                .then(|| point(px(16.0), px(17.0))),
-                        }),
-                        // Michelle moves its custom macOS titlebar explicitly. Keep
-                        // the NSWindow movable so native controls and Window-menu
-                        // tiling remain enabled.
-                        is_movable: true,
-                        app_owns_titlebar_drag: cfg!(target_os = "macos"),
-                        window_background: if cfg!(target_os = "macos") {
-                            WindowBackgroundAppearance::Blurred
-                        } else {
-                            WindowBackgroundAppearance::Opaque
-                        },
-                        app_id: Some(APP_ID.to_owned()),
-                        window_bounds: Some(window_bounds),
-                        display_id,
-                        window_min_size: Some(size(px(MIN_WINDOW_WIDTH), px(MIN_WINDOW_HEIGHT))),
-                        ..Default::default()
-                    },
-                    move |window, cx| {
-                        crate::platform::configure_main_window_close_behavior(window, cx);
-                        let michelle = Michelle::new(window, cx, daemon);
-                        let composer_focus = michelle.read(cx).composer_focus(cx);
-                        window.focus(&composer_focus, cx);
-                        michelle
-                    },
-                )
-                .expect("failed to open Michelle window");
+            cx.spawn(async move |cx| {
+                system_icons.await.expect("failed to load system icons");
+                cx.update(move |cx| {
+                    let (window_bounds, display_id) = restored_window_placement(cx);
+                    let window = cx
+                        .open_window(
+                            WindowOptions {
+                                titlebar: Some(TitlebarOptions {
+                                    title: Some(APP_NAME.into()),
+                                    // Windows creates the window without `WS_CAPTION`
+                                    // either way; asking for the transparent titlebar
+                                    // is what extends the client area over the frame
+                                    // so Michelle's own header can host the caption
+                                    // buttons and drag region.
+                                    appears_transparent: cfg!(any(
+                                        target_os = "macos",
+                                        target_os = "windows"
+                                    )),
+                                    traffic_light_position: cfg!(target_os = "macos")
+                                        .then(|| point(px(16.0), px(17.0))),
+                                }),
+                                // Michelle moves its custom macOS titlebar explicitly. Keep
+                                // the NSWindow movable so native controls and Window-menu
+                                // tiling remain enabled.
+                                is_movable: true,
+                                app_owns_titlebar_drag: cfg!(target_os = "macos"),
+                                window_background: if cfg!(target_os = "macos") {
+                                    WindowBackgroundAppearance::Blurred
+                                } else {
+                                    WindowBackgroundAppearance::Opaque
+                                },
+                                app_id: Some(APP_ID.to_owned()),
+                                window_bounds: Some(window_bounds),
+                                display_id,
+                                window_min_size: Some(size(
+                                    px(MIN_WINDOW_WIDTH),
+                                    px(MIN_WINDOW_HEIGHT),
+                                )),
+                                ..Default::default()
+                            },
+                            move |window, cx| {
+                                crate::platform::configure_main_window_close_behavior(window, cx);
+                                let michelle = Michelle::new(window, cx, daemon);
+                                let composer_focus = michelle.read(cx).composer_focus(cx);
+                                window.focus(&composer_focus, cx);
+                                michelle
+                            },
+                        )
+                        .expect("failed to open Michelle window");
 
-            cx.on_system_notification_response({
-                let window = window;
-                move |response, cx| {
-                    let Some(session_id) = crate::app::task_id_from_notification_tag(&response.tag)
-                    else {
-                        return;
-                    };
+                    cx.on_system_notification_response({
+                        let window = window;
+                        move |response, cx| {
+                            let Some(session_id) =
+                                crate::app::task_id_from_notification_tag(&response.tag)
+                            else {
+                                return;
+                            };
+                            window
+                                .update(cx, |michelle, window, cx| {
+                                    michelle.open_task_from_notification(session_id, cx);
+                                    window.activate_window();
+                                    cx.activate(true);
+                                })
+                                .ok();
+                            cx.dismiss_system_notification(&response.tag);
+                        }
+                    });
+
                     window
-                        .update(cx, |michelle, window, cx| {
-                            michelle.open_task_from_notification(session_id, cx);
-                            window.activate_window();
+                        .update(cx, |_, window, cx| {
+                            crate::platform::configure_sidebar_material(
+                                window,
+                                crate::theme::Theme::current(cx).is_dark,
+                                crate::theme::Theme::current(cx).sidebar,
+                            );
+                            crate::platform::configure_touch_scrolling(window, cx);
                             cx.activate(true);
                         })
                         .ok();
-                    cx.dismiss_system_notification(&response.tag);
-                }
-            });
 
-            window
-                .update(cx, |_, window, cx| {
-                    crate::platform::configure_sidebar_material(
-                        window,
-                        crate::theme::Theme::current(cx).is_dark,
-                        crate::theme::Theme::current(cx).sidebar,
-                    );
-                    crate::platform::configure_touch_scrolling(window, cx);
-                    cx.activate(true);
-                })
-                .ok();
-
-            set_app_menus(cx);
-            // A Linux handoff retains the previous prefix until this freshly
-            // relaunched build has successfully opened its main window.
+                    set_app_menus(cx);
+                    // A Linux handoff retains the previous prefix until this freshly
+                    // relaunched build has successfully opened its main window.
+                });
+            })
+            .detach();
         });
 }
 

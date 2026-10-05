@@ -465,7 +465,7 @@ fn usage_panel(
                 .hover(|element| element.opacity(0.8))
                 .tooltip(Tooltip::text(tr!("usage.open_account_settings")))
                 .on_click(move |_, _, cx| cx.open_url(url))
-                .child(icon("icons/arrow-right.svg", 10.0, theme.text_tertiary))
+                .child(icon("arrow.right", 10.0, theme.text_tertiary))
                 .into_any_element(),
             None => header_row.into_any_element(),
         });

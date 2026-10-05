@@ -23,43 +23,43 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 7] = [
     (
         SettingsPage::General,
         "settings.general",
-        "icons/settings.svg",
+        "gearshape",
         "settings.general_keywords",
     ),
     (
         SettingsPage::Appearance,
         "settings.appearance",
-        "icons/appearance.svg",
+        "circle.lefthalf.filled",
         "settings.appearance_keywords",
     ),
     (
         SettingsPage::Providers,
         "settings.providers",
-        "icons/bot.svg",
+        "cpu",
         "settings.providers_keywords",
     ),
     (
         SettingsPage::Skills,
         "settings.skills",
-        "icons/package.svg",
+        "shippingbox",
         "settings.skills_keywords",
     ),
     (
         SettingsPage::Usage,
         "settings.usage",
-        "icons/chart-column.svg",
+        "chart.bar",
         "settings.usage_keywords",
     ),
     (
         SettingsPage::Daemon,
         "settings.daemon",
-        "icons/server.svg",
+        "server.rack",
         "settings.daemon_keywords",
     ),
     (
         SettingsPage::ComputerUse,
         "settings.computer_use",
-        "icons/cursor-spark.svg",
+        "cursorarrow.rays",
         "settings.computer_use_keywords",
     ),
 ];
@@ -197,7 +197,7 @@ impl Michelle {
                         .text_color(theme.text_secondary)
                         .hover(|element| element.bg(theme.overlay))
                         .active(|element| element.bg(theme.overlay_strong))
-                        .child(icon("icons/arrow-left.svg", 15.0, theme.text_tertiary))
+                        .child(icon("arrow.left", 15.0, theme.text_tertiary))
                         .child(tr!("settings.back"))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.settings_page = None;
@@ -210,7 +210,7 @@ impl Michelle {
             .child(
                 div().px(px(12.0)).pt(px(8.0)).child(
                     TextField::new("settings-search-field", self.settings_search.clone())
-                        .icon("icons/search.svg", 13.0),
+                        .icon("magnifyingglass", 13.0),
                 ),
             )
             .child(div().h(px(18.0)))
@@ -601,9 +601,9 @@ impl Michelle {
             .hover(|element| element.bg(theme.overlay))
             .child(icon(
                 if url_copied {
-                    "icons/check.svg"
+                    "checkmark"
                 } else {
-                    "icons/copy.svg"
+                    "doc.on.doc"
                 },
                 11.0,
                 theme.text_tertiary,
@@ -648,11 +648,7 @@ impl Michelle {
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .child(icon(
-                if token_revealed {
-                    "icons/eye-off.svg"
-                } else {
-                    "icons/eye.svg"
-                },
+                if token_revealed { "eye.slash" } else { "eye" },
                 12.0,
                 theme.text_tertiary,
             ))
@@ -692,9 +688,9 @@ impl Michelle {
             .hover(|element| element.bg(theme.overlay))
             .child(icon(
                 if token_copied {
-                    "icons/check.svg"
+                    "checkmark"
                 } else {
-                    "icons/copy.svg"
+                    "doc.on.doc"
                 },
                 11.0,
                 theme.text_tertiary,
@@ -1017,7 +1013,7 @@ impl Michelle {
                                 .min_w_0()
                                 .flex()
                                 .gap(px(8.0))
-                                .child(icon("icons/alert.svg", 13.0, theme.warning))
+                                .child(icon("exclamationmark.triangle", 13.0, theme.warning))
                                 .child(
                                     div()
                                         .flex_1()
@@ -1580,7 +1576,7 @@ impl Michelle {
             .text_color(theme.text_secondary)
             .opacity(if checking { 0.6 } else { 1.0 })
             .hover(|element| element.bg(theme.overlay))
-            .child(icon("icons/rotate-cw.svg", 11.0, theme.text_tertiary))
+            .child(icon("arrow.clockwise", 11.0, theme.text_tertiary))
             .child(if checking {
                 tr!("common.checking")
             } else {
@@ -1658,9 +1654,9 @@ impl Michelle {
             let expand_button = icon_button(
                 SharedString::from(format!("provider-expand-{}", kind.id())),
                 if expanded {
-                    "icons/chevron-down.svg"
+                    "chevron.down"
                 } else {
-                    "icons/chevron-right.svg"
+                    "chevron.right"
                 },
                 theme,
             )
@@ -2562,7 +2558,7 @@ fn permission_status_row(
             .cursor_default()
             .text_size(sp(12.5))
             .text_color(theme.success)
-            .child(icon("icons/check.svg", 12.0, theme.success))
+            .child(icon("checkmark", 12.0, theme.success))
             .child(tr!("computer_use.access_granted"))
     } else {
         div()

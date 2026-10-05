@@ -118,7 +118,7 @@ impl Michelle {
                             .flex()
                             .items_center()
                             .gap(px(8.0))
-                            .child(icon("icons/alert.svg", 13.0, theme.warning))
+                            .child(icon("exclamationmark.triangle", 13.0, theme.warning))
                             .child(
                                 div()
                                     .text_size(sp(12.5))
@@ -229,7 +229,7 @@ impl Michelle {
                             })),
                     )
                     .when(is_selected, |row| {
-                        row.child(icon("icons/check.svg", 12.0, theme.accent))
+                        row.child(icon("checkmark", 12.0, theme.accent))
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.select_user_input_option(click_label.clone(), cx);
@@ -410,7 +410,7 @@ impl Michelle {
                         .text_size(sp(12.5))
                         .line_height(sp(16.0))
                         .child(icon(
-                            "icons/pencil.svg",
+                            "pencil",
                             11.0,
                             if has_custom {
                                 theme.accent
@@ -499,7 +499,7 @@ impl Michelle {
                         .flex()
                         .items_center()
                         .gap(px(9.0))
-                        .child(icon("icons/globe.svg", 14.0, theme.warning))
+                        .child(icon("globe", 14.0, theme.warning))
                         .child(
                             div()
                                 .text_size(sp(12.5))
@@ -779,7 +779,7 @@ impl Michelle {
                                         .hover(|style| style.bg(gpui::white().opacity(0.16)))
                                         .active(|style| style.bg(gpui::white().opacity(0.24)))
                                         .tooltip(Tooltip::text(tr!("common.close")))
-                                        .child(icon("icons/x.svg", 11.0, gpui::white()))
+                                        .child(icon("xmark", 11.0, gpui::white()))
                                         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                                             window.focus(&close_focus, cx);
                                             cx.stop_propagation();
@@ -992,7 +992,7 @@ impl Michelle {
         // state on their own, so the warning tint is never the only signal.
         let trigger = if no_providers {
             MenuChip::new("composer-provider-model")
-                .icon("icons/alert.svg", theme.warning)
+                .icon("exclamationmark.triangle", theme.warning)
                 .label(tr!("models.no_providers"))
         } else {
             MenuChip::new("composer-provider-model")
@@ -1045,7 +1045,7 @@ impl Michelle {
                             })
                             .hover(|element| element.bg(theme.overlay))
                             .child(icon(
-                                "icons/star.svg",
+                                "star",
                                 17.0,
                                 if favorites_selected {
                                     theme.text
@@ -1140,7 +1140,7 @@ impl Michelle {
                             .flex()
                             .items_center()
                             .gap(px(8.0))
-                            .child(icon("icons/search.svg", 15.0, theme.text_secondary))
+                            .child(icon("magnifyingglass", 15.0, theme.text_secondary))
                             .child(div().flex_1().min_w_0().child(search.clone())),
                     );
 
@@ -1264,11 +1264,7 @@ impl Michelle {
                                     .justify_center()
                                     .hover(|element| element.bg(theme.overlay_strong))
                                     .child(icon(
-                                        if is_favorite {
-                                            "icons/star-filled.svg"
-                                        } else {
-                                            "icons/star.svg"
-                                        },
+                                        if is_favorite { "star.fill" } else { "star" },
                                         14.0,
                                         if is_favorite {
                                             theme.favorite
@@ -1590,9 +1586,7 @@ impl Michelle {
         let handle = self.menu_handle("model-traits", cx);
         Some(dropdown_menu(
             MenuChip::new("model-traits")
-                .when(fast, |trigger| {
-                    trigger.icon("icons/zap.svg", theme.text_secondary)
-                })
+                .when(fast, |trigger| trigger.icon("bolt", theme.text_secondary))
                 .label(trigger_label)
                 .caret(false)
                 .selected(handle.is_open()),
@@ -1740,11 +1734,7 @@ impl Michelle {
                                         ),
                                 )
                                 .when(selected, |element| {
-                                    element.child(icon(
-                                        "icons/check.svg",
-                                        11.0,
-                                        theme.text_tertiary,
-                                    ))
+                                    element.child(icon("checkmark", 11.0, theme.text_tertiary))
                                 })
                                 .into_any_element()
                         })
@@ -1784,7 +1774,7 @@ impl Michelle {
             }
         });
         let trigger = MenuChip::new("agent-preset")
-            .icon("icons/bot.svg", theme.text_tertiary)
+            .icon("cpu", theme.text_tertiary)
             .label(selected_label)
             .caret(false)
             .selected(handle.is_open());
@@ -1854,11 +1844,7 @@ impl Michelle {
                                         ),
                                 )
                                 .when(selected, |element| {
-                                    element.child(icon(
-                                        "icons/check.svg",
-                                        11.0,
-                                        theme.text_tertiary,
-                                    ))
+                                    element.child(icon("checkmark", 11.0, theme.text_tertiary))
                                 })
                                 .into_any_element()
                         })
@@ -1906,7 +1892,7 @@ impl Michelle {
                 .text_size(sp(12.5))
                 .line_height(sp(14.0))
                 .text_color(color)
-                .child(icon("icons/target.svg", 10.5, color))
+                .child(icon("scope", 10.5, color))
                 .child(div().max_w(px(220.0)).truncate().child(label))
                 .hover(|element| element.bg(theme.overlay))
                 .tooltip(Tooltip::text(objective))
@@ -2332,7 +2318,7 @@ impl Michelle {
         for (index, attachment) in self.composer_attachments.iter().enumerate() {
             let menu = self.menu_handle(format!("composer-attachment-{index}-menu"), cx);
             let icon_path = if attachment.is_dir {
-                "icons/folder.svg"
+                "folder"
             } else {
                 super::right_panel::file_icon_for_path(&attachment.mention)
             };
@@ -2399,7 +2385,7 @@ impl Michelle {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(icon("icons/file-types/image.svg", 16.0, theme.text_ghost)),
+                            .child(icon("photo", 16.0, theme.text_ghost)),
                     );
                 }
             } else {
@@ -2462,7 +2448,7 @@ impl Michelle {
                     .focus_visible(|style| style.border_1().border_color(theme.accent))
                     .hover(|element| element.bg(theme.canvas.opacity(0.95)))
                     .active(|element| element.opacity(0.8))
-                    .child(icon("icons/x.svg", 9.0, theme.text_secondary))
+                    .child(icon("xmark", 9.0, theme.text_secondary))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
                         if index < this.composer_attachments.len() {
@@ -2536,11 +2522,7 @@ impl Michelle {
                     .active(|element| element.opacity(0.8))
                     .text_size(sp(12.5))
                     .text_color(theme.text_secondary)
-                    .child(icon(
-                        "icons/corner-down-right.svg",
-                        11.0,
-                        theme.text_secondary,
-                    ))
+                    .child(icon("arrow.turn.down.right", 11.0, theme.text_secondary))
                     .child(tr!("composer.steer"))
                     .tooltip(Tooltip::text(tr!("composer.steer_current")))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -2573,7 +2555,7 @@ impl Michelle {
                     .when(menu_open, |element| element.bg(theme.overlay_strong))
                     .hover(|element| element.bg(theme.overlay_strong))
                     .active(|element| element.opacity(0.8))
-                    .child(icon("icons/ellipsis.svg", 12.5, theme.text_secondary)),
+                    .child(icon("ellipsis", 12.5, theme.text_secondary)),
                 SharedString::from(format!("queued-message-more-menu-{message_id}")),
                 &menu_handle,
                 MenuAlign::BelowRight,
@@ -2586,13 +2568,13 @@ impl Michelle {
                                 this.edit_queued_message(session_id, message_id, window, cx);
                             });
                         })
-                        .icon("icons/pencil.svg"),
+                        .icon("pencil"),
                         MenuItem::new(tr!("composer.remove_followup"), move |_, cx| {
                             let _ = remove_weak.update(cx, |this, cx| {
                                 this.remove_queued_message(session_id, message_id, cx);
                             });
                         })
-                        .icon("icons/trash.svg"),
+                        .icon("trash"),
                     ]
                 },
             );
@@ -2610,7 +2592,7 @@ impl Michelle {
                     .focus_visible(|style| style.border_1().border_color(theme.accent))
                     .hover(|element| element.bg(theme.overlay))
                     .tooltip(Tooltip::text(tr!("composer.edit_in_composer")))
-                    .child(icon("icons/queue.svg", 12.0, theme.text_tertiary))
+                    .child(icon("text.badge.plus", 12.0, theme.text_tertiary))
                     .child(
                         div()
                             .flex_1()
@@ -2644,7 +2626,7 @@ impl Michelle {
                                     })
                                     .hover(|element| element.bg(theme.overlay_strong))
                                     .active(|element| element.opacity(0.8))
-                                    .child(icon("icons/trash.svg", 12.0, theme.text_secondary))
+                                    .child(icon("trash", 12.0, theme.text_secondary))
                                     .tooltip(Tooltip::text(tr!("composer.remove_followup")))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
@@ -2820,7 +2802,7 @@ impl Michelle {
                                 .cursor_default()
                                 .bg(theme.overlay_strong)
                                 .child(motion::spin(icon(
-                                    "icons/loader-circle.svg",
+                                    "arrow.clockwise",
                                     15.0,
                                     theme.text_secondary,
                                 )))
@@ -2853,7 +2835,7 @@ impl Michelle {
                                             )
                                         })
                                         .when(!escape_stop_armed, |element| {
-                                            element.child(icon("icons/stop.svg", 18.0, theme.text))
+                                            element.child(icon("stop", 18.0, theme.text))
                                         })
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.cancel_turn(cx);
@@ -2873,11 +2855,7 @@ impl Michelle {
                                             .bg(theme.inverse)
                                             .hover(|element| element.opacity(0.9))
                                             .active(|element| element.opacity(0.8))
-                                            .child(icon(
-                                                "icons/arrow-up.svg",
-                                                16.0,
-                                                theme.on_inverse,
-                                            ))
+                                            .child(icon("arrow.up", 16.0, theme.on_inverse))
                                             .tooltip(Tooltip::text(tr!("composer.queue_followup")))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 let prompt =
@@ -2912,7 +2890,7 @@ impl Michelle {
                                         .active(|element| element.opacity(0.8))
                                 })
                                 .child(icon(
-                                    "icons/arrow-up.svg",
+                                    "arrow.up",
                                     16.0,
                                     if can_send {
                                         theme.on_inverse
@@ -3007,7 +2985,7 @@ impl Michelle {
         };
 
         let trigger = MenuChip::new("workspace-branch")
-            .icon("icons/git-branch.svg", theme.text_tertiary)
+            .icon("arrow.triangle.branch", theme.text_tertiary)
             .label(if self.branch_operation_pending {
                 tr!("branches.switching")
             } else {
@@ -3079,7 +3057,7 @@ impl Michelle {
                                 .text_size(sp(13.0))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.text)
-                                .child(icon("icons/plus.svg", 14.0, theme.text_secondary))
+                                .child(icon("plus", 14.0, theme.text_secondary))
                                 .child(tr!("branches.create_and_checkout")),
                         )
                         .child(
@@ -3173,7 +3151,7 @@ impl Michelle {
                                                 .hover(|element| element.bg(theme.overlay))
                                                 .active(|element| element.opacity(0.85))
                                         })
-                                        .child(icon("icons/git-branch.svg", 12.0, color))
+                                        .child(icon("arrow.triangle.branch", 12.0, color))
                                         .child(
                                             div()
                                                 .min_w_0()
@@ -3186,7 +3164,7 @@ impl Michelle {
                                         )
                                         .when(selected, |element| {
                                             element.child(icon(
-                                                "icons/check.svg",
+                                                "checkmark",
                                                 11.0,
                                                 theme.text_secondary,
                                             ))
@@ -3238,7 +3216,7 @@ impl Michelle {
                             )
                             .hover(|element| element.bg(theme.overlay))
                             .active(|element| element.opacity(0.85))
-                            .child(icon("icons/plus.svg", 12.0, theme.text_secondary))
+                            .child(icon("plus", 12.0, theme.text_secondary))
                             .child(
                                 div()
                                     .text_size(sp(12.5))
@@ -3276,7 +3254,7 @@ impl Michelle {
                                         .flex()
                                         .items_center()
                                         .gap(px(8.0))
-                                        .child(icon("icons/search.svg", 15.0, theme.text_secondary))
+                                        .child(icon("magnifyingglass", 15.0, theme.text_secondary))
                                         .child(div().flex_1().min_w_0().child(search.clone())),
                                 ),
                         )
@@ -3376,7 +3354,7 @@ impl Michelle {
 
         let project_handle = self.project_picker_handle(ProjectPickerSite::Composer, cx);
         let project_trigger = MenuChip::new("workspace-project")
-            .icon("icons/folder.svg", theme.text_tertiary)
+            .icon("folder", theme.text_tertiary)
             .label(project_name)
             .caret(false)
             .disabled(!can_configure_workspace)
@@ -3405,9 +3383,9 @@ impl Michelle {
             SessionWorkspace::Worktree { branch, .. } => SharedString::from(branch.clone()),
         };
         let workspace_icon = if workspace.is_local() {
-            "icons/laptop.svg"
+            "laptopcomputer"
         } else {
-            "icons/fork.svg"
+            "arrow.triangle.branch"
         };
         let worktree_handle = self.menu_handle("workspace-worktree", cx);
         let worktree_trigger = MenuChip::new("workspace-worktree")
@@ -3436,7 +3414,7 @@ impl Michelle {
                                 this.select_workspace(SessionWorkspace::Local, cx);
                             });
                         })
-                        .icon("icons/laptop.svg")
+                        .icon("laptopcomputer")
                         .selected(local_selected),
                         MenuItem::new(tr!("workspace.new_worktree"), move |_, cx| {
                             let _ = worktree.update(cx, |this, cx| {
@@ -3446,7 +3424,7 @@ impl Michelle {
                                 );
                             });
                         })
-                        .icon("icons/fork.svg")
+                        .icon("arrow.triangle.branch")
                         .selected(worktree_selected)
                         .disabled(projectless_selected),
                     ]
@@ -3766,7 +3744,7 @@ fn model_picker_empty_state(
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(icon("icons/bot.svg", 19.0, theme.text_tertiary)),
+                .child(icon("cpu", 19.0, theme.text_tertiary)),
         )
         .child(
             div()
@@ -3803,7 +3781,7 @@ fn model_picker_empty_state(
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
                 .hover(|element| element.bg(theme.overlay))
-                .child(icon("icons/settings.svg", 11.0, theme.text_tertiary))
+                .child(icon("gearshape", 11.0, theme.text_tertiary))
                 .child(tr!("models.open_provider_settings"))
                 .on_click(move |_, window, cx| {
                     open_provider_settings_from_picker(&click_michelle, &click_popover, window, cx);

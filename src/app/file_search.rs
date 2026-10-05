@@ -846,7 +846,7 @@ impl Michelle {
                 )
                 .child(find_toggle(
                     "find-toggle-case",
-                    "icons/case-sensitive.svg",
+                    "textformat",
                     tr!(
                         "find.match_case",
                         shortcut = crate::platform::primary_shortcut("⌥⌘C", "Ctrl+Alt+C")
@@ -859,7 +859,7 @@ impl Michelle {
                 ))
                 .child(find_toggle(
                     "find-toggle-word",
-                    "icons/whole-word.svg",
+                    "textformat.abc",
                     tr!(
                         "find.match_whole_word",
                         shortcut = crate::platform::primary_shortcut("⌥⌘W", "Ctrl+Alt+W")
@@ -872,7 +872,7 @@ impl Michelle {
                 ))
                 .child(find_toggle(
                     "find-toggle-regex",
-                    "icons/regex.svg",
+                    "asterisk",
                     tr!(
                         "find.use_regex",
                         shortcut = crate::platform::primary_shortcut("⌥⌘R", "Ctrl+Alt+R")
@@ -906,7 +906,7 @@ impl Michelle {
             )
             .child(find_bar_button(
                 "find-previous",
-                "icons/arrow-up.svg",
+                "arrow.up",
                 tr!("find.previous_match"),
                 has_matches,
                 theme,
@@ -914,7 +914,7 @@ impl Michelle {
             ))
             .child(find_bar_button(
                 "find-next",
-                "icons/arrow-down.svg",
+                "arrow.down",
                 tr!("find.next_match"),
                 has_matches,
                 theme,
@@ -923,7 +923,7 @@ impl Michelle {
             .child(div().flex_1())
             .child(find_bar_button(
                 "find-close",
-                "icons/x.svg",
+                "xmark",
                 tr!("find.close"),
                 true,
                 theme,
@@ -945,7 +945,7 @@ impl Michelle {
                 ))
                 .child(find_bar_button(
                     "replace-one",
-                    "icons/replace.svg",
+                    "arrow.left.arrow.right",
                     tr!("find.replace"),
                     has_matches,
                     theme,
@@ -953,7 +953,7 @@ impl Michelle {
                 ))
                 .child(find_bar_button(
                     "replace-all",
-                    "icons/replace-all.svg",
+                    "arrow.triangle.2.circlepath",
                     tr!(
                         "find.replace_all",
                         shortcut = crate::platform::primary_shortcut("⌥⌘Enter", "Ctrl+Alt+Enter")
@@ -1009,9 +1009,9 @@ impl Michelle {
                         })
                         .child(icon(
                             if replace_shown {
-                                "icons/chevron-down.svg"
+                                "chevron.down"
                             } else {
-                                "icons/chevron-right.svg"
+                                "chevron.right"
                             },
                             10.0,
                             if writable {

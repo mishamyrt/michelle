@@ -1540,7 +1540,7 @@ fn checkbox(checked: bool, ctx: &Ctx) -> AnyElement {
         .justify_center()
         .when(checked, |element| {
             element.child(crate::ui::icon(
-                "icons/check.svg",
+                "checkmark",
                 box_size - 4.0,
                 ctx.palette.inset,
             ))
@@ -1681,11 +1681,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
         .focus_visible(|style| style.border_1().border_color(ctx.palette.accent))
         .hover(|style| style.bg(ctx.palette.overlay))
         .child(crate::ui::icon(
-            if copied {
-                "icons/check.svg"
-            } else {
-                "icons/copy.svg"
-            },
+            if copied { "checkmark" } else { "doc.on.doc" },
             11.0,
             ctx.palette.ghost,
         ))
@@ -2119,8 +2115,8 @@ mod tests {
         assert!(body.contains(".whitespace_normal()"));
         assert!(!body.contains(".overflow_x_scroll()"));
         assert!(!body.contains(".whitespace_nowrap()"));
-        assert!(body.contains("\"icons/copy.svg\""));
-        assert!(body.contains("\"icons/check.svg\""));
+        assert!(body.contains("\"doc.on.doc\""));
+        assert!(body.contains("\"checkmark\""));
         assert!(body.contains("ClipboardItem::new_string"));
         assert!(body.contains("show_code_copied"));
         assert!(body.contains(".tab_index(0)"));

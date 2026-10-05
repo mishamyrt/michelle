@@ -278,7 +278,7 @@ impl Michelle {
                         .focus_visible(|style| style.border_color(theme.accent))
                         .hover(|style| style.bg(theme.raised))
                         .active(|style| style.bg(theme.overlay_strong))
-                        .child(icon("icons/arrow-down.svg", 16.0, theme.text))
+                        .child(icon("arrow.down", 16.0, theme.text))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.scroll_transcript_to_bottom(cx);
                             cx.stop_propagation();
@@ -918,11 +918,7 @@ impl Michelle {
             .cursor_default()
             .focus_visible(|button| button.bg(theme.overlay_strong))
             .hover(|button| button.bg(theme.overlay_strong))
-            .child(icon(
-                "icons/file-bottom-left-arrow.svg",
-                14.0,
-                theme.text_ghost,
-            ))
+            .child(icon("doc.badge.arrow.up", 14.0, theme.text_ghost))
             .tooltip(Tooltip::text(tr!("activity.open_file")))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -1545,7 +1541,7 @@ impl Michelle {
             .focus_visible(|style| style.border_color(theme.accent))
             .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
             .active(|style| style.bg(theme.overlay))
-            .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
+            .child(icon("doc.text", 12.0, theme.text_tertiary))
             .child(tr_cow!("transcript.review_changes"))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.open_turn_diff(turn_id, cx);
@@ -1591,7 +1587,7 @@ impl Michelle {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(icon("icons/file-diff.svg", 16.0, theme.text_tertiary)),
+                            .child(icon("doc.text", 16.0, theme.text_tertiary)),
                     )
                     .child(
                         div()
@@ -1727,9 +1723,9 @@ impl Michelle {
                     .child(div().flex_1())
                     .child(icon(
                         if expanded {
-                            "icons/chevron-down.svg"
+                            "chevron.down"
                         } else {
-                            "icons/chevron-right.svg"
+                            "chevron.right"
                         },
                         11.0,
                         theme.text_tertiary,
@@ -1786,9 +1782,9 @@ impl Michelle {
                     .child(SharedString::from(label))
                     .child(icon(
                         if expanded {
-                            "icons/chevron-down.svg"
+                            "chevron.down"
                         } else {
-                            "icons/chevron-right.svg"
+                            "chevron.right"
                         },
                         11.5,
                         theme.text_tertiary,
@@ -1945,9 +1941,9 @@ impl Michelle {
                     )
                     .child(icon(
                         if expanded {
-                            "icons/chevron-down.svg"
+                            "chevron.down"
                         } else {
-                            "icons/chevron-right.svg"
+                            "chevron.right"
                         },
                         10.0,
                         theme.text_tertiary,
@@ -2145,9 +2141,9 @@ impl Michelle {
                         .when(has_detail, |element| {
                             element.child(icon(
                                 if item_expanded {
-                                    "icons/chevron-down.svg"
+                                    "chevron.down"
                                 } else {
-                                    "icons/chevron-right.svg"
+                                    "chevron.right"
                                 },
                                 10.0,
                                 theme.text_tertiary,
@@ -2156,9 +2152,8 @@ impl Michelle {
                         .when(!has_detail && reasoning.is_none(), |element| {
                             element
                                 .when(activity.failed, |element| {
-                                    element.child(
-                                        icon("icons/x.svg", 10.0, theme.danger).into_any_element(),
-                                    )
+                                    element
+                                        .child(icon("xmark", 10.0, theme.danger).into_any_element())
                                 })
                                 .when(!activity.complete && !activity.failed, |element| {
                                     element.child(pulse_dot(5.0, theme.accent))
@@ -2380,11 +2375,7 @@ impl Michelle {
                                             .cursor_default()
                                             .hover(|button| button.bg(theme.overlay_strong))
                                             .child(icon(
-                                                if copied {
-                                                    "icons/check.svg"
-                                                } else {
-                                                    "icons/copy.svg"
-                                                },
+                                                if copied { "checkmark" } else { "doc.on.doc" },
                                                 11.0,
                                                 theme.text_ghost,
                                             ))
@@ -2856,7 +2847,7 @@ fn render_activity_image(
             .flex()
             .items_center()
             .justify_center()
-            .child(icon("icons/file-types/image.svg", 18.0, theme.text_ghost))
+            .child(icon("photo", 18.0, theme.text_ghost))
             .into_any_element();
     };
 

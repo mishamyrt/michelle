@@ -193,10 +193,10 @@ fn task_switcher_branch(workspace: &SessionWorkspace) -> Option<&str> {
 fn task_switcher_status_icon(status: SessionStatus) -> Option<&'static str> {
     match status {
         SessionStatus::Idle => None,
-        SessionStatus::Connecting | SessionStatus::Working => Some("icons/loader-circle.svg"),
-        SessionStatus::Background => Some("icons/hourglass.svg"),
-        SessionStatus::Waiting => Some("icons/alert.svg"),
-        SessionStatus::Failed => Some("icons/x.svg"),
+        SessionStatus::Connecting | SessionStatus::Working => Some("arrow.clockwise"),
+        SessionStatus::Background => Some("hourglass"),
+        SessionStatus::Waiting => Some("exclamationmark.triangle"),
+        SessionStatus::Failed => Some("xmark"),
     }
 }
 
@@ -545,7 +545,7 @@ impl Michelle {
                             .flex()
                             .items_center()
                             .gap(px(7.0))
-                            .child(icon("icons/folder.svg", 16.0, theme.text_tertiary))
+                            .child(icon("folder", 16.0, theme.text_tertiary))
                             .child(
                                 div()
                                     .min_w_0()
@@ -573,7 +573,7 @@ impl Michelle {
                     .items_center()
                     .gap(px(5.0))
                     .when_some(branch.clone(), |row, branch| {
-                        row.child(icon("icons/git-branch.svg", 11.5, theme.text_tertiary))
+                        row.child(icon("arrow.triangle.branch", 11.5, theme.text_tertiary))
                             .child(
                                 div()
                                     .flex_1()

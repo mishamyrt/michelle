@@ -35,7 +35,7 @@ pub(super) fn attachment_menu_items(path: PathBuf, can_reveal: bool) -> Vec<Menu
         MenuItem::new(tr!("common.reveal_in_finder"), move |_, cx| {
             crate::platform::reveal_in_file_manager(&path, cx);
         })
-        .icon("icons/folder.svg")
+        .icon("folder")
         .disabled(!can_reveal),
     ]
 }
@@ -185,7 +185,7 @@ impl Michelle {
             .hover(|style| style.bg(gpui::hsla(0.0, 0.0, 0.0, 0.66)))
             .active(|style| style.opacity(0.8))
             .tooltip(Tooltip::text(tr!("attachments.close_preview")))
-            .child(icon("icons/x.svg", 13.0, gpui::white()))
+            .child(icon("xmark", 13.0, gpui::white()))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.close_image_preview(window, cx);
                 cx.stop_propagation();
@@ -217,7 +217,7 @@ impl Michelle {
                             .gap(px(8.0))
                             .text_size(sp(12.5))
                             .text_color(unavailable_color)
-                            .child(icon("icons/alert.svg", 18.0, unavailable_color))
+                            .child(icon("exclamationmark.triangle", 18.0, unavailable_color))
                             .child(tr_cow!("attachments.preview_unavailable"))
                             .into_any_element()
                     }),

@@ -448,7 +448,7 @@ impl Michelle {
         let next_focus = self.transcript_control_focus("transcript-find-next", cx);
         let close_focus = self.transcript_control_focus("transcript-find-close", cx);
 
-        let previous = icon_button("transcript-find-previous", "icons/arrow-up.svg", theme)
+        let previous = icon_button("transcript-find-previous", "arrow.up", theme)
             .track_focus(&previous_focus)
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
@@ -457,7 +457,7 @@ impl Michelle {
             .when(has_matches, |button| {
                 button.on_activation(cx, |this, _, cx| this.navigate_transcript_search(true, cx))
             });
-        let next = icon_button("transcript-find-next", "icons/arrow-down.svg", theme)
+        let next = icon_button("transcript-find-next", "arrow.down", theme)
             .track_focus(&next_focus)
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
@@ -466,7 +466,7 @@ impl Michelle {
             .when(has_matches, |button| {
                 button.on_activation(cx, |this, _, cx| this.navigate_transcript_search(false, cx))
             });
-        let close = icon_button("transcript-find-close", "icons/x.svg", theme)
+        let close = icon_button("transcript-find-close", "xmark", theme)
             .track_focus(&close_focus)
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))

@@ -232,11 +232,7 @@ pub(super) fn render_message_footer(
         .cursor_default()
         .hover(|element| element.bg(theme.overlay_strong))
         .child(icon(
-            if copied {
-                "icons/check.svg"
-            } else {
-                "icons/copy.svg"
-            },
+            if copied { "checkmark" } else { "doc.on.doc" },
             14.0,
             footer_color,
         ))
@@ -272,9 +268,9 @@ pub(super) fn render_message_footer(
         if let Some(action) = assistant_message_action {
             let fork_michelle = michelle.clone();
             let fork_icon = if action.preparing {
-                motion::spin(icon("icons/loader-circle.svg", 14.0, footer_color))
+                motion::spin(icon("arrow.clockwise", 14.0, footer_color))
             } else {
-                icon("icons/fork.svg", 14.0, footer_color).into_any_element()
+                icon("arrow.triangle.branch", 14.0, footer_color).into_any_element()
             };
             let fork_button = div()
                 .id(SharedString::from(format!("fork-response-{message_id}")))
@@ -328,7 +324,7 @@ pub(super) fn render_message_footer(
                 .justify_center()
                 .cursor_default()
                 .hover(|element| element.bg(theme.overlay_strong))
-                .child(icon("icons/rewind.svg", 14.0, footer_color))
+                .child(icon("backward.end", 14.0, footer_color))
                 .tooltip(Tooltip::text(tr_cow!("session.revert_to_here")))
                 .on_click(move |_, window, cx| {
                     let _ = edit_michelle.update(cx, |this, cx| {
@@ -391,7 +387,7 @@ fn render_sent_message_attachments(
             continue;
         };
         let icon_path = if attachment.is_dir {
-            "icons/folder.svg"
+            "folder"
         } else {
             right_panel::file_icon_for_path(&attachment.mention)
         };
@@ -469,7 +465,7 @@ fn render_sent_message_attachments(
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(icon("icons/file-types/image.svg", 18.0, theme.text_ghost)),
+                            .child(icon("photo", 18.0, theme.text_ghost)),
                     )
                     .on_key_down(move |event: &KeyDownEvent, window, cx| {
                         if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
@@ -941,7 +937,7 @@ fn message_menu_items(
                     this.begin_message_edit(action, window, cx);
                 });
             })
-            .icon("icons/rewind.svg"),
+            .icon("backward.end"),
         );
     }
 
@@ -961,7 +957,7 @@ fn message_menu_items(
                     });
                 },
             )
-            .icon("icons/fork.svg")
+            .icon("arrow.triangle.branch")
             .disabled(!action.enabled),
         );
     }

@@ -350,9 +350,9 @@ impl Michelle {
         });
 
         let refresh_glyph: AnyElement = if pending {
-            motion::spin(icon("icons/loader-circle.svg", 12.0, theme.text_tertiary))
+            motion::spin(icon("arrow.clockwise", 12.0, theme.text_tertiary))
         } else {
-            icon("icons/rotate-cw.svg", 12.0, theme.text_tertiary).into_any_element()
+            icon("arrow.clockwise", 12.0, theme.text_tertiary).into_any_element()
         };
         let refresh = div()
             .id("usage-refresh")
@@ -1198,7 +1198,7 @@ impl Michelle {
                     )
                     .child(
                         TextField::new("usage-project-filter", self.usage_project_filter.clone())
-                            .icon("icons/search.svg", 13.0)
+                            .icon("magnifyingglass", 13.0)
                             .w(px(240.0))
                             .flex_none(),
                     ),
@@ -1402,7 +1402,7 @@ impl Michelle {
                 models = count_noun(model_count, "model")
             ))))
             .child(div().min_w_0().truncate().child(SharedString::from(label)))
-            .child(icon("icons/chevron-down.svg", 8.0, theme.text_ghost));
+            .child(icon("chevron.down", 8.0, theme.text_ghost));
 
         Some(dropdown_menu(
             trigger,

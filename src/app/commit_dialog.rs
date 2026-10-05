@@ -585,7 +585,7 @@ impl Michelle {
                         .items_center()
                         .justify_center()
                         .when(include_unstaged, |checkbox| {
-                            checkbox.child(icon("icons/check.svg", 12.0, theme.text))
+                            checkbox.child(icon("checkmark", 12.0, theme.text))
                         }),
                 )
                 .child(
@@ -644,7 +644,7 @@ impl Michelle {
         let commit = render_commit_action_row(
             "commit-dialog-commit",
             &dialog.commit_focus,
-            "icons/git-commit-horizontal.svg",
+            "point.topleft.down.to.point.bottomright.curvepath",
             if commit_active {
                 pending_status
                     .clone()
@@ -667,7 +667,7 @@ impl Michelle {
         let commit_and_push = render_commit_action_row(
             "commit-dialog-commit-and-push",
             &dialog.commit_push_focus,
-            "icons/cloud-upload.svg",
+            "icloud.and.arrow.up",
             if commit_and_push_active {
                 pending_status
                     .clone()
@@ -686,7 +686,7 @@ impl Michelle {
         let push = render_commit_action_row(
             "commit-dialog-push",
             &dialog.push_focus,
-            "icons/cloud-upload.svg",
+            "icloud.and.arrow.up",
             if push_active {
                 pending_status.unwrap_or_else(|| tr!("commit.push"))
             } else {
@@ -734,7 +734,7 @@ impl Michelle {
                     .gap(px(9.0))
                     .text_size(sp(14.0))
                     .text_color(theme.text)
-                    .child(icon("icons/git-branch.svg", 15.0, theme.text))
+                    .child(icon("arrow.triangle.branch", 15.0, theme.text))
                     .child(div().min_w_0().truncate().child(branch)),
             )
             .child(
@@ -816,7 +816,7 @@ fn render_commit_action_row(
         theme.text_ghost
     };
     let indicator = if active {
-        motion::spin(icon("icons/loader-circle.svg", 15.0, theme.text_secondary))
+        motion::spin(icon("arrow.clockwise", 15.0, theme.text_secondary))
     } else {
         icon(icon_path, 15.0, foreground).into_any_element()
     };

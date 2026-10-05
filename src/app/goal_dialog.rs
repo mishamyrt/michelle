@@ -357,18 +357,14 @@ impl Michelle {
         let status_action = current
             .filter(|_| !replace)
             .and_then(|goal| match goal.status {
-                ThreadGoalStatus::Active => Some((
-                    ThreadGoalStatus::Paused,
-                    tr!("goal.pause"),
-                    "icons/stop.svg",
-                )),
+                ThreadGoalStatus::Active => {
+                    Some((ThreadGoalStatus::Paused, tr!("goal.pause"), "stop"))
+                }
                 ThreadGoalStatus::Paused
                 | ThreadGoalStatus::Blocked
-                | ThreadGoalStatus::UsageLimited => Some((
-                    ThreadGoalStatus::Active,
-                    tr!("goal.resume"),
-                    "icons/arrow-up.svg",
-                )),
+                | ThreadGoalStatus::UsageLimited => {
+                    Some((ThreadGoalStatus::Active, tr!("goal.resume"), "arrow.up"))
+                }
                 ThreadGoalStatus::BudgetLimited | ThreadGoalStatus::Complete => None,
             });
         let status_line = current.map(|goal| {
@@ -410,7 +406,7 @@ impl Michelle {
                     .gap(px(9.0))
                     .text_size(sp(14.0))
                     .text_color(theme.text)
-                    .child(icon("icons/target.svg", 15.0, theme.text))
+                    .child(icon("scope", 15.0, theme.text))
                     .child(div().child(tr!("goal.title")))
                     .when_some(status_line, |header, (label, color, usage)| {
                         header
@@ -461,7 +457,7 @@ impl Michelle {
         let save = render_goal_action_row(
             "goal-dialog-save",
             &dialog.save_focus,
-            "icons/check.svg",
+            "checkmark",
             save_label,
             can_save,
             Some(crate::platform::primary_shortcut("⌘↩", "Ctrl+Enter")),
@@ -491,7 +487,7 @@ impl Michelle {
             actions_column = actions_column.child(render_goal_action_row(
                 "goal-dialog-clear",
                 &dialog.clear_focus,
-                "icons/trash.svg",
+                "trash",
                 tr!("goal.clear"),
                 true,
                 None,

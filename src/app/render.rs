@@ -482,8 +482,8 @@ impl Michelle {
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
         let (status_icon, status_color) = match tone {
-            ToastTone::Alert => ("icons/alert.svg", theme.danger),
-            ToastTone::Success => ("icons/check.svg", theme.success),
+            ToastTone::Alert => ("exclamationmark.triangle", theme.danger),
+            ToastTone::Success => ("checkmark", theme.success),
         };
         let palette = MarkdownPalette::from_theme(&theme);
         let text_ctx = MarkdownCtx::new(
@@ -513,7 +513,7 @@ impl Michelle {
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tr!("common.dismiss_notification")))
-            .child(icon("icons/x.svg", 12.0, theme.text_tertiary))
+            .child(icon("xmark", 12.0, theme.text_tertiary))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.hide_toast();
                 cx.notify();

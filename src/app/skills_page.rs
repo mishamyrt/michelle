@@ -30,14 +30,14 @@ const SKILLS_LIST_WIDTH: f32 = 264.0;
 
 fn skill_source_icon(source: SkillSource) -> &'static str {
     match source {
-        SkillSource::Shared => "icons/package.svg",
+        SkillSource::Shared => "shippingbox",
         SkillSource::Provider(provider) => crate::ui::provider_icon(provider),
     }
 }
 
 fn skill_icon(skill: &SkillEntry) -> &'static str {
     if skill.installs.len() > 1 {
-        "icons/package.svg"
+        "shippingbox"
     } else {
         skill_source_icon(skill.primary().source)
     }
@@ -490,7 +490,7 @@ impl Michelle {
                     .gap(px(7.0))
                     .child(
                         TextField::new("skills-search-field", self.skills_search.clone())
-                            .icon("icons/search.svg", 13.0)
+                            .icon("magnifyingglass", 13.0)
                             .w_full(),
                     )
                     .child(self.render_skills_source_filter(catalog, theme, cx)),
@@ -553,7 +553,7 @@ impl Michelle {
             MenuChip::new("skills-source-filter")
                 .icon(
                     match current {
-                        None => "icons/package.svg",
+                        None => "shippingbox",
                         Some(source) => skill_source_icon(source),
                     },
                     theme.text_tertiary,
@@ -983,7 +983,7 @@ impl Michelle {
 
         let open_button = action_button(
             SharedString::from(format!("skill-open-{}", skill.row_key)),
-            "icons/pencil.svg",
+            "pencil",
             tr!("skills.open_file"),
         )
         .on_click(cx.listener({
@@ -1000,7 +1000,7 @@ impl Michelle {
 
         let reveal_button = action_button(
             SharedString::from(format!("skill-reveal-{}", skill.row_key)),
-            "icons/folder.svg",
+            "folder",
             tr!("skills.reveal"),
         )
         .on_click(cx.listener({
@@ -1019,11 +1019,7 @@ impl Michelle {
         let copied = self.control_was_copied(&copy_feedback_id);
         let copy_button = action_button(
             SharedString::from(copy_feedback_id.clone()),
-            if copied {
-                "icons/check.svg"
-            } else {
-                "icons/copy.svg"
-            },
+            if copied { "checkmark" } else { "doc.on.doc" },
             if copied {
                 tr!("common.copied")
             } else {
@@ -1069,7 +1065,7 @@ impl Michelle {
             })
             .hover(|element| element.bg(theme.overlay).text_color(theme.danger))
             .child(icon(
-                "icons/trash.svg",
+                "trash",
                 11.0,
                 if armed {
                     theme.danger
@@ -1247,7 +1243,7 @@ impl Michelle {
                         .flex()
                         .items_center()
                         .gap(px(6.0))
-                        .child(icon("icons/alert.svg", 11.0, theme.warning))
+                        .child(icon("exclamationmark.triangle", 11.0, theme.warning))
                         .child(div().text_size(sp(12.5)).text_color(theme.warning).child(
                             SharedString::from(if skill.duplicates == 1 {
                                 tr!("skills.duplicate_one")
@@ -1304,7 +1300,7 @@ fn skills_empty_state(theme: &Theme) -> Div {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(icon("icons/package.svg", 21.0, theme.text_tertiary)),
+                .child(icon("shippingbox", 21.0, theme.text_tertiary)),
         )
         .child(
             div()
@@ -1333,7 +1329,7 @@ fn skills_detail_placeholder(theme: &Theme) -> Div {
         .items_center()
         .justify_center()
         .gap(px(8.0))
-        .child(icon("icons/package.svg", 22.0, theme.text_ghost))
+        .child(icon("shippingbox", 22.0, theme.text_ghost))
         .child(
             div()
                 .text_size(sp(12.5))

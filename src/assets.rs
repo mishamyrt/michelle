@@ -1,10 +1,28 @@
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+};
 
 use anyhow::Result;
 use gpui::{App, AssetSource, SharedString};
 
-/// Icons embedded in the binary so the app stays a single artifact.
-pub struct Assets;
+mod symbols;
+
+/// Brand marks stay embedded; ordinary icons are resolved from macOS once.
+#[derive(Clone, Default)]
+pub struct Assets {
+    system_icons: Arc<OnceLock<HashMap<&'static str, Vec<u8>>>>,
+}
+
+impl Assets {
+    pub fn prepare_system_icons(&self) -> Result<()> {
+        let icons = symbols::load()?;
+        self.system_icons
+            .set(icons)
+            .map_err(|_| anyhow::anyhow!("system icons already prepared"))
+    }
+}
 
 macro_rules! icons {
     ($($name:literal),+ $(,)?) => {
@@ -16,69 +34,27 @@ macro_rules! icons {
 }
 
 const ICONS: &[(&str, &[u8])] = icons![
-    "alert",
-    "appearance",
-    "arrow-down",
-    "arrow-left",
-    "arrow-right",
-    "arrow-up",
-    "arrow-up-right",
-    "block",
-    "bot",
-    "brain",
-    "case-sensitive",
-    "chart-column",
-    "check",
-    "changes",
-    "cloud-upload",
-    "chevron-down",
-    "chevron-right",
-    "chevron-up",
-    "chevrons-up-down",
-    "command",
-    "compose",
-    "copy",
-    "corner-down-right",
-    "cursor-spark",
-    "download",
-    "ellipsis",
-    "eye",
-    "eye-off",
-    "external-link",
-    "file",
-    "folder",
-    "folder-new",
-    "folder-open",
-    "file-bottom-left-arrow",
-    "file-diff",
     "file-types/angular",
-    "file-types/audio",
     "file-types/astro",
     "file-types/babel",
     "file-types/biome",
     "file-types/bun",
     "file-types/c",
-    "file-types/certificate",
     "file-types/clojure",
     "file-types/cmake",
     "file-types/coffee",
-    "file-types/console",
     "file-types/cpp",
     "file-types/crystal",
     "file-types/csharp",
     "file-types/css",
     "file-types/dart",
-    "file-types/database",
     "file-types/deno",
-    "file-types/diff",
     "file-types/docker",
     "file-types/editorconfig",
     "file-types/elixir",
     "file-types/elm",
     "file-types/erlang",
     "file-types/eslint",
-    "file-types/exe",
-    "file-types/file",
     "file-types/firebase",
     "file-types/git",
     "file-types/gitlab",
@@ -89,7 +65,6 @@ const ICONS: &[(&str, &[u8])] = icons![
     "file-types/haxe",
     "file-types/helm",
     "file-types/html",
-    "file-types/image",
     "file-types/java",
     "file-types/javascript",
     "file-types/jinja",
@@ -97,10 +72,8 @@ const ICONS: &[(&str, &[u8])] = icons![
     "file-types/julia",
     "file-types/kotlin",
     "file-types/kubernetes",
-    "file-types/lock",
     "file-types/lua",
     "file-types/makefile",
-    "file-types/markdown",
     "file-types/nest",
     "file-types/next",
     "file-types/nginx",
@@ -109,7 +82,6 @@ const ICONS: &[(&str, &[u8])] = icons![
     "file-types/npm",
     "file-types/nuxt",
     "file-types/ocaml",
-    "file-types/pdf",
     "file-types/perl",
     "file-types/php",
     "file-types/pnpm",
@@ -120,26 +92,21 @@ const ICONS: &[(&str, &[u8])] = icons![
     "file-types/pug",
     "file-types/python",
     "file-types/react",
-    "file-types/readme",
     "file-types/rollup",
     "file-types/ruby",
     "file-types/rust",
     "file-types/sass",
     "file-types/scala",
-    "file-types/settings",
     "file-types/solidity",
     "file-types/storybook",
     "file-types/stylelint",
     "file-types/supabase",
     "file-types/svelte",
-    "file-types/svg",
     "file-types/swift",
     "file-types/tailwindcss",
     "file-types/terraform",
-    "file-types/tex",
     "file-types/turborepo",
     "file-types/typescript",
-    "file-types/video",
     "file-types/vite",
     "file-types/vitest",
     "file-types/vue",
@@ -150,26 +117,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "file-types/yaml",
     "file-types/yarn",
     "file-types/zig",
-    "file-types/zip",
-    "fork",
-    "git-branch",
-    "git-commit-horizontal",
-    "globe",
     "github",
-    "hourglass",
-    "hexagon",
-    "info",
-    "laptop",
-    "list",
-    "list-filter",
-    "loader-circle",
-    "lock",
-    "lock-open",
-    "package",
-    "panel-left",
-    "panel-right",
-    "pencil",
-    "plus",
     "provider-amp",
     "provider-claude",
     "provider-cursor",
@@ -181,32 +129,6 @@ const ICONS: &[(&str, &[u8])] = icons![
     "provider-ohmypi",
     "provider-opencode",
     "provider-pi",
-    "queue",
-    "regex",
-    "replace",
-    "replace-all",
-    "rewind",
-    "rotate-cw",
-    "search",
-    "server",
-    "settings",
-    "slash",
-    "sparkle",
-    "star",
-    "star-filled",
-    "stop",
-    "stop-filled",
-    "target",
-    "terminal",
-    "terminal-square",
-    "trash",
-    "whole-word",
-    "wrench",
-    "window-maximize",
-    "window-minimize",
-    "window-restore",
-    "x",
-    "zap",
 ];
 
 const TEXT_FONTS: &[&[u8]] = &[
@@ -235,6 +157,9 @@ pub fn register_fonts(cx: &App) -> Result<()> {
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if let Some(bytes) = self.system_icons.get().and_then(|icons| icons.get(path)) {
+            return Ok(Some(Cow::Owned(bytes.clone())));
+        }
         Ok(ICONS
             .iter()
             .find(|(name, _)| *name == path)
@@ -244,8 +169,10 @@ impl AssetSource for Assets {
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         Ok(ICONS
             .iter()
-            .filter(|(name, _)| name.starts_with(path))
-            .map(|(name, _)| SharedString::from(*name))
+            .map(|(name, _)| *name)
+            .chain(symbols::SYMBOLS.iter().copied())
+            .filter(|name| name.starts_with(path))
+            .map(SharedString::from)
             .collect())
     }
 }

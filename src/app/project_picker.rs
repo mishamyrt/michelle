@@ -212,11 +212,7 @@ impl Michelle {
                                         .child(name.clone()),
                                 )
                                 .when(selected_project == Some(project_id), |element| {
-                                    element.child(icon(
-                                        "icons/check.svg",
-                                        11.0,
-                                        theme.text_secondary,
-                                    ))
+                                    element.child(icon("checkmark", 11.0, theme.text_secondary))
                                 })
                                 .on_click(move |_, window, cx| {
                                     select_popover.close(window, cx);
@@ -267,7 +263,7 @@ impl Michelle {
                                 .child(label),
                         )
                         .when(selected, |element| {
-                            element.child(icon("icons/check.svg", 11.0, theme.text_secondary))
+                            element.child(icon("checkmark", 11.0, theme.text_secondary))
                         })
                         .on_click(move |_, window, cx| {
                             popover.close(window, cx);
@@ -358,7 +354,7 @@ impl Michelle {
                                     .flex()
                                     .items_center()
                                     .gap(px(8.0))
-                                    .child(icon("icons/search.svg", 12.0, theme.text_secondary))
+                                    .child(icon("magnifyingglass", 12.0, theme.text_secondary))
                                     .child(div().flex_1().min_w_0().child(search.clone())),
                             ),
                     )
@@ -367,14 +363,14 @@ impl Michelle {
                     .child(pinned_row(
                         ProjectPickerAction::NewProject,
                         "project-picker-new",
-                        "icons/folder-new.svg",
+                        "folder.badge.plus",
                         tr!("project.new_project"),
                         false,
                     ))
                     .child(pinned_row(
                         ProjectPickerAction::NoProject,
                         "project-picker-none",
-                        "icons/x.svg",
+                        "xmark",
                         tr!("project.no_project"),
                         projectless_selected,
                     ))

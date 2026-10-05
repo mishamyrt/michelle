@@ -697,7 +697,7 @@ impl Michelle {
             CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.new_task"),
-                "icons/pencil.svg",
+                "pencil",
                 Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N")),
                 PaletteAction::NewTask,
                 "new task session chat conversation start",
@@ -706,7 +706,7 @@ impl Michelle {
             CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.resume"),
-                "icons/rotate-cw.svg",
+                "arrow.clockwise",
                 None,
                 PaletteAction::Resume,
                 "resume continue restore import external terminal cli session conversation",
@@ -715,7 +715,7 @@ impl Michelle {
             CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.open_project"),
-                "icons/folder.svg",
+                "folder",
                 Some(crate::platform::primary_shortcut("⌘O", "Ctrl+O")),
                 PaletteAction::OpenProject,
                 "open add folder project workspace repository repo",
@@ -730,7 +730,7 @@ impl Michelle {
             commands.push(CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.choose_model"),
-                "icons/bot.svg",
+                "cpu",
                 Some(crate::platform::primary_shortcut("⌘/", "Ctrl+/")),
                 PaletteAction::ChooseModel,
                 "choose change select model provider agent",
@@ -742,7 +742,7 @@ impl Michelle {
             commands.push(CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.model_reasoning"),
-                "icons/brain.svg",
+                "brain",
                 Some(crate::platform::primary_shortcut("⌥⌘/", "Ctrl+Alt+/")),
                 PaletteAction::ModelTraits,
                 "model reasoning thinking effort settings service tier context window",
@@ -753,7 +753,7 @@ impl Michelle {
         commands.push(CommandPaletteItem::command(
             PaletteSection::Commands,
             tr!("menu.focus_composer"),
-            "icons/pencil.svg",
+            "pencil",
             Some(crate::platform::primary_shortcut("⌘L", "Ctrl+L")),
             PaletteAction::FocusComposer,
             "focus composer prompt input message",
@@ -764,7 +764,7 @@ impl Michelle {
                 commands.push(CommandPaletteItem::command(
                     PaletteSection::Commands,
                     identifier.label(),
-                    "icons/copy.svg",
+                    "doc.on.doc",
                     None,
                     PaletteAction::CopyIdentifier(identifier),
                     identifier.keywords(),
@@ -776,7 +776,7 @@ impl Michelle {
             commands.push(CommandPaletteItem::command(
                 PaletteSection::Commands,
                 tr!("menu.toggle_usage_panel"),
-                "icons/command.svg",
+                "command",
                 Some(crate::platform::primary_shortcut("⌘U", "Ctrl+U")),
                 PaletteAction::ToggleUsage,
                 "toggle usage limits rate quota panel",
@@ -786,7 +786,7 @@ impl Michelle {
         commands.push(CommandPaletteItem::command(
             PaletteSection::Commands,
             tr!("command_palette.collapse_sidebar_groups"),
-            "icons/command.svg",
+            "command",
             None,
             PaletteAction::CollapseSidebarGroups,
             "collapse close fold all sidebar groups projects dates history",
@@ -800,7 +800,7 @@ impl Michelle {
                 } else {
                     "command_palette.show_sidebar"
                 }),
-                "icons/panel-left.svg",
+                "sidebar.left",
                 Some(crate::platform::primary_shortcut("⌘B", "Ctrl+B")),
                 PaletteAction::ToggleSidebar,
                 "toggle show hide left sidebar history tasks",
@@ -813,7 +813,7 @@ impl Michelle {
                 } else {
                     "command_palette.show_right_panel"
                 }),
-                "icons/panel-right.svg",
+                "sidebar.right",
                 Some(crate::platform::primary_shortcut("⇧⌘B", "Ctrl+Shift+B")),
                 PaletteAction::ToggleRightPanel,
                 "toggle show hide right panel files diff terminal",
@@ -825,43 +825,43 @@ impl Michelle {
             (
                 SettingsPage::General,
                 "settings.general",
-                "icons/settings.svg",
+                "gearshape",
                 "settings preferences general local privacy updates",
             ),
             (
                 SettingsPage::Appearance,
                 "settings.appearance",
-                "icons/appearance.svg",
+                "circle.lefthalf.filled",
                 "settings preferences appearance theme language light dark",
             ),
             (
                 SettingsPage::Providers,
                 "settings.providers",
-                "icons/bot.svg",
+                "cpu",
                 "settings preferences providers agents models cli",
             ),
             (
                 SettingsPage::Skills,
                 "settings.skills",
-                "icons/package.svg",
+                "shippingbox",
                 "settings preferences skills library create disable agent skill",
             ),
             (
                 SettingsPage::Usage,
                 "settings.usage",
-                "icons/chart-column.svg",
+                "chart.bar",
                 "settings preferences usage tokens cost history",
             ),
             (
                 SettingsPage::Daemon,
                 "settings.daemon",
-                "icons/server.svg",
+                "server.rack",
                 "settings preferences daemon server remote web network origin token port",
             ),
             (
                 SettingsPage::ComputerUse,
                 "settings.computer_use",
-                "icons/cursor-spark.svg",
+                "cursorarrow.rays",
                 "settings preferences computer use accessibility screen recording",
             ),
         ] {
@@ -1710,28 +1710,28 @@ impl Michelle {
                 .flatten();
             let (icon_path, title, hint, spinning) = if show_loading_state {
                 (
-                    "icons/loader-circle.svg",
+                    "arrow.clockwise",
                     tr!("command_palette.loading_sessions"),
                     None,
                     true,
                 )
             } else if let Some(error) = error {
                 (
-                    "icons/alert.svg",
+                    "exclamationmark.triangle",
                     tr!("command_palette.could_not_load_sessions"),
                     Some(error),
                     false,
                 )
             } else if resume_view {
                 (
-                    "icons/search.svg",
+                    "magnifyingglass",
                     tr!("command_palette.no_resume_sessions"),
                     Some(tr!("command_palette.no_resume_sessions_hint")),
                     false,
                 )
             } else {
                 (
-                    "icons/search.svg",
+                    "magnifyingglass",
                     tr!("command_palette.no_results"),
                     Some(tr!("command_palette.no_results_hint")),
                     false,
@@ -1817,7 +1817,7 @@ impl Michelle {
                                         .text_color(theme.text_secondary)
                                         .child(provider.display_name().to_owned()),
                                 )
-                                .child(icon("icons/chevron-down.svg", 11.0, theme.text_tertiary))
+                                .child(icon("chevron.down", 11.0, theme.text_tertiary))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.open_command_palette_resume_provider_view(cx);
                                     cx.stop_propagation();
@@ -1915,7 +1915,7 @@ impl Michelle {
                                 .items_center()
                                 .justify_center()
                                 .child(if importing {
-                                    motion::spin(icon("icons/loader-circle.svg", 16.0, icon_color))
+                                    motion::spin(icon("arrow.clockwise", 16.0, icon_color))
                                 } else {
                                     row_mark
                                 }),
@@ -2204,7 +2204,7 @@ mod tests {
             CommandPaletteItem::command(
                 section,
                 format!("Item {order}"),
-                "icons/search.svg",
+                "magnifyingglass",
                 None,
                 PaletteAction::NewTask,
                 "",

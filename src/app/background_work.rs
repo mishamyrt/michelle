@@ -422,11 +422,11 @@ fn work_status_icon(status: BackgroundWorkStatus) -> &'static str {
     match status {
         BackgroundWorkStatus::Starting
         | BackgroundWorkStatus::Running
-        | BackgroundWorkStatus::Monitoring => "icons/loader-circle.svg",
-        BackgroundWorkStatus::Stopping | BackgroundWorkStatus::Stopped => "icons/stop.svg",
-        BackgroundWorkStatus::Completed => "icons/check.svg",
-        BackgroundWorkStatus::Failed => "icons/x.svg",
-        BackgroundWorkStatus::Lost => "icons/alert.svg",
+        | BackgroundWorkStatus::Monitoring => "arrow.clockwise",
+        BackgroundWorkStatus::Stopping | BackgroundWorkStatus::Stopped => "stop",
+        BackgroundWorkStatus::Completed => "checkmark",
+        BackgroundWorkStatus::Failed => "xmark",
+        BackgroundWorkStatus::Lost => "exclamationmark.triangle",
     }
 }
 
@@ -479,8 +479,8 @@ pub(super) fn work_status_color(status: BackgroundWorkStatus, theme: Theme) -> H
 
 pub(super) fn work_kind_icon(kind: BackgroundWorkKind) -> &'static str {
     match kind {
-        BackgroundWorkKind::Subagent => "icons/bot.svg",
-        BackgroundWorkKind::Process | BackgroundWorkKind::Monitor => "icons/terminal-square.svg",
+        BackgroundWorkKind::Subagent => "cpu",
+        BackgroundWorkKind::Process | BackgroundWorkKind::Monitor => "terminal",
     }
 }
 
@@ -826,7 +826,7 @@ impl Michelle {
             } else {
                 summary
             }))
-            .child(icon("icons/info.svg", 15.0, theme.text_tertiary))
+            .child(icon("info.circle", 15.0, theme.text_tertiary))
             .when(has_live_work, |trigger| {
                 trigger.child(
                     div()
@@ -1054,7 +1054,7 @@ impl Michelle {
             .hover(|style| style.bg(theme.overlay))
             .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tr!("open_in.choose")))
-            .child(icon("icons/chevron-down.svg", 11.0, theme.text_tertiary));
+            .child(icon("chevron.down", 11.0, theme.text_tertiary));
 
         let weak = cx.entity().downgrade();
         let menu = dropdown_menu(
@@ -1179,7 +1179,7 @@ impl Michelle {
                     .active(|style| style.bg(theme.danger.opacity(0.16)))
                     .focus_visible(|style| style.border_color(theme.accent))
                     .tooltip(Tooltip::text(tr!("background.stop")))
-                    .child(icon("icons/stop-filled.svg", 11.0, theme.danger))
+                    .child(icon("stop.fill", 11.0, theme.danger))
                     .child(tr!("background.stop"))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(move |_, _, cx| {
@@ -1597,11 +1597,7 @@ fn render_task_identifier_row(
         .active(|style| style.bg(theme.overlay))
         .tooltip(tooltip)
         .child(icon(
-            if copied {
-                "icons/check.svg"
-            } else {
-                "icons/copy.svg"
-            },
+            if copied { "checkmark" } else { "doc.on.doc" },
             12.0,
             theme.text_tertiary,
         ))
@@ -1667,7 +1663,7 @@ fn render_environment_summary_section(
     let commit = render_environment_action_row(
         "environment-summary-commit",
         &environment.commit_focus,
-        "icons/git-commit-horizontal.svg",
+        "point.topleft.down.to.point.bottomright.curvepath",
         environment
             .commit_status
             .unwrap_or_else(|| tr!("environment.commit_or_push")),
@@ -1693,7 +1689,7 @@ fn render_environment_summary_section(
         tr!("environment.compare_branch"),
         true,
         false,
-        Some(icon("icons/arrow-up-right.svg", 13.0, theme.text_tertiary).into_any_element()),
+        Some(icon("arrow.up.right", 13.0, theme.text_tertiary).into_any_element()),
         theme,
         move |window, cx| {
             compare_handle.close(window, cx);
@@ -1747,7 +1743,7 @@ fn render_environment_action_row(
         theme.text_ghost
     };
     let indicator = if active {
-        motion::spin_slow(icon("icons/loader-circle.svg", 14.0, theme.text_secondary))
+        motion::spin_slow(icon("arrow.clockwise", 14.0, theme.text_secondary))
     } else {
         icon(icon_path, 14.0, icon_foreground).into_any_element()
     };
@@ -1882,7 +1878,7 @@ fn render_background_summary_row(
                     .border_color(theme.accent)
             })
             .tooltip(Tooltip::text(tr!("background.stop")))
-            .child(icon("icons/stop-filled.svg", 12.0, theme.text_tertiary))
+            .child(icon("stop.fill", 12.0, theme.text_tertiary))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
@@ -1992,21 +1988,21 @@ mod tests {
                 BackgroundWorkKind::Process,
                 BackgroundWorkStatus::Completed,
             ),
-            Some("icons/check.svg")
+            Some("checkmark")
         );
         assert_eq!(
             background_summary_process_status_icon(
                 BackgroundWorkKind::Monitor,
                 BackgroundWorkStatus::Failed,
             ),
-            Some("icons/x.svg")
+            Some("xmark")
         );
         assert_eq!(
             background_summary_process_status_icon(
                 BackgroundWorkKind::Process,
                 BackgroundWorkStatus::Running,
             ),
-            Some("icons/loader-circle.svg")
+            Some("arrow.clockwise")
         );
         assert_eq!(
             background_summary_process_status_icon(

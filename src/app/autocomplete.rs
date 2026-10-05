@@ -442,7 +442,7 @@ impl Michelle {
                     .text_size(sp(12.5))
                     .text_color(theme.text_tertiary)
                     .child(crate::ui::motion::spin(icon(
-                        "icons/loader-circle.svg",
+                        "arrow.clockwise",
                         12.0,
                         theme.text_tertiary,
                     )))
@@ -519,9 +519,9 @@ impl Michelle {
                 let command = &scored.item;
                 let composer_text = composer_complete::command_composer_text(command);
                 let icon_path = if command.scope == composer_complete::CommandScope::Skill {
-                    "icons/sparkle.svg"
+                    "sparkles"
                 } else {
-                    "icons/command.svg"
+                    "command"
                 };
                 // Positions index the bare name; the drawn sigil shifts every
                 // byte range right by one.
@@ -595,7 +595,7 @@ impl Michelle {
                 let parent = &file.path[..name_start.saturating_sub(1)];
                 let name_char_offset = file.path[..name_start].chars().count();
                 let icon_path = if file.is_dir {
-                    "icons/folder.svg"
+                    "folder"
                 } else {
                     super::right_panel::file_icon_for_path(&file.path)
                 };
