@@ -1,5 +1,47 @@
-use super::composer::next_picker_highlight;
+use gpui::transparent_black;
+
 use super::*;
+use crate::ui::primitives::navigation::next_picker_highlight;
+
+pub(super) mod model;
+pub(super) mod permissions;
+pub(super) mod plan_usage;
+pub(super) mod providers;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SettingsPage {
+    General,
+    Providers,
+    Skills,
+    Usage,
+    Daemon,
+    ComputerUse,
+    Appearance,
+}
+
+impl SettingsPage {
+    /// Keep the Settings sidebar and command palette visibility in sync.
+    pub(super) fn is_visible_in_navigation(self) -> bool {
+        self != Self::ComputerUse || crate::computer_use::is_available()
+    }
+}
+
+/// Focus, form fields and navigation for the Settings interface.
+pub(super) struct SettingsUi {
+    pub(in crate::app) page: Option<SettingsPage>,
+    pub(in crate::app) search: Entity<TextInput>,
+    pub(in crate::app) daemon_port_input: Entity<TextInput>,
+    pub(in crate::app) daemon_origins_input: Entity<TextInput>,
+    pub(in crate::app) daemon_token_revealed: bool,
+    pub(in crate::app) focus: FocusHandle,
+    pub(in crate::app) sidebar_focuses: RefCell<HashMap<SharedString, FocusHandle>>,
+    pub(in crate::app) expanded_provider: Option<ProviderKind>,
+    pub(in crate::app) provider_path_input: Entity<TextInput>,
+    pub(in crate::app) scroll: ScrollHandle,
+    pub(in crate::app) scrollbar: Rc<ScrollbarState>,
+}
+
+use crate::ui::sidebar::{SidebarItemProps, sidebar_item};
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 
@@ -88,13 +130,47 @@ pub(super) fn visible_settings_pages(
         })
 }
 
+fn settings_navigation_target(
+    pages: &[SettingsPage],
+    current: SettingsPage,
+    key: &str,
+) -> Option<SettingsPage> {
+    match key {
+        "home" => pages.first().copied(),
+        "end" => pages.last().copied(),
+        _ => {
+            let current = pages.iter().position(|page| *page == current);
+            next_picker_highlight(current, pages.len(), key).map(|index| pages[index])
+        }
+    }
+}
+
 impl Michelle {
+    /// Switch the settings view to `page`, warming the Usage scan when that
+    /// is where the user is heading.
+    pub(super) fn open_settings_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
+        // Secrets are revealed only for the current visit to the page. This
+        // also masks the token again when the Daemon row is reselected.
+        self.settings_ui.daemon_token_revealed = false;
+        self.settings_ui.page = Some(page);
+        // Each page starts at its own top; a scroll position carried over
+        // from the previous page would land mid-content.
+        self.settings_ui.scroll.set_offset(gpui::Point::default());
+        if page == SettingsPage::Usage {
+            self.ensure_usage_history(false, cx);
+        }
+        if page == SettingsPage::Skills {
+            self.ensure_skills_catalog(false, cx);
+        }
+        cx.notify();
+    }
+
     pub(super) fn render_settings(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
 
         div()
             .key_context("Michelle")
-            .track_focus(&self.settings_focus)
+            .track_focus(&self.settings_ui.focus)
             .on_action(|_: &CloseWindow, window, _| crate::platform::hide_window(window))
             .on_action(cx.listener(Self::new_session_action))
             .on_action(cx.listener(Self::new_project_action))
@@ -121,49 +197,60 @@ impl Michelle {
 
     fn render_settings_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let current_page = self.settings_page.unwrap_or(SettingsPage::General);
+        let current_page = self.settings_ui.page.unwrap_or(SettingsPage::General);
         let query = self.settings_search_query(cx);
         let mut navigation = div().flex().flex_col().gap(px(3.0));
+        let focus_for = |id: SharedString, cx: &mut App| {
+            self.settings_ui
+                .sidebar_focuses
+                .borrow_mut()
+                .entry(id)
+                .or_insert_with(|| cx.focus_handle())
+                .clone()
+        };
+        let back_focus = focus_for("settings-back".into(), cx);
 
         for (page, label, icon_path) in visible_settings_pages(&query) {
             let selected = current_page == page;
+            let id = SharedString::from(format!("settings-tab-{page:?}"));
+            let focus = focus_for(id.clone(), cx);
             navigation = navigation.child(
-                div()
-                    .id(SharedString::from(format!(
-                        "settings-tab-{}",
-                        label.to_lowercase()
-                    )))
-                    .h(px(36.0))
-                    .px(px(11.0))
-                    .rounded(px(8.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .cursor_default()
-                    .text_size(sp(13.0))
-                    .text_color(if selected {
-                        theme.text
-                    } else {
-                        theme.text_secondary
-                    })
-                    .when(selected, |element| {
-                        element.bg(theme.sidebar_item_background)
-                    })
-                    .hover(|element| element.bg(theme.sidebar_item_background))
-                    .active(|element| element.bg(theme.sidebar_item_background))
-                    .child(icon(
-                        icon_path,
-                        15.0,
-                        if selected {
-                            theme.text_secondary
-                        } else {
-                            theme.text_tertiary
-                        },
-                    ))
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_settings_page(page, cx);
-                    })),
+                sidebar_item(
+                    id,
+                    icon_path,
+                    label,
+                    SidebarItemProps {
+                        selected,
+                        ..Default::default()
+                    },
+                    &theme.ui_colors(),
+                )
+                .track_focus(&focus)
+                .tab_index(0)
+                .tab_stop(true)
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.modifiers.modified() {
+                        return;
+                    }
+                    let query = this.settings_search_query(cx);
+                    let pages = visible_settings_pages(&query)
+                        .map(|(page, ..)| page)
+                        .collect::<Vec<_>>();
+                    let Some(next) = settings_navigation_target(&pages, page, &event.keystroke.key)
+                    else {
+                        return;
+                    };
+                    this.open_settings_page(next, cx);
+                    let id = SharedString::from(format!("settings-tab-{next:?}"));
+                    let focus = this.settings_ui.sidebar_focuses.borrow().get(&id).cloned();
+                    if let Some(focus) = focus {
+                        window.focus(&focus, cx);
+                    }
+                    cx.stop_propagation();
+                }))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_settings_page(page, cx);
+                })),
             );
         }
 
@@ -180,46 +267,42 @@ impl Michelle {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(theme.sidebar_surface())
+            .bg(transparent_black())
             .child(self.render_settings_sidebar_titlebar(window, cx))
             .child(
                 div().px(px(12.0)).child(
-                    div()
-                        .id("settings-back")
-                        .h(px(34.0))
-                        .px(px(9.0))
-                        .rounded(px(8.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(9.0))
-                        .cursor_default()
-                        .text_size(sp(13.0))
-                        .text_color(theme.text_secondary)
-                        .hover(|element| element.bg(theme.overlay))
-                        .active(|element| element.bg(theme.overlay_strong))
-                        .child(icon("arrow.left", 15.0, theme.text_tertiary))
-                        .child(tr!("settings.back"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.settings_page = None;
-                            let focus_handle = this.composer_focus(cx);
-                            window.focus(&focus_handle, cx);
-                            cx.notify();
-                        })),
+                    sidebar_item(
+                        "settings-back",
+                        "arrow.left",
+                        tr!("settings.back"),
+                        SidebarItemProps::default(),
+                        &theme.ui_colors(),
+                    )
+                    .track_focus(&back_focus)
+                    .tab_index(0)
+                    .tab_stop(true)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.settings_ui.page = None;
+                        let focus_handle = this.composer_focus(cx);
+                        window.focus(&focus_handle, cx);
+                        cx.notify();
+                    })),
                 ),
             )
             .child(
                 div().px(px(12.0)).pt(px(8.0)).child(
-                    TextField::new("settings-search-field", self.settings_search.clone())
+                    TextField::new("settings-search-field", self.settings_ui.search.clone())
                         .icon("magnifyingglass", 13.0),
                 ),
             )
             .child(div().h(px(18.0)))
-            .child(div().px(px(12.0)).child(navigation))
+            .child(div().px(px(12.0)).tab_group().child(navigation))
     }
 
     /// The search field's content, normalized the way the page filter expects.
     fn settings_search_query(&self, cx: &App) -> String {
-        self.settings_search
+        self.settings_ui
+            .search
             .read(cx)
             .content()
             .trim()
@@ -236,12 +319,11 @@ impl Michelle {
         let pages = visible_settings_pages(&query)
             .map(|(page, ..)| page)
             .collect::<Vec<_>>();
-        let current_page = self.settings_page.unwrap_or(SettingsPage::General);
-        let current = pages.iter().position(|page| *page == current_page);
-        let Some(next) = next_picker_highlight(current, pages.len(), key) else {
+        let current_page = self.settings_ui.page.unwrap_or(SettingsPage::General);
+        let Some(next) = settings_navigation_target(&pages, current_page, key) else {
             return;
         };
-        self.open_settings_page(pages[next], cx);
+        self.open_settings_page(next, cx);
     }
 
     fn render_settings_sidebar_titlebar(
@@ -249,30 +331,12 @@ impl Michelle {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let left_window_controls = self.render_client_window_controls(
-            super::window_chrome::WindowControlSide::Left,
-            window,
-            cx,
-        );
-        // Only as tall as whatever actually sits in it: macOS's native
-        // traffic lights, or the client-side buttons a Linux desktop puts on
-        // this side. Windows keeps all three on the far side, and a desktop
-        // like GNOME keeps none here, so there is nothing to clear and the
-        // strip is only somewhere to drag the window by — the content
-        // column's own titlebar carries the rest of that job.
-        let height = if cfg!(target_os = "macos") || left_window_controls.is_some() {
-            48.0
-        } else {
-            12.0
-        };
-
         div()
             .id("settings-sidebar-titlebar")
-            .h(px(height))
+            .h(px(TOOLBAR_HEIGHT))
             .flex_none()
             .flex()
             .items_center()
-            .children(left_window_controls)
             .child(
                 self.window_drag_region(
                     div()
@@ -285,19 +349,13 @@ impl Michelle {
             )
             .child(
                 self.render_settings_drag_region("settings-sidebar-titlebar-drag-region", cx)
-                    .h(px(height))
                     .flex_1(),
             )
     }
 
     fn render_settings_content(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let page = self.settings_page.unwrap_or(SettingsPage::General);
-        let right_window_controls = self.render_client_window_controls(
-            super::window_chrome::WindowControlSide::Right,
-            window,
-            cx,
-        );
+        let page = self.settings_ui.page.unwrap_or(SettingsPage::General);
         // The Skills page is a mail-style split that owns the whole content
         // column — no page title, no titlebar strip, no width cap, no card.
         // Window dragging stays with the sidebar's own titlebar region.
@@ -311,13 +369,6 @@ impl Michelle {
                 .border_l_1()
                 .border_color(theme.sidebar_border)
                 .bg(theme.surface)
-                .children(right_window_controls.map(|controls| {
-                    self.render_settings_drag_region("settings-skills-titlebar", cx)
-                        .flex()
-                        .items_center()
-                        .justify_end()
-                        .child(controls)
-                }))
                 .child(
                     div()
                         .flex_1()
@@ -330,13 +381,13 @@ impl Michelle {
         // container.
         let fills_viewport = page == SettingsPage::Usage
             && matches!(
-                self.usage_view,
+                self.usage_ui.view,
                 UsageViewMode::Monthly | UsageViewMode::Projects
             );
         // The titlebar strip is transparent; once content slides under it, a
         // hairline marks the boundary so the clip edge reads as a header
         // rather than a glitch.
-        let content_scrolled = !fills_viewport && self.settings_scroll.offset().y < px(-1.0);
+        let content_scrolled = !fills_viewport && self.settings_ui.scroll.offset().y < px(-1.0);
 
         let inner = div()
             .w_full()
@@ -389,7 +440,6 @@ impl Michelle {
                     .flex()
                     .items_center()
                     .justify_end()
-                    .children(right_window_controls)
                     .when(content_scrolled, |element| {
                         element.border_b_1().border_color(theme.border)
                     }),
@@ -406,7 +456,7 @@ impl Michelle {
                             .when(!fills_viewport, |element| {
                                 element
                                     .overflow_y_scroll()
-                                    .track_scroll(&self.settings_scroll)
+                                    .track_scroll(&self.settings_ui.scroll)
                                     .pb(px(48.0))
                             })
                             .when(fills_viewport, |element| {
@@ -417,8 +467,8 @@ impl Michelle {
                     )
                     .when(!fills_viewport, |element| {
                         element.child(scrollbar::vertical(
-                            &self.settings_scroll,
-                            &self.settings_scrollbar,
+                            &self.settings_ui.scroll,
+                            &self.settings_ui.scrollbar,
                         ))
                     }),
             )
@@ -487,7 +537,7 @@ impl Michelle {
                         "render-math-toggle",
                         self.state.render_math,
                         false,
-                        theme,
+                        theme.ui_colors(),
                         cx,
                         {
                             let enabled = self.state.render_math;
@@ -527,17 +577,17 @@ impl Michelle {
         }
 
         let enabled = self.state.daemon_exposure.enabled;
-        let pending = self.daemon_reconfigure_pending;
+        let pending = self.settings.daemon_reconfigure_pending;
         let fields_dirty = self.daemon_exposure_fields_dirty(cx);
         let port = self.state.daemon_exposure.port;
-        let websocket_url = format!("ws://{}:{port}", self.daemon_hostname);
+        let websocket_url = format!("ws://{}:{port}", self.settings.daemon_hostname);
         let token = self.state.daemon_exposure.token.clone();
 
         let exposure_toggle = toggle_switch(
             "daemon-exposure-toggle",
             enabled,
             pending,
-            theme,
+            theme.ui_colors(),
             cx,
             move |this, _, cx| this.set_daemon_exposure_enabled(!enabled, cx),
         );
@@ -631,7 +681,7 @@ impl Michelle {
         let token_copied = self.control_was_copied(copy_token_feedback_id);
         let click_token = token.clone();
         let key_token = token.clone();
-        let token_revealed = self.daemon_token_revealed;
+        let token_revealed = self.settings_ui.daemon_token_revealed;
         let reveal_token_button = div()
             .id("reveal-daemon-token")
             .tab_index(0)
@@ -658,14 +708,15 @@ impl Michelle {
                 tr!("daemon.reveal_token")
             }))
             .on_click(cx.listener(|this, _, _, cx| {
-                this.daemon_token_revealed = !this.daemon_token_revealed;
+                this.settings_ui.daemon_token_revealed = !this.settings_ui.daemon_token_revealed;
                 cx.notify();
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 if !event.keystroke.modifiers.modified()
                     && matches!(event.keystroke.key.as_str(), "enter" | "space")
                 {
-                    this.daemon_token_revealed = !this.daemon_token_revealed;
+                    this.settings_ui.daemon_token_revealed =
+                        !this.settings_ui.daemon_token_revealed;
                     cx.stop_propagation();
                     cx.notify();
                 }
@@ -867,7 +918,7 @@ impl Michelle {
                                     div().flex_1().min_w_0().flex().justify_end().child(
                                         TextField::new(
                                             "daemon-port-field",
-                                            self.daemon_port_input.clone(),
+                                            self.settings_ui.daemon_port_input.clone(),
                                         )
                                         .w(px(150.0)),
                                     ),
@@ -904,7 +955,7 @@ impl Michelle {
                                     div().flex_1().min_w_0().flex().justify_end().child(
                                         TextField::new(
                                             "daemon-origins-field",
-                                            self.daemon_origins_input.clone(),
+                                            self.settings_ui.daemon_origins_input.clone(),
                                         )
                                         .w_full()
                                         .max_w(px(360.0)),
@@ -963,7 +1014,7 @@ impl Michelle {
                                         .text_color(theme.text)
                                         .child(SharedString::from(format!(
                                             "ws://{}:{port}",
-                                            self.daemon_hostname
+                                            self.settings.daemon_hostname
                                         ))),
                                 )
                                 .child(copy_url_button),
@@ -1030,149 +1081,6 @@ impl Michelle {
             .into_any_element()
     }
 
-    fn daemon_exposure_from_fields(
-        &self,
-        cx: &App,
-    ) -> Result<michelle_client::DaemonExposureSettings, String> {
-        let port = self
-            .daemon_port_input
-            .read(cx)
-            .content()
-            .trim()
-            .parse::<u16>()
-            .map_err(|_| tr!("daemon.invalid_port"))?;
-        if port == 0 {
-            return Err(tr!("daemon.invalid_port"));
-        }
-        let origins = self.daemon_origins_input.read(cx).content().to_owned();
-        let mut settings = self.state.daemon_exposure.clone();
-        settings.port = port;
-        settings
-            .with_allowed_origins_text(&origins)
-            .and_then(michelle_client::DaemonExposureSettings::validate)
-            .map_err(|error| error.to_string())
-    }
-
-    fn daemon_exposure_fields_dirty(&self, cx: &App) -> bool {
-        self.daemon_exposure_from_fields(cx)
-            .map(|settings| {
-                settings.port != self.state.daemon_exposure.port
-                    || settings.allowed_origins != self.state.daemon_exposure.allowed_origins
-            })
-            .unwrap_or(true)
-    }
-
-    fn set_daemon_exposure_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        if !enabled {
-            self.daemon_token_revealed = false;
-        }
-        let settings = if enabled {
-            match self.daemon_exposure_from_fields(cx) {
-                Ok(mut settings) => {
-                    settings.enabled = true;
-                    settings
-                }
-                Err(error) => {
-                    self.show_toast(tr!("daemon.invalid_settings", error = error));
-                    return;
-                }
-            }
-        } else {
-            let mut settings = self.state.daemon_exposure.clone();
-            settings.enabled = false;
-            settings
-        };
-        self.apply_daemon_exposure(settings, cx);
-    }
-
-    pub(super) fn apply_daemon_exposure_fields(&mut self, cx: &mut Context<Self>) {
-        let settings = match self.daemon_exposure_from_fields(cx) {
-            Ok(settings) => settings,
-            Err(error) => {
-                self.show_toast(tr!("daemon.invalid_settings", error = error));
-                return;
-            }
-        };
-        self.apply_daemon_exposure(settings, cx);
-    }
-
-    fn regenerate_daemon_token(&mut self, cx: &mut Context<Self>) {
-        let mut settings = match self.daemon_exposure_from_fields(cx) {
-            Ok(settings) => settings,
-            Err(error) => {
-                self.show_toast(tr!("daemon.invalid_settings", error = error));
-                return;
-            }
-        };
-        settings.token = michelle_client::DaemonExposureSettings::new_token();
-        self.daemon_token_revealed = false;
-        self.apply_daemon_exposure(settings, cx);
-    }
-
-    fn apply_daemon_exposure(
-        &mut self,
-        settings: michelle_client::DaemonExposureSettings,
-        cx: &mut Context<Self>,
-    ) {
-        if self.daemon_reconfigure_pending || settings == self.state.daemon_exposure {
-            return;
-        }
-        if self.daemon.is_remote() {
-            self.show_toast(tr!("daemon.external_description"));
-            return;
-        }
-        if self
-            .state
-            .sessions
-            .iter()
-            .any(|session| !matches!(session.status, SessionStatus::Idle | SessionStatus::Failed))
-        {
-            self.show_toast(tr!("daemon.stop_active_tasks"));
-            return;
-        }
-
-        let needs_restart = self.state.daemon_exposure.enabled || settings.enabled;
-        if !needs_restart {
-            self.state.daemon_exposure = settings;
-            self.save();
-            cx.notify();
-            return;
-        }
-
-        self.daemon_reconfigure_pending = true;
-        let daemon = self.daemon.clone();
-        let applied = settings.clone();
-        let restart = cx
-            .background_executor()
-            .spawn(async move { daemon.reconfigure(settings) });
-        cx.spawn(async move |this, cx| {
-            let result = restart.await;
-            let _ = this.update(cx, |this, cx| {
-                this.daemon_reconfigure_pending = false;
-                match result {
-                    Ok(()) => {
-                        this.state.daemon_exposure = applied.clone();
-                        this.runtimes.clear();
-                        this.daemon_port_input.update(cx, |input, cx| {
-                            input.set_content(applied.port.to_string(), cx)
-                        });
-                        this.daemon_origins_input.update(cx, |input, cx| {
-                            input.set_content(applied.allowed_origins_text(), cx)
-                        });
-                        this.save();
-                        this.show_success_toast(tr!("daemon.settings_applied"));
-                    }
-                    Err(error) => {
-                        this.show_toast(tr!("daemon.restart_failed", error = error.to_string()))
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
     fn render_appearance_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let selected_scheme = self.state.theme;
@@ -1205,10 +1113,10 @@ impl Michelle {
             },
         );
 
-        let theme_selector = (self.themes.len() > 1).then(|| {
+        let theme_selector = (self.settings.themes.len() > 1).then(|| {
             let selected_theme = self.selected_theme();
             let selected_file = selected_theme.file.clone();
-            let themes = self.themes.clone();
+            let themes = self.settings.themes.clone();
             let weak = cx.entity().downgrade();
             let handle = self.menu_handle("theme-selector", cx);
             dropdown_menu(
@@ -1499,63 +1407,13 @@ impl Michelle {
             .into_any_element()
     }
 
-    fn set_render_math(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        if self.state.render_math == enabled {
-            return;
-        }
-        self.state.render_math = enabled;
-        self.remeasure_font_sized_surfaces();
-        self.save();
-        cx.notify();
-    }
-
-    fn set_ui_font_size(&mut self, size: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let size = michelle_client::persistence::sanitized_ui_font_size(size);
-        if self.state.ui_font_size == size {
-            return;
-        }
-        self.state.ui_font_size = size;
-        // Chrome is authored in `sp` rems; the rem size is the setting.
-        window.set_rem_size(px(size));
-        self.remeasure_font_sized_surfaces();
-        self.save();
-        window.refresh();
-        cx.notify();
-    }
-
-    fn set_code_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
-        let size = michelle_client::persistence::sanitized_code_font_size(size);
-        if self.state.code_font_size == size {
-            return;
-        }
-        self.state.code_font_size = size;
-        self.remeasure_font_sized_surfaces();
-        self.save();
-        cx.notify();
-    }
-
-    /// Drop every cached row height that a font size participates in. The
-    /// virtualized lists remember measured heights, so a stale entry would
-    /// misplace scroll anchors until the row happened to remeasure. The
-    /// sidebar list keeps its uniform row height and needs no reset.
-    fn remeasure_font_sized_surfaces(&self) {
-        self.reset_transcript_rows(self.transcript_row_count());
-        let line_count = self
-            .right_panel_diff_snapshot
-            .as_ref()
-            .map_or(0, |snapshot| snapshot.lines.len());
-        self.right_panel_diff_list_state.reset(line_count);
-        self.right_panel_diff_tree_list_state
-            .reset(self.right_panel_diff_tree_rows.borrow().len());
-        self.skills_list_state
-            .reset(self.skills_rows.borrow().len());
-    }
-
     fn render_providers_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let checking = self.provider_detection_remaining > 0;
+        let checking = self.settings.providers.detection_remaining > 0;
         let checked_label = self
-            .provider_detection_checked_at
+            .settings
+            .providers
+            .detection_checked_at
             .filter(|_| !checking)
             .map(|checked_at| detection_checked_label(checked_at.elapsed()));
 
@@ -1595,10 +1453,12 @@ impl Michelle {
             let binary_path = probe
                 .filter(|probe| probe.installed)
                 .and_then(|probe| probe.path.as_deref())
-                .map(|path| abbreviate_home_path(path, self.home_directory.as_deref()));
+                .map(|path| abbreviate_home_path(path, self.shell_model.home_directory.as_deref()));
             let model_count = probe.map(|probe| probe.models.len()).unwrap_or(0);
             let version = self
-                .provider_versions
+                .settings
+                .providers
+                .versions
                 .get(&kind)
                 .and_then(|version| version.clone());
             let disabled = self.state.disabled_providers.contains(&kind);
@@ -1645,12 +1505,12 @@ impl Michelle {
                 SharedString::from(format!("provider-enabled-{}", kind.id())),
                 toggle_on,
                 false,
-                theme,
+                theme.ui_colors(),
                 cx,
                 move |this, _, cx| this.set_provider_enabled(kind, disabled, cx),
             );
 
-            let expanded = self.expanded_provider_settings == Some(kind);
+            let expanded = self.settings_ui.expanded_provider == Some(kind);
             let expand_button = icon_button(
                 SharedString::from(format!("provider-expand-{}", kind.id())),
                 if expanded {
@@ -1658,7 +1518,7 @@ impl Michelle {
                 } else {
                     "chevron.right"
                 },
-                theme,
+                theme.ui_colors(),
             )
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
@@ -1852,7 +1712,8 @@ impl Michelle {
             .hover(|element| element.bg(theme.overlay))
             .child(tr!("common.reset"))
             .on_click(cx.listener(|this, _, _, cx| {
-                this.provider_path_input
+                this.settings_ui
+                    .provider_path_input
                     .update(cx, |input, cx| input.clear(cx));
                 this.apply_provider_path_override(cx);
             }));
@@ -1889,7 +1750,7 @@ impl Michelle {
                     .child(
                         TextField::new(
                             SharedString::from(format!("provider-path-field-{}", kind.id())),
-                            self.provider_path_input.clone(),
+                            self.settings_ui.provider_path_input.clone(),
                         )
                         .flex_1()
                         .max_w(px(430.0)),
@@ -1913,114 +1774,30 @@ impl Michelle {
         // Commit any pending edit for the previously expanded provider before
         // the input is handed to another row.
         self.apply_provider_path_override(cx);
-        if self.expanded_provider_settings == Some(provider) {
-            self.expanded_provider_settings = None;
+        if self.settings_ui.expanded_provider == Some(provider) {
+            self.settings_ui.expanded_provider = None;
         } else {
-            self.expanded_provider_settings = Some(provider);
+            self.settings_ui.expanded_provider = Some(provider);
             let override_value = self
                 .state
                 .provider_binary_overrides
                 .get(&provider)
                 .cloned()
                 .unwrap_or_default();
-            self.provider_path_input
+            self.settings_ui
+                .provider_path_input
                 .update(cx, |input, cx| input.set_content(override_value, cx));
-            let focus = self.provider_path_input.read(cx).focus();
+            let focus = self.settings_ui.provider_path_input.read(cx).focus();
             window.focus(&focus, cx);
         }
-        cx.notify();
-    }
-
-    /// Commit the binary override edit for the expanded provider: empty means
-    /// detect from PATH. Re-detects that provider and refreshes every catalog
-    /// keyed by the executable path.
-    pub(super) fn apply_provider_path_override(&mut self, cx: &mut Context<Self>) {
-        let Some(provider) = self.expanded_provider_settings else {
-            return;
-        };
-        let text = self
-            .provider_path_input
-            .read(cx)
-            .content()
-            .trim()
-            .to_owned();
-        let current = self
-            .state
-            .provider_binary_overrides
-            .get(&provider)
-            .cloned()
-            .unwrap_or_default();
-        if text == current {
-            return;
-        }
-        if text.is_empty() {
-            self.state.provider_binary_overrides.remove(&provider);
-        } else {
-            self.state.provider_binary_overrides.insert(provider, text);
-        }
-        self.save();
-        self.refresh_provider_detection(Some(provider));
-        self.refresh_composer_sources(cx);
-        cx.notify();
-    }
-
-    /// Providers switched off here stop offering models to new sessions;
-    /// sessions already locked to them keep working.
-    fn set_provider_enabled(
-        &mut self,
-        provider: ProviderKind,
-        enabled: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if enabled {
-            self.state
-                .disabled_providers
-                .retain(|kind| *kind != provider);
-        } else if !self.state.disabled_providers.contains(&provider) {
-            self.state.disabled_providers.push(provider);
-        }
-        if !enabled
-            && let Some(fallback) = ProviderKind::ALL
-                .into_iter()
-                .find(|kind| self.provider_enabled(*kind))
-        {
-            // New work must land somewhere usable: move the new-session
-            // default and any unstarted drafts off the switched-off provider.
-            // The remembered model belongs to the old provider, so it resets
-            // with it.
-            if self.state.last_provider == provider {
-                self.state.last_provider = fallback;
-                self.state.last_model = None;
-                self.state.last_reasoning_effort = None;
-                self.state.last_service_tier = None;
-                self.state.last_context_window = None;
-            }
-            let draft_ids = self
-                .state
-                .sessions
-                .iter()
-                .filter(|session| session.provider == provider && !session.has_started())
-                .map(|session| session.id)
-                .collect::<Vec<_>>();
-            for id in draft_ids {
-                if let Some(session) = self.state.session_mut(id) {
-                    session.provider = fallback;
-                    session.model = None;
-                    session.reasoning_effort = None;
-                    session.service_tier = None;
-                    session.context_window = None;
-                }
-            }
-        }
-        self.save();
         cx.notify();
     }
 
     fn render_computer_use_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let enabled = self.state.computer_use_enabled;
-        let permissions = self.computer_permissions.clone();
-        let pending = self.computer_permission_request_pending;
+        let permissions = self.settings.permissions.snapshot.clone();
+        let pending = self.settings.permissions.request_pending;
         let helper_name = crate::computer_use::helper_display_name();
         let mut allowed_apps = div().flex().flex_col().gap(px(1.0));
         if self.state.computer_use_allowed_apps.is_empty() {
@@ -2137,7 +1914,7 @@ impl Michelle {
                         "computer-use-enabled",
                         enabled,
                         false,
-                        theme,
+                        theme.ui_colors(),
                         cx,
                         move |this, _, cx| this.set_computer_use_enabled(!enabled, cx),
                     )),
@@ -2262,94 +2039,6 @@ impl Michelle {
             .into_any_element()
     }
 
-    fn set_computer_use_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.state.computer_use_enabled = enabled;
-        self.save();
-        if enabled {
-            self.request_computer_permissions(true, cx);
-        }
-        cx.notify();
-    }
-
-    pub(super) fn request_computer_permissions(&mut self, prompt: bool, cx: &mut Context<Self>) {
-        if !cfg!(target_os = "macos")
-            || !crate::computer_use::is_available()
-            || self.computer_permission_request_pending
-        {
-            return;
-        }
-        self.computer_permission_request_pending = true;
-        let tx = self.computer_permission_tx.clone();
-        let event_wake = self.event_wake_tx.clone();
-        let daemon = self.daemon.client();
-        std::thread::Builder::new()
-            .name("michelle-computer-permission-request".into())
-            .spawn(move || {
-                let result = match daemon.request(
-                    Uuid::nil(),
-                    Uuid::nil(),
-                    michelle_client::Command::ProbeComputerPermissions { prompt },
-                ) {
-                    Ok(michelle_client::ResponsePayload::ComputerPermissions { permissions }) => {
-                        Ok(permissions)
-                    }
-                    Ok(_) => Err("the daemon returned an invalid permission response".into()),
-                    Err(error) => Err(error.to_string()),
-                };
-                if tx.send(result).is_ok() {
-                    signal_event_pump(&event_wake);
-                }
-            })
-            .ok();
-        cx.notify();
-    }
-
-    fn revoke_computer_app(&mut self, key: &str, cx: &mut Context<Self>) {
-        self.state
-            .computer_use_allowed_apps
-            .retain(|grant| grant.key() != key);
-        self.save();
-        cx.notify();
-    }
-
-    fn computer_use_app_icon(
-        &self,
-        bundle_id: &str,
-        cx: &mut Context<Self>,
-    ) -> Option<std::sync::Arc<gpui::Image>> {
-        if let Some(icon) = self.computer_use_app_icons.borrow().get(bundle_id) {
-            return icon.clone();
-        }
-
-        let bundle_id = bundle_id.to_owned();
-        if self
-            .computer_use_app_icon_loads
-            .borrow_mut()
-            .insert(bundle_id.clone())
-        {
-            cx.spawn(async move |this, cx| {
-                let load_bundle_id = bundle_id.clone();
-                let icon =
-                    cx.background_executor()
-                        .spawn(async move {
-                            crate::platform::load_app_icon_for_bundle_id(&load_bundle_id)
-                        })
-                        .await;
-                let _ = this.update(cx, |this, cx| {
-                    this.computer_use_app_icon_loads
-                        .borrow_mut()
-                        .remove(&bundle_id);
-                    this.computer_use_app_icons
-                        .borrow_mut()
-                        .insert(bundle_id, icon);
-                    cx.notify();
-                });
-            })
-            .detach();
-        }
-        None
-    }
-
     fn render_settings_drag_region(
         &self,
         id: &'static str,
@@ -2361,7 +2050,7 @@ impl Michelle {
         let region = region.window_control_area(gpui::WindowControlArea::Drag);
 
         region
-            .h(px(48.0))
+            .h(px(TOOLBAR_HEIGHT))
             .flex_none()
             .on_click(|event, window, _| {
                 if event.click_count() == 2 {
@@ -2369,137 +2058,26 @@ impl Michelle {
                 }
             })
             .on_mouse_down_out(cx.listener(|this, _, _, _| {
-                this.header_drag_armed = false;
+                this.shell_ui.header_drag_armed = false;
             }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, _| {
-                    this.header_drag_armed = true;
+                    this.shell_ui.header_drag_armed = true;
                 }),
             )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, _, _| {
-                    this.header_drag_armed = false;
+                    this.shell_ui.header_drag_armed = false;
                 }),
             )
             .on_mouse_move(cx.listener(|this, _, window, _| {
-                if this.header_drag_armed {
-                    this.header_drag_armed = false;
+                if this.shell_ui.header_drag_armed {
+                    this.shell_ui.header_drag_armed = false;
                     crate::platform::start_window_move(window);
                 }
             }))
-    }
-
-    fn selected_theme(&self) -> &ThemeDefinition {
-        self.themes
-            .iter()
-            .find(|theme| theme.file == self.state.theme_name)
-            .unwrap_or(&self.themes[0])
-    }
-
-    pub(super) fn apply_theme(&self, window: &mut Window, cx: &mut App) {
-        crate::theme::apply_theme_preference(self.state.theme, self.selected_theme(), window, cx);
-    }
-
-    pub(super) fn load_themes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let task = cx
-            .background_executor()
-            .spawn(async { crate::theme::load_themes() });
-        cx.spawn_in(window, async move |this, cx| {
-            let themes = task.await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.themes = Rc::new(themes);
-                if this.themes.len() > 1 {
-                    this.apply_theme(window, cx);
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
-    fn set_theme(&mut self, file: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.theme_name == file {
-            return;
-        }
-        self.state.theme_name = file;
-        self.apply_theme(window, cx);
-        self.save();
-        cx.notify();
-    }
-
-    fn set_color_scheme(
-        &mut self,
-        preference: ThemePreference,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.state.theme == preference {
-            return;
-        }
-        self.state.theme = preference;
-        self.apply_theme(window, cx);
-        self.save();
-        cx.notify();
-    }
-
-    fn set_language(
-        &mut self,
-        language: crate::i18n::AppLanguage,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.state.language == language {
-            return;
-        }
-
-        self.state.language = language;
-        crate::i18n::set_language(language);
-
-        self.composer.update(cx, |input, cx| {
-            input.set_placeholder(tr!("input.do_anything"), cx)
-        });
-        self.model_search.update(cx, |input, cx| {
-            input.set_placeholder(tr!("input.search_models"), cx)
-        });
-        self.branch_search.update(cx, |input, cx| {
-            input.set_placeholder(tr!("input.search_branches"), cx)
-        });
-        self.branch_create_input.update(cx, |input, cx| {
-            input.set_placeholder(tr!("input.new_branch_name"), cx)
-        });
-        self.project_search.update(cx, |input, cx| {
-            input.set_placeholder(tr!("input.search_projects"), cx)
-        });
-        self.settings_search.update(cx, |input, cx| {
-            input.set_placeholder(tr!("settings.search"), cx)
-        });
-        self.skills_search.update(cx, |input, cx| {
-            input.set_placeholder(tr!("skills.search"), cx)
-        });
-        self.provider_path_input.update(cx, |input, cx| {
-            input.set_placeholder(tr!("input.detected_automatically"), cx)
-        });
-        self.usage_project_filter.update(cx, |input, cx| {
-            input.set_placeholder(tr!("input.filter_projects"), cx)
-        });
-        self.refresh_command_palette_localized_text(cx);
-        self.refresh_file_search_localized_text(cx);
-        self.refresh_transcript_search_localized_text(cx);
-        for terminal in self.right_panel_terminals.values() {
-            terminal.update(cx, |terminal, cx| terminal.refresh_localized_text(cx));
-        }
-        for probe in &mut self.probes {
-            probe.models = crate::model_catalog::fallback_models(probe.provider);
-        }
-        self.refresh_provider_detection(None);
-        self.invalidate_composer_sources(cx);
-
-        crate::set_app_menus(cx);
-        self.save();
-        window.refresh();
-        cx.notify();
     }
 }
 
@@ -2612,8 +2190,31 @@ fn permission_status_row(
 
 #[cfg(test)]
 mod tests {
-    use super::abbreviate_home_path;
+    use super::{SettingsPage, abbreviate_home_path, settings_navigation_target};
     use std::path::Path;
+
+    #[test]
+    fn navigation_stays_in_filtered_pages_and_supports_home_end() {
+        use SettingsPage::{Appearance, General, Skills};
+
+        let pages = [Appearance, Skills];
+        for (current, key, expected) in [
+            (Appearance, "down", Some(Skills)),
+            (Skills, "down", Some(Appearance)),
+            (Appearance, "up", Some(Skills)),
+            (General, "down", Some(Appearance)),
+            (General, "up", Some(Skills)),
+            (Skills, "home", Some(Appearance)),
+            (Appearance, "end", Some(Skills)),
+            (Appearance, "enter", None),
+            (Appearance, "space", None),
+        ] {
+            assert_eq!(settings_navigation_target(&pages, current, key), expected);
+        }
+        for key in ["up", "down", "home", "end"] {
+            assert_eq!(settings_navigation_target(&[], General, key), None);
+        }
+    }
 
     #[test]
     fn provider_paths_abbreviate_only_the_home_prefix() {

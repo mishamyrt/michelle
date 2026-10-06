@@ -1,5 +1,132 @@
 use super::right_panel::{DiffRowStyle, render_diff_code_row};
 use super::*;
+
+mod list;
+pub(super) mod model;
+
+pub(super) struct TranscriptUi {
+    /// User expansion overrides keyed by persisted transcript block index.
+    pub(in crate::app) activities_expanded: HashMap<usize, bool>,
+    /// Per-item disclosure overrides. Reasoning starts open while live; tool
+    /// details start closed, so the stored bool must preserve either choice.
+    pub(in crate::app) expanded_activity_items: HashMap<Uuid, bool>,
+    /// Settled turns whose folded work the user has reopened.
+    pub(in crate::app) expanded_turns: HashSet<Uuid>,
+    /// Per-response file cards the user expanded beyond their three-file
+    /// preview. Runtime-only, like the other transcript disclosures.
+    pub(in crate::app) expanded_changed_files: HashSet<Uuid>,
+    /// Stable focus identities for controls inside virtualized transcript and
+    /// diff rows. Recreating a handle on every row build would drop keyboard
+    /// focus whenever GPUI re-renders the list.
+    pub(in crate::app) control_focuses: RefCell<HashMap<String, FocusHandle>>,
+    pub(in crate::app) copied_message_feedback: HashMap<Uuid, u64>,
+    pub(in crate::app) copied_message_generation: u64,
+    pub(in crate::app) copied_activity_feedback:
+        HashMap<(Uuid, ActivityDisclosureSectionKind), u64>,
+    pub(in crate::app) copied_activity_generation: u64,
+    pub(in crate::app) message_edit: Option<MessageEdit>,
+    pub(in crate::app) rows: ListState,
+    /// Active turns use top alignment so row remeasurement cannot invoke the
+    /// bottom-aligned list's implicit pin and displace the sent-message anchor.
+    pub(in crate::app) anchored_transcript_rows: ListState,
+    /// The response row currently under the pointer. Response footers are
+    /// separate virtual-list rows, so GPUI's ancestor-scoped `group_hover`
+    /// cannot reveal them when a sibling response row is hovered.
+    pub(in crate::app) hovered_response_row: Option<(Uuid, TranscriptRowKind)>,
+    pub(in crate::app) anchor: Cell<Option<TranscriptAnchor>>,
+    pub(in crate::app) anchor_end_space: Rc<Cell<Pixels>>,
+    pub(in crate::app) anchor_following: Rc<Cell<bool>>,
+    /// A wheel scroll has landed and where it came to rest is not classified
+    /// yet. The first frame that can measure the tail consumes this and
+    /// re-engages following when the reader scrolled back onto it; a frame that
+    /// cannot measure the tail leaves it set, so a stream remeasure cannot
+    /// swallow the re-engage.
+    pub(in crate::app) tail_recheck: Rc<Cell<bool>>,
+    pub(in crate::app) is_scrolled: Rc<Cell<bool>>,
+    /// Last decided visibility of the scroll-to-tail affordance. The tail's
+    /// position is unknowable on the frames a stream commit remeasures it, and
+    /// those arrive at commit cadence — deciding "show" from that silence
+    /// strobes the button against the frames in between.
+    pub(in crate::app) scroll_to_bottom_visible: Cell<bool>,
+    /// Whether the transcript's scrollbar thumb was held at the last frame, so
+    /// render can notice a drag starting and ending.
+    pub(in crate::app) scrollbar_dragging: Cell<bool>,
+    pub(in crate::app) layout_width: Cell<Pixels>,
+    /// Stable offsets for capped user bubbles, including across virtualized row rebuilds.
+    pub(in crate::app) user_message_viewports: RefCell<HashMap<Uuid, UserMessageScrollViewport>>,
+    /// Independent capped viewports for expanded thoughts and command output.
+    /// Keeping these stable preserves scroll position through virtualization.
+    pub(in crate::app) activity_scroll_viewports: RefCell<HashMap<Uuid, ActivityScrollViewport>>,
+    /// Viewports for those diffs. Separate from `activity_scroll_viewports`
+    /// because a failed edit shows both its diff and the error it returned.
+    pub(in crate::app) activity_diff_viewports: RefCell<HashMap<Uuid, ActivityScrollViewport>>,
+    /// One allocation for every transcript markdown context to share. The
+    /// callback knows about the active workspace; the renderer deliberately
+    /// does not.
+    pub(in crate::app) markdown_link_handler: md::render::LinkHandler,
+    /// Transcript-wide text selection, spanning messages and tool output.
+    pub(in crate::app) selection: TranscriptSelection,
+    /// Programmatic focus for the transcript canvas. Clicking the transcript
+    /// moves focus here so the shared find action can distinguish it from the
+    /// right-panel file editor without putting the canvas in the tab order.
+    pub(in crate::app) focus: FocusHandle,
+    /// Find-in-page state for the selected transcript, created lazily on the
+    /// first primary-modifier F press.
+    pub(in crate::app) search: Option<transcript_search::TranscriptSearch>,
+    pub(in crate::app) scrollbar: Rc<ScrollbarState>,
+    pub(in crate::app) navigation_rail: Entity<ConversationNavigationRail>,
+    pub(in crate::app) navigation_rail_reset_generation: Cell<u64>,
+}
+
+#[derive(Clone)]
+pub(super) struct MessageEdit {
+    pub(in crate::app) session_id: Uuid,
+    /// Identifies the edited bubble outright. Matching by turn alone would
+    /// open this one input on every user message the turn holds.
+    pub(in crate::app) message_id: Uuid,
+    pub(in crate::app) turn_count: usize,
+    pub(in crate::app) input: Entity<ComposerInput>,
+    pub(in crate::app) attachments: Vec<MessageAttachment>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct TranscriptAnchor {
+    pub(in crate::app) session_id: Uuid,
+    pub(in crate::app) turn_id: Uuid,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct NavigationRailVisualState {
+    pub(in crate::app) emphasized_turn: Option<Uuid>,
+}
+
+#[derive(Clone)]
+pub(super) struct ActivityScrollViewport {
+    pub(in crate::app) scroll_handle: ScrollHandle,
+    pub(in crate::app) scrollbar: Rc<ScrollbarState>,
+    pub(in crate::app) follow_tail: Rc<Cell<bool>>,
+    pub(in crate::app) last_scrolled: Rc<Cell<Option<Pixels>>>,
+    pub(in crate::app) last_max_offset: Rc<Cell<Option<Pixels>>>,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct UserMessageScrollViewport {
+    pub(in crate::app) scroll_handle: ScrollHandle,
+    pub(in crate::app) scrollbar: Rc<ScrollbarState>,
+}
+
+impl Default for ActivityScrollViewport {
+    fn default() -> Self {
+        Self {
+            scroll_handle: ScrollHandle::new(),
+            scrollbar: ScrollbarState::new(),
+            follow_tail: Rc::new(Cell::new(true)),
+            last_scrolled: Rc::new(Cell::new(None)),
+            last_max_offset: Rc::new(Cell::new(None)),
+        }
+    }
+}
+
 use base64::Engine as _;
 
 const CHANGED_FILES_PREVIEW_LIMIT: usize = 3;
@@ -158,7 +285,8 @@ impl Michelle {
         key: impl Into<String>,
         cx: &mut App,
     ) -> FocusHandle {
-        self.transcript_control_focuses
+        self.transcript_ui
+            .control_focuses
             .borrow_mut()
             .entry(key.into())
             .or_insert_with(|| cx.focus_handle())
@@ -184,22 +312,23 @@ impl Michelle {
         // frame of the drag — and hand back the same question a wheel scroll
         // asks when the thumb is let go: did the reader come to rest on the
         // tail?
-        let scrollbar_dragging = self.transcript_scrollbar.is_grabbed();
+        let scrollbar_dragging = self.transcript_ui.scrollbar.is_grabbed();
         if self
-            .transcript_scrollbar_dragging
+            .transcript_ui
+            .scrollbar_dragging
             .replace(scrollbar_dragging)
             != scrollbar_dragging
         {
             if scrollbar_dragging {
-                self.transcript_anchor_following.set(false);
-                self.transcript_is_scrolled.set(true);
-                self.transcript_tail_recheck.set(false);
+                self.transcript_ui.anchor_following.set(false);
+                self.transcript_ui.is_scrolled.set(true);
+                self.transcript_ui.tail_recheck.set(false);
             } else {
-                self.transcript_tail_recheck.set(true);
+                self.transcript_ui.tail_recheck.set(true);
             }
         }
         let anchor_end_space = self.update_transcript_anchor_end_space(window);
-        if self.transcript_anchor_following.get()
+        if self.transcript_ui.anchor_following.get()
             && anchor_end_space <= Pixels::ZERO
             && self
                 .selected_transcript_anchor_row()
@@ -209,10 +338,11 @@ impl Michelle {
                 item_ix: transcript_rows.item_count(),
                 offset_in_item: Pixels::ZERO,
             });
-            self.transcript_is_scrolled.set(false);
+            self.transcript_ui.is_scrolled.set(false);
         }
         let entity = cx.entity().downgrade();
         let scrollbar_handle = transcript_rows.clone();
+        let transcript_scrolled = transcript_rows.scroll_px_offset_for_scrollbar().y < px(-0.5);
         let viewport_bounds = transcript_rows.viewport_bounds();
         let transcript_scrollable = viewport_bounds.size.height > Pixels::ZERO
             && transcript_rows.max_offset_for_scrollbar().y > px(0.5);
@@ -229,25 +359,26 @@ impl Michelle {
         // the reader is stranded mid-stream after a round trip up and back —
         // watching the reply grow past the bottom edge with no way but the
         // button to rejoin it.
-        if self.transcript_tail_recheck.get()
+        if self.transcript_ui.tail_recheck.get()
             && let Some(rests_at_tail) =
                 transcript_rests_at_tail(viewport_bottom, tail_bottom, anchor_end_space)
         {
-            self.transcript_tail_recheck.set(false);
+            self.transcript_ui.tail_recheck.set(false);
             if rests_at_tail {
                 self.pin_transcript_to_tail();
             }
         }
         let scroll_to_bottom_visible = should_show_scroll_to_bottom(
-            self.transcript_is_scrolled.get(),
-            self.transcript_anchor_following.get(),
+            self.transcript_ui.is_scrolled.get(),
+            self.transcript_ui.anchor_following.get(),
             transcript_scrollable,
             viewport_bottom,
             tail_bottom,
             anchor_end_space,
         )
-        .unwrap_or_else(|| self.transcript_scroll_to_bottom_visible.get());
-        self.transcript_scroll_to_bottom_visible
+        .unwrap_or_else(|| self.transcript_ui.scroll_to_bottom_visible.get());
+        self.transcript_ui
+            .scroll_to_bottom_visible
             .set(scroll_to_bottom_visible);
         let scroll_to_bottom = scroll_to_bottom_visible.then(|| {
             let theme = Theme::current(cx);
@@ -308,7 +439,7 @@ impl Michelle {
             let active_turn = active_navigation_turn_index(
                 &turn_rows,
                 scroll_top_row,
-                !self.transcript_is_scrolled.get(),
+                !self.transcript_ui.is_scrolled.get(),
             )
             .map(|index| navigation_turns[index].message_id);
             let navigation_rail_snapshot = ConversationNavigationRailSnapshot {
@@ -316,15 +447,15 @@ impl Michelle {
                 turns: navigation_turns,
                 viewport_height: f32::from(viewport_size.height),
                 active_turn,
-                reset_generation: self.navigation_rail_reset_generation.get(),
+                reset_generation: self.transcript_ui.navigation_rail_reset_generation.get(),
                 theme_generation: Theme::generation(cx),
             };
-            if self.navigation_rail.read(cx).snapshot != navigation_rail_snapshot {
-                self.navigation_rail.update(cx, |rail, cx| {
+            if self.transcript_ui.navigation_rail.read(cx).snapshot != navigation_rail_snapshot {
+                self.transcript_ui.navigation_rail.update(cx, |rail, cx| {
                     rail.set_snapshot(navigation_rail_snapshot, cx)
                 });
             }
-            self.navigation_rail.clone().cached(
+            self.transcript_ui.navigation_rail.clone().cached(
                 StyleRefinement::default()
                     .absolute()
                     .top_0()
@@ -332,7 +463,7 @@ impl Michelle {
                     .size_full(),
             )
         });
-        let transcript_focus = self.transcript_focus.clone();
+        let transcript_focus = self.transcript_ui.focus.clone();
         div()
             .flex_1()
             .min_h_0()
@@ -343,12 +474,14 @@ impl Michelle {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
-                    window.focus(&this.transcript_focus, cx);
+                    window.focus(&this.transcript_ui.focus, cx);
                 }),
             )
             // Painted before any row, so the frame's selection registry holds
             // exactly the text elements this frame put on screen, in order.
-            .child(md::render::frame_reset(self.transcript_selection.clone()))
+            .child(md::render::frame_reset(
+                self.transcript_ui.selection.clone(),
+            ))
             .child(
                 list(transcript_rows, move |index, window, cx| {
                     entity
@@ -365,10 +498,21 @@ impl Michelle {
             .children(scroll_to_bottom)
             .child(scrollbar::vertical(
                 &scrollbar_handle,
-                &self.transcript_scrollbar,
+                &self.transcript_ui.scrollbar,
             ))
             .child(self.transcript_selection_input())
             .children(search_bar)
+            .when(transcript_scrolled, |element| {
+                element.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .w_full()
+                        .h(px(0.5))
+                        .bg(Theme::current(cx).border),
+                )
+            })
             .into_any_element()
     }
 
@@ -386,10 +530,11 @@ impl Michelle {
     /// against the viewport as that row grows. The flag alone only re-pins in
     /// the phase where the anchor's end space has already collapsed to zero.
     fn pin_transcript_to_tail(&self) {
-        self.transcript_anchor_following
-            .set(self.transcript_anchor.get().is_some());
+        self.transcript_ui
+            .anchor_following
+            .set(self.transcript_ui.anchor.get().is_some());
         self.active_transcript_rows().scroll_to_end();
-        self.transcript_is_scrolled.set(false);
+        self.transcript_ui.is_scrolled.set(false);
     }
 
     /// Copy the transcript's text selection.
@@ -403,19 +548,22 @@ impl Michelle {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let reviewing_diff = self.right_panel_visible
+        let reviewing_diff = self.shell_ui.right_panel_visible
             && self
-                .right_panel_active_surface
-                .and_then(|index| self.right_panel_surfaces.get(index))
+                .right_panel_ui
+                .active_surface
+                .and_then(|index| self.right_panel_ui.surfaces.get(index))
                 .is_some_and(|surface| matches!(surface, RightPanelSurface::Diff));
-        let reviewing_background_work = self.right_panel_visible
+        let reviewing_background_work = self.shell_ui.right_panel_visible
             && self
-                .right_panel_active_surface
-                .and_then(|index| self.right_panel_surfaces.get(index))
+                .right_panel_ui
+                .active_surface
+                .and_then(|index| self.right_panel_ui.surfaces.get(index))
                 .is_some_and(|surface| matches!(surface, RightPanelSurface::BackgroundWork { .. }));
         let selected = reviewing_diff
             .then(|| {
-                self.right_panel_diff_selection
+                self.right_panel_ui
+                    .diff_selection
                     .selection
                     .borrow()
                     .selected_text()
@@ -426,14 +574,28 @@ impl Michelle {
                     .then(|| {
                         self.state
                             .selected_session
-                            .and_then(|session_id| self.background_work.get(&session_id))
+                            .and_then(|session_id| {
+                                self.sessions.runtime.background_work.get(&session_id)
+                            })
                             .and_then(BackgroundWorkRegistry::selected_text)
                     })
                     .flatten()
             })
-            .or_else(|| self.toast_selection.selection.borrow().selected_text())
-            .or_else(|| self.skills_selection.selection.borrow().selected_text())
-            .or_else(|| self.transcript_selection.selection.borrow().selected_text());
+            .or_else(|| {
+                self.notifications_ui
+                    .selection
+                    .selection
+                    .borrow()
+                    .selected_text()
+            })
+            .or_else(|| self.skills_ui.selection.selection.borrow().selected_text())
+            .or_else(|| {
+                self.transcript_ui
+                    .selection
+                    .selection
+                    .borrow()
+                    .selected_text()
+            });
         match selected {
             Some(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
             None => cx.propagate(),
@@ -444,18 +606,7 @@ impl Michelle {
     /// One set for the whole transcript: the registry already knows every
     /// painted element's geometry, so per-element listeners would be redundant.
     fn transcript_selection_input(&self) -> impl IntoElement {
-        let selection = self.transcript_selection.clone();
-        canvas(
-            |_, _, _| (),
-            move |_, _, window, _| md::render::install_selection_input(window, &selection),
-        )
-        .absolute()
-        .w(px(0.0))
-        .h(px(0.0))
-    }
-
-    pub(super) fn toast_selection_input(&self) -> impl IntoElement {
-        let selection = self.toast_selection.clone();
+        let selection = self.transcript_ui.selection.clone();
         canvas(
             |_, _, _| (),
             move |_, _, window, _| md::render::install_selection_input(window, &selection),
@@ -831,12 +982,12 @@ impl Michelle {
             return;
         };
 
-        self.transcript_anchor_following.set(false);
+        self.transcript_ui.anchor_following.set(false);
         self.active_transcript_rows().scroll_to(ListOffset {
             item_ix: row_index,
             offset_in_item: Pixels::ZERO,
         });
-        self.transcript_is_scrolled.set(true);
+        self.transcript_ui.is_scrolled.set(true);
         cx.notify();
     }
 
@@ -868,7 +1019,9 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) {
         self.toggle_block_disclosure(block_index, cx, |this| {
-            this.activities_expanded.insert(block_index, !current);
+            this.transcript_ui
+                .activities_expanded
+                .insert(block_index, !current);
         });
     }
 
@@ -881,13 +1034,21 @@ impl Michelle {
             return;
         };
         self.toggle_block_disclosure(block_index, cx, |this| {
-            this.expanded_activity_items.insert(id, !current);
+            this.transcript_ui
+                .expanded_activity_items
+                .insert(id, !current);
             if current {
                 // Collapsed: the rows would only be rebuilt from the same
                 // changes if it reopens, so do not keep them alive for every
                 // edit the session ever made.
-                this.activity_diffs.borrow_mut().remove(&id);
-                this.activity_diff_viewports.borrow_mut().remove(&id);
+                this.transcript_model
+                    .activity_diffs
+                    .borrow_mut()
+                    .remove(&id);
+                this.transcript_ui
+                    .activity_diff_viewports
+                    .borrow_mut()
+                    .remove(&id);
             }
         });
     }
@@ -934,19 +1095,6 @@ impl Michelle {
             .into_any_element()
     }
 
-    /// Diff rows for an expanded file-change activity, built on first sight and
-    /// held until the activity collapses or its changes are replaced.
-    fn activity_diff_rows(&self, activity: &ActivityItem) -> Rc<activity_diff::Diff> {
-        if let Some(diff) = self.activity_diffs.borrow().get(&activity.id) {
-            return diff.clone();
-        }
-        let diff = Rc::new(activity_diff::build(activity));
-        self.activity_diffs
-            .borrow_mut()
-            .insert(activity.id, diff.clone());
-        diff
-    }
-
     pub(super) fn toggle_turn_fold(
         &mut self,
         turn_id: Uuid,
@@ -955,17 +1103,17 @@ impl Michelle {
     ) {
         self.pin_transcript_for_disclosure();
         let scroll_top = self.active_transcript_rows().logical_scroll_top();
-        let previous_kinds = self.transcript_row_kinds.borrow().clone();
+        let previous_kinds = self.transcript_model.row_kinds.borrow().clone();
         let anchor_kind = previous_kinds.get(scroll_top.item_ix).copied();
         if expanded {
-            self.expanded_turns.remove(&turn_id);
+            self.transcript_ui.expanded_turns.remove(&turn_id);
         } else {
-            self.expanded_turns.insert(turn_id);
+            self.transcript_ui.expanded_turns.insert(turn_id);
         }
-        self.transcript_anchor_following.set(false);
+        self.transcript_ui.anchor_following.set(false);
         self.splice_transcript_rows_after_visibility_change(&previous_kinds);
 
-        let next_kinds = self.transcript_row_kinds.borrow();
+        let next_kinds = self.transcript_model.row_kinds.borrow();
         let anchored_target =
             anchor_kind.and_then(|kind| next_kinds.iter().position(|candidate| *candidate == kind));
         let target = anchored_target.or_else(|| {
@@ -983,155 +1131,9 @@ impl Michelle {
                     Pixels::ZERO
                 },
             });
-            self.transcript_is_scrolled.set(true);
+            self.transcript_ui.is_scrolled.set(true);
         }
         cx.notify();
-    }
-
-    /// A single transcript row, self-centered to the content column so the
-    /// list can measure it at its true wrap width. Current-turn reasoning and
-    /// activity blocks are anchored at the exact boundary between assistant
-    /// text segments where their provider events arrived.
-    pub(super) fn user_message_action_for_message(
-        &self,
-        message_index: usize,
-    ) -> Option<UserMessageAction> {
-        let session = self.selected_session()?;
-        let message = session.messages.get(message_index)?;
-        if message.role != MessageRole::User
-            || !matches!(session.status, SessionStatus::Idle | SessionStatus::Failed)
-        {
-            return None;
-        }
-        let turn_id = message.turn_id?;
-        let turn = session.turns.iter().find(|turn| turn.id == turn_id)?;
-        if !session.provider.supports_conversation_rollback() {
-            return None;
-        }
-        // A steer joins the running turn as another user message. Rewinding
-        // restores the turn's checkpoint and resubmits the prompt that opened
-        // it, so only that prompt can carry the affordance.
-        if !message_opens_turn(&session.messages, message_index) {
-            return None;
-        }
-        let retained_turn_count = turn.turn_count.saturating_sub(1);
-        // Cache only — the ref lives in git, and this runs for every visible
-        // user message on every frame. `prefetch_checkpoint_refs` fills the
-        // cache off-thread and notifies.
-        if !self
-            .checkpoint_ref_cache
-            .borrow()
-            .get(&(session.id, retained_turn_count))
-            .copied()
-            .unwrap_or(false)
-        {
-            return None;
-        }
-        let rollback_turns = session.provider_turns_after(retained_turn_count);
-        if rollback_turns > 0 && session.provider_cursor.is_none() {
-            return None;
-        }
-        Some(UserMessageAction {
-            session_id: session.id,
-            message_id: message.id,
-            turn_count: turn.turn_count,
-        })
-    }
-
-    /// Forget cached checkpoint-ref existence after refs changed. The next
-    /// transcript frame schedules a fresh background prefetch.
-    pub(super) fn invalidate_checkpoint_refs(&self) {
-        self.checkpoint_ref_cache.borrow_mut().clear();
-        self.checkpoint_ref_generation
-            .set(self.checkpoint_ref_generation.get().wrapping_add(1));
-    }
-
-    /// Resolve the selected session's checkpoint refs on the background
-    /// executor — one `git for-each-ref` per session per invalidation — and
-    /// cache which retained turn counts have one. The rewind affordance
-    /// appears once the result lands and notifies.
-    fn prefetch_checkpoint_refs(&self, cx: &mut Context<Self>) {
-        let Some(session) = self.selected_session() else {
-            return;
-        };
-        let generation = self.checkpoint_ref_generation.get();
-        if self.checkpoint_ref_prefetch.get() == Some((session.id, generation)) {
-            return;
-        }
-        let Some(project_path) = self
-            .workspace_path_for_session(session)
-            .map(std::path::Path::to_path_buf)
-        else {
-            return;
-        };
-        let session_id = session.id;
-        let retained_turn_counts = session
-            .turns
-            .iter()
-            .map(|turn| turn.turn_count.saturating_sub(1))
-            .collect::<Vec<_>>();
-        self.checkpoint_ref_prefetch
-            .set(Some((session_id, generation)));
-        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |this, cx| {
-            let existing = cx
-                .background_executor()
-                .spawn(async move {
-                    match workspace.request(michelle_client::WorkspaceOperation::SessionTurnRefs {
-                        cwd: project_path,
-                        session_id,
-                    }) {
-                        Ok(michelle_client::WorkspaceResult::TurnRefs { turn_counts }) => {
-                            turn_counts.into_iter().collect::<HashSet<_>>()
-                        }
-                        Ok(_) | Err(_) => HashSet::new(),
-                    }
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.checkpoint_ref_generation.get() != generation {
-                    return;
-                }
-                let mut cache = this.checkpoint_ref_cache.borrow_mut();
-                for turn_count in retained_turn_counts {
-                    cache.insert((session_id, turn_count), existing.contains(&turn_count));
-                }
-                drop(cache);
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    pub(super) fn assistant_message_action_for_message(
-        &self,
-        message_index: usize,
-    ) -> Option<AssistantMessageAction> {
-        let session = self.selected_session()?;
-        let message = session.messages.get(message_index)?;
-        if message.role != MessageRole::Assistant
-            || assistant_response_footer_index(session, message_index) != Some(message_index)
-            || !matches!(session.status, SessionStatus::Idle | SessionStatus::Failed)
-            || !session.provider.supports_conversation_fork()
-            || session
-                .provider_cursor
-                .as_ref()
-                .is_none_or(|cursor| cursor.provider() != session.provider)
-        {
-            return None;
-        }
-        let turn_id = message.turn_id?;
-        let turn = session
-            .turns
-            .iter()
-            .find(|turn| turn.id == turn_id && turn.provider_turn_started)?;
-        let pending_turn = self.response_fork_preparations.get(&session.id).copied();
-        Some(AssistantMessageAction {
-            session_id: session.id,
-            turn_count: turn.turn_count,
-            enabled: pending_turn.is_none(),
-            preparing: pending_turn == Some(turn.turn_count),
-        })
     }
 
     /// `metrics` rescaled to the user's UI and code font size settings.
@@ -1156,9 +1158,9 @@ impl Michelle {
         metrics: MarkdownMetrics,
         animate_streaming: bool,
     ) -> MarkdownCtx<'a> {
-        MarkdownCtx::new(row, palette, metrics, self.transcript_selection.clone())
+        MarkdownCtx::new(row, palette, metrics, self.transcript_ui.selection.clone())
             .with_math_enabled(self.state.render_math)
-            .with_link_handler(self.markdown_link_handler.clone())
+            .with_link_handler(self.transcript_ui.markdown_link_handler.clone())
             .with_streaming_animation(animate_streaming)
     }
 
@@ -1184,10 +1186,10 @@ impl Michelle {
         extra: impl Fn(bool, &mut Window, &mut App) + 'static,
     ) -> ContextMenuHandle {
         let id = id.into();
-        if let Some(handle) = self.menus.borrow().get(&id) {
+        if let Some(handle) = self.shell_ui.menus.borrow().get(&id) {
             return handle.clone();
         }
-        let composer = self.composer.clone();
+        let composer = self.composer_ui.input.clone();
         let handle = ContextMenuHandle::new(cx)
             .on_toggle(move |open, window, cx| {
                 composer.update(cx, |composer, cx| {
@@ -1199,7 +1201,7 @@ impl Michelle {
                 });
             })
             .on_toggle(extra);
-        self.menus.borrow_mut().insert(id, handle.clone());
+        self.shell_ui.menus.borrow_mut().insert(id, handle.clone());
         handle
     }
 
@@ -1211,14 +1213,14 @@ impl Michelle {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
-        let composer = self.composer.clone();
+        let composer = self.composer_ui.input.clone();
         let michelle = cx.entity().downgrade();
         // Both from the cache `sync_transcript_rows` refreshed at the top of
         // this frame. Recomputing the row list here would rebuild the whole
         // transcript's row kinds — several allocations proportional to the
         // session — once for every visible row, every frame.
         let (row_count, kind) = {
-            let kinds = self.transcript_row_kinds.borrow();
+            let kinds = self.transcript_model.row_kinds.borrow();
             let kind = kinds
                 .get(index)
                 .copied()
@@ -1244,16 +1246,19 @@ impl Michelle {
             TranscriptRowKind::Message(message_index) => self
                 .selected_session()
                 .and_then(|session| session.messages.get(message_index))
-                .cloned()
                 .map(|message| {
-                    let copied = self.copied_message_feedback.contains_key(&message.id);
+                    let copied = self
+                        .transcript_ui
+                        .copied_message_feedback
+                        .contains_key(&message.id);
                     let (assistant_footer_copy_content, assistant_footer_time) =
                         self.assistant_response_footer_cached(message_index);
                     let assistant_message_action =
                         self.assistant_message_action_for_message(message_index);
                     let user_message_action = self.user_message_action_for_message(message_index);
                     let message_edit_input = user_message_action.and_then(|action| {
-                        self.message_edit
+                        self.transcript_ui
+                            .message_edit
                             .as_ref()
                             .filter(|edit| {
                                 edit.session_id == action.session_id
@@ -1290,7 +1295,8 @@ impl Michelle {
                     let attachments_can_reveal = !self.daemon.is_remote();
                     let menu = self.menu_handle(format!("message-{}", message.id), cx);
                     let user_message_viewport = (message.role == MessageRole::User).then(|| {
-                        self.user_message_viewports
+                        self.transcript_ui
+                            .user_message_viewports
                             .borrow_mut()
                             .entry(message.id)
                             .or_default()
@@ -1317,7 +1323,7 @@ impl Michelle {
                     // Human and assistant messages share the Markdown path.
                     // Parse only visible rows rather than doing work for every
                     // driver delta or every off-screen prompt.
-                    let mut markdown = self.message_markdown.borrow_mut();
+                    let mut markdown = self.transcript_model.message_markdown.borrow_mut();
                     let view = matches!(message.role, MessageRole::User | MessageRole::Assistant)
                         .then(|| {
                             let view = markdown.entry(message.id).or_default();
@@ -1327,7 +1333,7 @@ impl Michelle {
                     let rendered = render_message(
                         MessageRender {
                             theme: &theme,
-                            message: &message,
+                            message,
                             assistant_footer_copy_content,
                             assistant_footer_time,
                             copied,
@@ -1405,13 +1411,13 @@ impl Michelle {
         if let Some(turn_id) = response_turn_id {
             let hover_target = (turn_id, kind);
             row = row.on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
-                let previous = this.hovered_response_row;
+                let previous = this.transcript_ui.hovered_response_row;
                 if *hovering {
-                    this.hovered_response_row = Some(hover_target);
+                    this.transcript_ui.hovered_response_row = Some(hover_target);
                 } else if previous == Some(hover_target) {
-                    this.hovered_response_row = None;
+                    this.transcript_ui.hovered_response_row = None;
                 }
-                if this.hovered_response_row != previous {
+                if this.transcript_ui.hovered_response_row != previous {
                     cx.notify();
                 }
             }));
@@ -1437,9 +1443,13 @@ impl Michelle {
         let Some(copy_content) = copy_content else {
             return div().into_any_element();
         };
-        let copied = self.copied_message_feedback.contains_key(&message.id);
+        let copied = self
+            .transcript_ui
+            .copied_message_feedback
+            .contains_key(&message.id);
         let action = self.assistant_message_action_for_message(message_index);
         let force_visible = self
+            .transcript_ui
             .hovered_response_row
             .is_some_and(|(hovered_turn_id, _)| hovered_turn_id == turn_id);
         let group_name = SharedString::from(format!("assistant-response-footer-{turn_id}"));
@@ -1478,9 +1488,9 @@ impl Michelle {
     ) {
         self.pin_transcript_for_disclosure();
         if expanded {
-            self.expanded_changed_files.remove(&turn_id);
+            self.transcript_ui.expanded_changed_files.remove(&turn_id);
         } else {
-            self.expanded_changed_files.insert(turn_id);
+            self.transcript_ui.expanded_changed_files.insert(turn_id);
         }
         self.remeasure_changed_files(turn_id);
         cx.notify();
@@ -1508,7 +1518,7 @@ impl Michelle {
         let files = checkpoint.files.as_slice();
         let additions = checkpoint.additions;
         let deletions = checkpoint.deletions;
-        let expanded = self.expanded_changed_files.contains(&turn_id);
+        let expanded = self.transcript_ui.expanded_changed_files.contains(&turn_id);
         let visible_limit = if expanded {
             CHANGED_FILES_EXPANDED_LIMIT
         } else {
@@ -1753,7 +1763,7 @@ impl Michelle {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let expanded = self.expanded_turns.contains(&turn_id);
+        let expanded = self.transcript_ui.expanded_turns.contains(&turn_id);
         let label = self
             .selected_session()
             .map(|session| turn_fold_label(session, turn_id))
@@ -1842,16 +1852,21 @@ impl Michelle {
         section_kind: ActivityDisclosureSectionKind,
         cx: &mut Context<Self>,
     ) {
-        self.copied_activity_generation = self.copied_activity_generation.wrapping_add(1);
-        let generation = self.copied_activity_generation;
+        self.transcript_ui.copied_activity_generation = self
+            .transcript_ui
+            .copied_activity_generation
+            .wrapping_add(1);
+        let generation = self.transcript_ui.copied_activity_generation;
         let key = (activity_id, section_kind);
-        self.copied_activity_feedback.insert(key, generation);
+        self.transcript_ui
+            .copied_activity_feedback
+            .insert(key, generation);
         cx.notify();
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(2)).await;
             let _ = this.update(cx, |this, cx| {
-                if this.copied_activity_feedback.get(&key) == Some(&generation) {
-                    this.copied_activity_feedback.remove(&key);
+                if this.transcript_ui.copied_activity_feedback.get(&key) == Some(&generation) {
+                    this.transcript_ui.copied_activity_feedback.remove(&key);
                     cx.notify();
                 }
             });
@@ -1887,6 +1902,7 @@ impl Michelle {
                 })
         });
         let expanded = self
+            .transcript_ui
             .activities_expanded
             .get(&block_index)
             .copied()
@@ -2059,6 +2075,7 @@ impl Michelle {
                 || shows_diff;
             let item_expanded = has_detail
                 && self
+                    .transcript_ui
                     .expanded_activity_items
                     .get(&id)
                     .copied()
@@ -2189,18 +2206,22 @@ impl Michelle {
                     )
                     .with_math_context_menu(self.menu_handle(format!("reasoning-math-{id}"), cx));
                 let reasoning_viewport = self
+                    .transcript_ui
                     .activity_scroll_viewports
                     .borrow_mut()
                     .entry(id)
                     .or_default()
                     .clone();
-                let mut views = self.activity_markdown.borrow_mut();
+                let mut views = self.transcript_model.activity_markdown.borrow_mut();
                 let view = views.entry(id).or_default();
                 if reasoning_live {
                     let start = self.live_reasoning_window_start(id, &reasoning.content, view);
                     view.set_text(&reasoning.content[start..], true);
                 } else {
-                    self.reasoning_window_starts.borrow_mut().remove(&id);
+                    self.transcript_model
+                        .reasoning_window_starts
+                        .borrow_mut()
+                        .remove(&id);
                     view.set_text(&reasoning.content, false);
                 }
                 let wheel_scroll = reasoning_viewport.scroll_handle.clone();
@@ -2339,6 +2360,7 @@ impl Michelle {
                     if let Some(label) = section_kind.label() {
                         let copy_content = content.clone();
                         let copied = self
+                            .transcript_ui
                             .copied_activity_feedback
                             .contains_key(&(id, section_kind));
                         let copy_michelle = cx.entity().downgrade();
@@ -2401,6 +2423,7 @@ impl Michelle {
                             && section_kind == ActivityDisclosureSectionKind::Output
                         {
                             let output_viewport = self
+                                .transcript_ui
                                 .activity_scroll_viewports
                                 .borrow_mut()
                                 .entry(id)
@@ -2508,6 +2531,7 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let viewport = self
+            .transcript_ui
             .activity_diff_viewports
             .borrow_mut()
             .entry(id)
@@ -2655,7 +2679,7 @@ impl Michelle {
                 line,
                 index,
                 &format!("activity-diff-{id}"),
-                &self.transcript_selection,
+                &self.transcript_ui.selection,
                 DiffRowStyle::activity(self.state.code_font_size),
                 theme,
             ),
@@ -2754,31 +2778,6 @@ fn live_reasoning_window_anchor(cached: usize, content: &str) -> usize {
         .find("\n\n")
         .map(|found| cut + found + 2)
         .unwrap_or(cut)
-}
-
-impl Michelle {
-    /// Byte offset the live reasoning peek renders from, slid forward as the
-    /// thought grows. The peek pins a 400 px viewport to the tail, but
-    /// markdown cost is O(rendered source) per pulse tick regardless of block
-    /// shape, so the window keeps parse, flatten, elements, and veil all
-    /// O(window); the full trace renders once the turn settles. A slide
-    /// re-anchors at a block boundary and reseeds the view so already-shown
-    /// text never re-dissolves.
-    fn live_reasoning_window_start(
-        &self,
-        id: Uuid,
-        content: &str,
-        view: &mut MarkdownView,
-    ) -> usize {
-        let mut starts = self.reasoning_window_starts.borrow_mut();
-        let start = starts.entry(id).or_insert(0);
-        let next = live_reasoning_window_anchor(*start, content);
-        if next != *start {
-            *start = next;
-            *view = MarkdownView::seeded();
-        }
-        *start
-    }
 }
 
 fn activity_scroll_guard(viewport: ActivityScrollViewport, live: bool) -> impl IntoElement {

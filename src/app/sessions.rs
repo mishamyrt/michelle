@@ -1,5 +1,12 @@
 use super::*;
 
+pub(super) mod activation;
+pub(super) mod checkpoints;
+pub(super) mod interactions;
+pub(super) mod model;
+pub(super) mod queue;
+use activation::SessionActivationTransition;
+
 fn retain_runtime_after_cancel(provider: ProviderKind) -> bool {
     // Codex's app-server owns the Computer Use process tree, and Amp offers no
     // interrupt on its stream — stopping it means ending the process. Both
@@ -18,223 +25,6 @@ impl Michelle {
         self.select_session(session_id, cx);
     }
 
-    pub(super) fn select_project(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
-        self.state.selected_project = Some(project_id);
-        self.create_session_for(project_id, self.state.last_provider, cx);
-    }
-
-    pub(super) fn select_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
-    }
-
-    fn request_session_activation(
-        &mut self,
-        session_id: Uuid,
-        transition: SessionActivationTransition,
-        cx: &mut Context<Self>,
-    ) {
-        if !self
-            .state
-            .sessions
-            .iter()
-            .any(|session| session.id == session_id)
-        {
-            return;
-        }
-        self.reveal_sidebar_session(session_id);
-        let needs_hydration = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .is_some_and(|session| !session.detail_loaded);
-        if needs_hydration {
-            self.pending_session_activation = Some(PendingSessionActivation {
-                session_id,
-                transition,
-            });
-            // Keep the current transcript visible until the daemon returns the
-            // target session, but acknowledge the click immediately in the
-            // sidebar instead of making the UI appear unresponsive.
-            cx.notify();
-            self.ensure_session_loaded(session_id, cx);
-            return;
-        }
-        self.pending_session_activation = None;
-        self.finish_session_activation(session_id, transition, cx);
-    }
-
-    fn finish_session_activation(
-        &mut self,
-        session_id: Uuid,
-        transition: SessionActivationTransition,
-        cx: &mut Context<Self>,
-    ) {
-        match transition {
-            SessionActivationTransition::Visit => self
-                .session_navigation
-                .visit(self.state.selected_session, session_id),
-            SessionActivationTransition::Back { from } => {
-                if self.state.selected_session != Some(from)
-                    || self.session_navigation.back_target() != Some(session_id)
-                {
-                    return;
-                }
-                let _ = self.session_navigation.go_back(from);
-            }
-            SessionActivationTransition::Forward { from } => {
-                if self.state.selected_session != Some(from)
-                    || self.session_navigation.forward_target() != Some(session_id)
-                {
-                    return;
-                }
-                let _ = self.session_navigation.go_forward(from);
-            }
-        }
-        self.activate_session(session_id, cx);
-    }
-
-    /// Loads a session's transcript if startup only fetched its list columns.
-    ///
-    /// The SQLite query and daemon round trip both stay off the UI thread. The
-    /// current selection stays rendered until the requested session is whole.
-    pub(super) fn ensure_session_loaded(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let needs_hydration = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .is_some_and(|session| !session.detail_loaded);
-        if !needs_hydration || !self.session_hydrations.insert(session_id) {
-            return;
-        }
-        let daemon = self.daemon.clone();
-        cx.spawn(async move |michelle, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    match michelle_client::persistence::hydrate_session(&daemon, session_id)? {
-                        Some(session) => Ok(session),
-                        None => {
-                            anyhow::bail!("the task no longer exists")
-                        }
-                    }
-                })
-                .await;
-            let _ = michelle.update(cx, |michelle, cx| {
-                if !michelle.session_hydrations.remove(&session_id) {
-                    return;
-                }
-                match result {
-                    Ok(session) => {
-                        let replaced = if let Some(existing) = michelle
-                            .state
-                            .sessions
-                            .iter_mut()
-                            .find(|existing| existing.id == session_id)
-                        {
-                            *existing = session;
-                            true
-                        } else {
-                            false
-                        };
-                        let pending = michelle
-                            .pending_session_activation
-                            .filter(|pending| pending.session_id == session_id);
-                        if pending.is_some() {
-                            michelle.pending_session_activation = None;
-                        }
-                        if replaced && let Some(pending) = pending {
-                            michelle.finish_session_activation(session_id, pending.transition, cx);
-                        } else if michelle.state.selected_session == Some(session_id) {
-                            michelle.reset_visible_state();
-                            michelle.reset_transcript_rows(michelle.transcript_row_count());
-                            michelle.refresh_composer_sources(cx);
-                        }
-                    }
-                    Err(error) => {
-                        if michelle
-                            .pending_session_activation
-                            .is_some_and(|pending| pending.session_id == session_id)
-                        {
-                            michelle.pending_session_activation = None;
-                        }
-                        michelle.show_toast(tr!("errors.open_session", error = error));
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn activate_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let session_changed = self.state.selected_session != Some(session_id);
-        if session_changed {
-            self.capture_and_save_current_composer_draft(cx);
-            self.store_selected_right_panel_state();
-        }
-        self.state.selected_session = Some(session_id);
-        self.task_switcher.record_access(session_id);
-        if let Some((
-            project_id,
-            provider,
-            runtime_mode,
-            model,
-            reasoning_effort,
-            service_tier,
-            context_window,
-        )) = self.selected_session().map(|session| {
-            (
-                session.project_id,
-                session.provider,
-                session.runtime_mode,
-                session.model.clone(),
-                session.reasoning_effort.clone(),
-                session.service_tier.clone(),
-                session.context_window.clone(),
-            )
-        }) {
-            self.state.selected_project = Some(project_id);
-            self.state.last_provider = provider;
-            self.state.last_runtime_mode = runtime_mode;
-            self.state.last_model = model;
-            self.state.last_reasoning_effort = reasoning_effort;
-            self.state.last_service_tier = service_tier;
-            self.state.last_context_window = context_window;
-        }
-        if self
-            .selected_session()
-            .is_some_and(|session| !session.has_started())
-        {
-            self.session_navigation.remember_new_task(session_id);
-        }
-        if session_changed {
-            self.restore_selected_composer_draft(cx);
-            self.sync_user_input_answer(cx);
-            self.restore_right_panel_state(session_id, cx);
-        } else {
-            self.ensure_right_panel_terminals(cx);
-        }
-        self.reset_visible_state();
-        if session_changed {
-            // Each materialized worktree has its own cache entry. A task that
-            // finished while another session was selected could otherwise
-            // retain the clean snapshot captured before its agent made edits.
-            self.refresh_selected_branch_snapshot(cx);
-        }
-        self.refresh_composer_sources(cx);
-        self.reset_transcript_rows(self.transcript_row_count());
-        self.save();
-        if self
-            .selected_session()
-            .is_some_and(AgentSession::has_started)
-        {
-            self.start_runtime_attachment(session_id, cx);
-        }
-        cx.notify();
-    }
-
     /// Drops cached answers about the workspace on disk.
     ///
     /// These queries cache to keep `git` and directory walks out of frames, but
@@ -248,160 +38,9 @@ impl Michelle {
         else {
             return;
         };
-        self.branch_snapshots.invalidate(&workspace_path);
-        self.sidebar_branch_scan_fingerprint.set(None);
-        self.sidebar_branch_scan_generation
-            .set(self.sidebar_branch_scan_generation.get().wrapping_add(1));
+        self.branches.snapshots.invalidate(&workspace_path);
         self.refresh_workspace_surfaces(cx);
         self.invalidate_composer_sources(cx);
-    }
-
-    pub(super) fn create_session_for(
-        &mut self,
-        project_id: Uuid,
-        provider: ProviderKind,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(draft_id) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.project_id == project_id && !session.has_started())
-            .map(|session| session.id)
-        {
-            self.select_session(draft_id, cx);
-            return;
-        }
-        // A task opened from the current task carries its working access mode.
-        // `last_runtime_mode` covers launch and the few creation paths without
-        // a selected source task.
-        let runtime_mode =
-            new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
-        let mut session = self.state.new_session(project_id, provider);
-        session.runtime_mode = runtime_mode;
-        let id = session.id;
-        self.state.push_session(session);
-        self.select_session(id, cx);
-    }
-
-    pub(super) fn select_workspace(&mut self, workspace: SessionWorkspace, cx: &mut Context<Self>) {
-        let Some(session) = self.selected_session_mut() else {
-            return;
-        };
-        if session.has_started() || session.is_busy() || session.workspace == workspace {
-            return;
-        }
-        session.workspace = workspace;
-        self.save();
-        cx.notify();
-    }
-
-    pub(super) fn remove_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.response_fork_preparations.contains_key(&session_id) {
-            self.show_toast(tr!("session.response_fork_in_progress"));
-            cx.notify();
-            return;
-        }
-        let Some(index) = self
-            .state
-            .sessions
-            .iter()
-            .position(|session| session.id == session_id)
-        else {
-            return;
-        };
-        let project_id = self.state.sessions[index].project_id;
-        let composer_draft_key =
-            crate::persistence::ComposerDraftKey::for_session(&self.state.sessions[index]);
-        let projectless = self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.id == project_id)
-            .is_some_and(Project::is_projectless);
-        let project_path = self
-            .workspace_path_for_session(&self.state.sessions[index])
-            .map(std::path::Path::to_path_buf);
-        let was_selected = self.state.selected_session == Some(session_id);
-        self.submission_preparations.remove(&session_id);
-        self.goal_runtime_starts.remove(&session_id);
-        self.pending_goal_operations.remove(&session_id);
-        self.goal_observed_at.remove(&session_id);
-        self.reset_session_runtime(session_id);
-        self.background_work.remove(&session_id);
-        self.remove_right_panel_session_state(session_id);
-        self.remove_composer_draft(composer_draft_key, cx);
-        self.state.sessions.remove(index);
-        if let Err(error) = self.store.remove_session(session_id) {
-            self.show_toast(tr!("errors.save_local_state", error = error));
-        }
-        if self
-            .pending_session_activation
-            .is_some_and(|pending| pending.session_id == session_id)
-        {
-            self.pending_session_activation = None;
-        }
-        self.session_navigation.remove(session_id);
-        self.task_switcher.remove(session_id);
-        let project_still_used = self
-            .state
-            .sessions
-            .iter()
-            .any(|session| session.project_id == project_id);
-        if projectless && !project_still_used {
-            self.remove_composer_draft(
-                crate::persistence::ComposerDraftKey::NewSession(project_id),
-                cx,
-            );
-            self.state
-                .projects
-                .retain(|project| project.id != project_id);
-            if self.state.selected_project == Some(project_id) {
-                self.state.selected_project = None;
-            }
-        }
-        if let Some(project_path) = project_path {
-            let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-            cx.background_executor()
-                .spawn(async move {
-                    let _ =
-                        workspace.request(michelle_client::WorkspaceOperation::DeleteSessionRefs {
-                            cwd: project_path,
-                            session_id,
-                        });
-                })
-                .detach();
-        }
-        self.invalidate_checkpoint_refs();
-
-        if was_selected {
-            self.state.selected_session = None;
-            let next_session = self
-                .state
-                .sessions
-                .iter()
-                .filter(|session| session.project_id == project_id)
-                .max_by_key(|session| session.updated_at)
-                .map(|session| session.id);
-            if let Some(session_id) = next_session {
-                self.select_session(session_id, cx);
-            } else if projectless {
-                self.create_projectless_session(cx);
-            } else {
-                self.create_session_for(project_id, self.state.last_provider, cx);
-            }
-        } else {
-            self.save();
-            cx.notify();
-        }
-
-        // Only now is the row gone, so the sweep can see which blobs are
-        // genuinely unreferenced. It reads the database and walks the blob
-        // directory, so it stays off the UI thread.
-        let sweep = self.store.blob_sweep();
-        cx.background_executor()
-            .spawn(async move { sweep() })
-            .detach();
     }
 
     pub(super) fn new_session_action(
@@ -410,7 +49,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = None;
+        self.settings_ui.page = None;
         let current_project = self
             .selected_project()
             .map(|project| (project.id, project.is_projectless()));
@@ -418,7 +57,9 @@ impl Michelle {
             Some((_, true)) => self.create_projectless_session(cx),
             Some((project_id, false)) => {
                 if let Some(session_id) = self
-                    .session_navigation
+                    .sessions
+                    .activation
+                    .navigation
                     .remembered_new_task(&self.state.sessions, project_id)
                 {
                     self.select_session(session_id, cx);
@@ -447,12 +88,12 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = Some(SettingsPage::General);
-        self.settings_scroll.set_offset(gpui::Point::default());
+        self.settings_ui.page = Some(SettingsPage::General);
+        self.settings_ui.scroll.set_offset(gpui::Point::default());
         // Warm the Usage page's transcript scan while the user is still on
         // General, so clicking Usage lands on data instead of a spinner.
         self.ensure_usage_history(false, cx);
-        window.focus(&self.settings_focus, cx);
+        window.focus(&self.settings_ui.focus, cx);
         cx.notify();
     }
 
@@ -462,7 +103,7 @@ impl Michelle {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_sidebar_visible(!self.sidebar_visible, cx);
+        self.set_sidebar_visible(!self.shell_ui.sidebar_visible, cx);
     }
 
     pub(super) fn toggle_right_panel_action(
@@ -471,7 +112,7 @@ impl Michelle {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_panel_visible(!self.right_panel_visible, cx);
+        self.set_right_panel_visible(!self.shell_ui.right_panel_visible, cx);
     }
 
     pub(super) fn toggle_fps_counter_action(
@@ -480,16 +121,17 @@ impl Michelle {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.fps_counter_visible = !self.fps_counter_visible;
+        self.shell_ui.fps_counter_visible = !self.shell_ui.fps_counter_visible;
         cx.notify();
     }
 
     pub(super) fn set_sidebar_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
-        if self.sidebar_visible == visible {
+        if self.shell_ui.sidebar_visible == visible {
             return;
         }
-        self.sidebar_visible = visible;
-        self.sidebar_slide = self.begin_panel_slide(self.sidebar_rendered_width, cx);
+        self.shell_ui.sidebar_visible = visible;
+        self.shell_ui.sidebar_slide =
+            self.begin_panel_slide(self.shell_ui.sidebar_rendered_width, cx);
         self.persist_panel_layout();
         cx.notify();
     }
@@ -506,22 +148,23 @@ impl Michelle {
         if visible {
             self.request_active_terminal_focus();
         } else {
-            self.right_panel_pending_terminal_focus = None;
+            self.right_panel_ui.pending_terminal_focus = None;
         }
-        if self.right_panel_visible == visible {
+        if self.shell_ui.right_panel_visible == visible {
             return;
         }
-        self.right_panel_visible = visible;
-        self.right_panel_slide = self.begin_panel_slide(self.right_panel_rendered_width, cx);
+        self.shell_ui.right_panel_visible = visible;
+        self.shell_ui.right_panel_slide =
+            self.begin_panel_slide(self.shell_ui.right_panel_rendered_width, cx);
         self.persist_panel_layout();
         cx.notify();
     }
 
     pub(super) fn persist_panel_layout(&mut self) {
-        self.state.sidebar_visible = self.sidebar_visible;
-        self.state.right_panel_visible = self.right_panel_visible;
-        self.state.sidebar_width = self.sidebar_width;
-        self.state.right_panel_width = self.right_panel_width;
+        self.state.sidebar_visible = self.shell_ui.sidebar_visible;
+        self.state.right_panel_visible = self.shell_ui.right_panel_visible;
+        self.state.sidebar_width = self.shell_ui.sidebar_width;
+        self.state.right_panel_width = self.shell_ui.right_panel_width;
         self.save();
     }
 
@@ -561,10 +204,10 @@ impl Michelle {
     pub(super) fn effective_panel_widths(&self, window: &Window) -> (f32, f32) {
         fitted_panel_widths(
             f32::from(window.viewport_size().width),
-            self.sidebar_visible || self.sidebar_slide.is_some(),
-            self.right_panel_visible || self.right_panel_slide.is_some(),
-            self.sidebar_width,
-            self.right_panel_width,
+            self.shell_ui.sidebar_visible || self.shell_ui.sidebar_slide.is_some(),
+            self.shell_ui.right_panel_visible || self.shell_ui.right_panel_slide.is_some(),
+            self.shell_ui.sidebar_width,
+            self.shell_ui.right_panel_width,
         )
     }
 
@@ -580,24 +223,24 @@ impl Michelle {
         // finishing would fight it for the same edge.
         let start_width = match target {
             PanelResizeTarget::Sidebar => {
-                self.sidebar_slide = None;
-                self.sidebar_width = sidebar_width;
+                self.shell_ui.sidebar_slide = None;
+                self.shell_ui.sidebar_width = sidebar_width;
                 crate::platform::set_sidebar_material_width(window, sidebar_width);
                 sidebar_width
             }
             PanelResizeTarget::RightPanel => {
-                self.right_panel_slide = None;
-                self.right_panel_width = right_panel_width;
+                self.shell_ui.right_panel_slide = None;
+                self.shell_ui.right_panel_width = right_panel_width;
                 right_panel_width
             }
             PanelResizeTarget::FileTree => {
                 let width =
-                    fitted_file_tree_width(right_panel_width, self.right_panel_file_tree_width);
-                self.right_panel_file_tree_width = width;
+                    fitted_file_tree_width(right_panel_width, self.right_panel_ui.file_tree_width);
+                self.right_panel_ui.file_tree_width = width;
                 width
             }
         };
-        self.panel_resize_drag = Some(PanelResizeDrag {
+        self.shell_ui.panel_resize_drag = Some(PanelResizeDrag {
             target,
             start_mouse_x: f32::from(event.position.x),
             start_width,
@@ -612,7 +255,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(drag) = self.panel_resize_drag else {
+        let Some(drag) = self.shell_ui.panel_resize_drag else {
             return;
         };
         let viewport_width = f32::from(window.viewport_size().width);
@@ -624,10 +267,10 @@ impl Michelle {
                     .min(viewport_width - MAIN_PANEL_MIN_WIDTH - right_panel_width)
                     .max(SIDEBAR_MIN_WIDTH);
                 let width = (drag.start_width + delta).clamp(SIDEBAR_MIN_WIDTH, maximum);
-                if (self.sidebar_width - width).abs() < 0.5 {
+                if (self.shell_ui.sidebar_width - width).abs() < 0.5 {
                     return;
                 }
-                self.sidebar_width = width;
+                self.shell_ui.sidebar_width = width;
                 crate::platform::set_sidebar_material_width(window, width);
             }
             PanelResizeTarget::RightPanel => {
@@ -635,20 +278,20 @@ impl Michelle {
                     .min(viewport_width - MAIN_PANEL_MIN_WIDTH - sidebar_width)
                     .max(RIGHT_PANEL_MIN_WIDTH);
                 let width = (drag.start_width - delta).clamp(RIGHT_PANEL_MIN_WIDTH, maximum);
-                if (self.right_panel_width - width).abs() < 0.5 {
+                if (self.shell_ui.right_panel_width - width).abs() < 0.5 {
                     return;
                 }
-                self.right_panel_width = width;
+                self.shell_ui.right_panel_width = width;
             }
             PanelResizeTarget::FileTree => {
                 let maximum = FILE_TREE_MAX_WIDTH
                     .min(right_panel_width - FILE_EDITOR_MIN_WIDTH)
                     .max(FILE_TREE_MIN_WIDTH);
                 let width = (drag.start_width - delta).clamp(FILE_TREE_MIN_WIDTH, maximum);
-                if (self.right_panel_file_tree_width - width).abs() < 0.5 {
+                if (self.right_panel_ui.file_tree_width - width).abs() < 0.5 {
                     return;
                 }
-                self.right_panel_file_tree_width = width;
+                self.right_panel_ui.file_tree_width = width;
             }
         }
         cx.notify();
@@ -661,7 +304,7 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) {
         if event.button == MouseButton::Left
-            && let Some(drag) = self.panel_resize_drag.take()
+            && let Some(drag) = self.shell_ui.panel_resize_drag.take()
         {
             if drag.target != PanelResizeTarget::FileTree {
                 self.persist_panel_layout();
@@ -676,7 +319,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_page.take().is_some() {
+        if self.settings_ui.page.take().is_some() {
             let focus_handle = self.composer_focus(cx);
             window.focus(&focus_handle, cx);
             cx.notify();
@@ -686,8 +329,8 @@ impl Michelle {
         let Some(current) = self.state.selected_session else {
             return;
         };
-        if let Some(target) = self.session_navigation.back_target() {
-            self.settings_page = None;
+        if let Some(target) = self.sessions.activation.navigation.back_target() {
+            self.settings_ui.page = None;
             self.request_session_activation(
                 target,
                 SessionActivationTransition::Back { from: current },
@@ -702,15 +345,15 @@ impl Michelle {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_page.is_some() {
+        if self.settings_ui.page.is_some() {
             return;
         }
 
         let Some(current) = self.state.selected_session else {
             return;
         };
-        if let Some(target) = self.session_navigation.forward_target() {
-            self.settings_page = None;
+        if let Some(target) = self.sessions.activation.navigation.forward_target() {
+            self.settings_ui.page = None;
             self.request_session_activation(
                 target,
                 SessionActivationTransition::Forward { from: current },
@@ -744,7 +387,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = None;
+        self.settings_ui.page = None;
         let focus_handle = self.composer_focus(cx);
         window.focus(&focus_handle, cx);
         cx.notify();
@@ -763,13 +406,13 @@ impl Michelle {
             self.cancel_task_switcher(window, cx);
             return;
         }
-        if self.settings_page.take().is_some() {
+        if self.settings_ui.page.take().is_some() {
             let focus_handle = self.composer_focus(cx);
             window.focus(&focus_handle, cx);
             cx.notify();
             return;
         }
-        if self.message_edit.is_some() {
+        if self.transcript_ui.message_edit.is_some() {
             self.cancel_message_edit(window, cx);
             return;
         }
@@ -777,7 +420,11 @@ impl Michelle {
             self.cancel_turn(cx);
             return;
         };
-        match self.escape_stop_confirmation.press(target, Instant::now()) {
+        match self
+            .session_ui
+            .escape_stop_confirmation
+            .press(target, Instant::now())
+        {
             EscapeStopPress::Stop => self.cancel_turn(cx),
             EscapeStopPress::Arm(arm) => {
                 cx.notify();
@@ -786,7 +433,7 @@ impl Michelle {
                         .timer(ESCAPE_STOP_CONFIRMATION_TIMEOUT)
                         .await;
                     let _ = this.update(cx, |this, cx| {
-                        if this.escape_stop_confirmation.expire(arm) {
+                        if this.session_ui.escape_stop_confirmation.expire(arm) {
                             cx.notify();
                         }
                     });
@@ -798,21 +445,29 @@ impl Michelle {
 
     fn selected_escape_stop_target(&self) -> Option<EscapeStopTarget> {
         let session = self.selected_session()?;
-        (!self.submission_preparations.contains(&session.id) && session.status.is_busy())
-            .then(|| EscapeStopTarget::for_session(session))
+        (!self
+            .sessions
+            .runtime
+            .submission_preparations
+            .contains(&session.id)
+            && session.status.is_busy())
+        .then(|| EscapeStopTarget::for_session(session))
     }
 
     pub(super) fn reset_visible_state(&mut self) {
-        self.activities_expanded.clear();
-        self.expanded_activity_items.clear();
-        self.expanded_turns.clear();
-        self.expanded_changed_files.clear();
-        self.transcript_control_focuses.borrow_mut().clear();
-        self.user_message_viewports.borrow_mut().clear();
-        self.hovered_response_row = None;
+        self.transcript_ui.activities_expanded.clear();
+        self.transcript_ui.expanded_activity_items.clear();
+        self.transcript_ui.expanded_turns.clear();
+        self.transcript_ui.expanded_changed_files.clear();
+        self.transcript_ui.control_focuses.borrow_mut().clear();
+        self.transcript_ui
+            .user_message_viewports
+            .borrow_mut()
+            .clear();
+        self.transcript_ui.hovered_response_row = None;
         // Selection belongs to the session being left.
-        self.transcript_selection.selection.borrow_mut().clear();
-        self.transcript_selection.registry.borrow_mut().clear();
+        self.transcript_ui.selection.selection.borrow_mut().clear();
+        self.transcript_ui.selection.registry.borrow_mut().clear();
         self.reset_transcript_search_for_session();
         let (streaming_messages, live_reasoning) = self.selected_session().map_or_else(
             || (Vec::new(), Vec::new()),
@@ -837,7 +492,7 @@ impl Michelle {
         // sessions, so they stay cached — switching back to a recent session
         // then costs no re-parse. Bounded so a long-running window cannot grow
         // without limit.
-        let mut message_markdown = self.message_markdown.borrow_mut();
+        let mut message_markdown = self.transcript_model.message_markdown.borrow_mut();
         let cached_bytes: usize = message_markdown
             .values()
             .map(md::render::MarkdownView::source_len)
@@ -854,784 +509,32 @@ impl Michelle {
         drop(message_markdown);
         // Block parses are keyed by position within the session, so they would
         // be read as another session's blocks.
-        let mut activity_markdown = self.activity_markdown.borrow_mut();
+        let mut activity_markdown = self.transcript_model.activity_markdown.borrow_mut();
         activity_markdown.clear();
         for id in live_reasoning {
             activity_markdown.insert(id, MarkdownView::seeded());
         }
         drop(activity_markdown);
-        self.reasoning_window_starts.borrow_mut().clear();
-        self.activity_scroll_viewports.borrow_mut().clear();
-        self.menus.borrow_mut().clear();
-        self.message_edit = None;
+        self.transcript_model
+            .reasoning_window_starts
+            .borrow_mut()
+            .clear();
+        self.transcript_ui
+            .activity_scroll_viewports
+            .borrow_mut()
+            .clear();
+        self.shell_ui.menus.borrow_mut().clear();
+        self.transcript_ui.message_edit = None;
         self.hide_toast();
-        self.navigation_rail_reset_generation
-            .set(self.navigation_rail_reset_generation.get().wrapping_add(1));
-        self.transcript_anchor.set(None);
-        self.transcript_anchor_end_space.set(Pixels::ZERO);
-        self.transcript_anchor_following.set(false);
-    }
-
-    pub(super) fn reset_session_runtime(&mut self, session_id: Uuid) {
-        if let Some(runtime) = self.runtimes.remove(&session_id) {
-            runtime.driver.cancel();
-            runtime.driver.close();
-            self.mark_background_work_lost(session_id);
-        }
-    }
-
-    fn remember_selected_model_traits(&mut self) {
-        let Some((provider, model, reasoning_effort, service_tier, context_window)) =
-            self.selected_session().and_then(|session| {
-                Some((
-                    session.provider,
-                    self.model_for_session(session)?.to_owned(),
-                    session.reasoning_effort.clone(),
-                    session.service_tier.clone(),
-                    session.context_window.clone(),
-                ))
-            })
-        else {
-            return;
-        };
-        self.state.remember_model_traits(
-            provider,
-            &model,
-            reasoning_effort,
-            service_tier,
-            context_window,
+        self.transcript_ui.navigation_rail_reset_generation.set(
+            self.transcript_ui
+                .navigation_rail_reset_generation
+                .get()
+                .wrapping_add(1),
         );
-    }
-
-    pub(super) fn choose_model(
-        &mut self,
-        provider: ProviderKind,
-        model: String,
-        cx: &mut Context<Self>,
-    ) {
-        let Some((session_id, provider_changed)) = self
-            .selected_session()
-            .filter(|session| {
-                session.can_choose_model(provider)
-                    && (session.provider != provider
-                        || session.model.as_deref() != Some(model.as_str()))
-            })
-            .map(|session| (session.id, session.provider != provider))
-        else {
-            return;
-        };
-
-        self.remember_selected_model_traits();
-        let (reasoning_effort, service_tier, context_window) =
-            self.state.model_traits_for(provider, &model);
-        if let Some(session) = self.selected_session_mut() {
-            session.provider = provider;
-            session.model = Some(model.clone());
-            if provider_changed {
-                session.agent_preset = None;
-            }
-            session.reasoning_effort.clone_from(&reasoning_effort);
-            session.service_tier.clone_from(&service_tier);
-            session.context_window.clone_from(&context_window);
-            self.state.last_provider = provider;
-            self.state.last_model = Some(model);
-            self.state.last_reasoning_effort = reasoning_effort;
-            self.state.last_service_tier = service_tier;
-            self.state.last_context_window = context_window;
-            self.model_picker_tab = ModelPickerTab::Provider(provider);
-            // A different provider is a different binary and protocol; only a
-            // model change within one provider can be applied in session.
-            if provider_changed {
-                self.reset_session_runtime(session_id);
-                // A different provider is also a different command registry.
-                self.refresh_composer_sources(cx);
-            } else {
-                self.apply_session_options(session_id, cx);
-            }
-            self.save();
-            cx.notify();
-        }
-    }
-
-    /// Primary modifier + /: toggle the composer's model picker as if its chip were clicked.
-    pub(super) fn toggle_model_picker_action(
-        &mut self,
-        _: &ToggleModelPicker,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.settings_page.is_some() {
-            return;
-        }
-        if !self
-            .selected_session()
-            .is_some_and(|session| session.can_choose_model(session.provider))
-        {
-            return;
-        }
-        self.toggle_composer_menu(MODEL_PICKER_MENU_ID, window, cx);
-    }
-
-    pub(super) fn toggle_model_traits_action(
-        &mut self,
-        _: &ToggleModelTraits,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.settings_page.is_some() || !self.can_configure_model_traits() {
-            return;
-        }
-        self.toggle_composer_menu("model-traits", window, cx);
-    }
-
-    pub(super) fn can_configure_model_traits(&self) -> bool {
-        self.selected_session()
-            .and_then(|session| self.model_metadata_for_session(session))
-            .is_some_and(|model| {
-                !model.reasoning_efforts.is_empty()
-                    || !model.service_tiers.is_empty()
-                    || !model.context_windows.is_empty()
-            })
-    }
-
-    fn toggle_composer_menu(&self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let is_model_picker = id == MODEL_PICKER_MENU_ID;
-        let menus = self.menus.borrow();
-        let Some(handle) = menus.get(id).cloned() else {
-            return;
-        };
-        // A keyboard toggle produces no mouse-down for another open menu's
-        // dismiss-on-down-out to see, so close the rest here.
-        let other_open: Vec<_> = menus
-            .iter()
-            .filter(|(other_id, other)| other_id.as_ref() != id && other.is_open())
-            .map(|(_, other)| other.clone())
-            .collect();
-        drop(menus);
-        // The picker's toggle observers update this entity, so the toggle has
-        // to run after this listener releases it.
-        window.defer(cx, move |window, cx| {
-            for menu in other_open {
-                menu.close(window, cx);
-            }
-            if is_model_picker {
-                crate::ui::menu::toggle_popover(&handle, MenuAlign::AboveLeft, window, cx);
-            } else {
-                crate::ui::menu::toggle_dropdown(&handle, MenuAlign::AboveLeft, window, cx);
-            }
-        });
-    }
-
-    /// Discovery is not requested here: launch already requested it for every
-    /// installed provider, so tabs only ever switch between loaded lists.
-    pub(super) fn select_model_picker_tab(&mut self, tab: ModelPickerTab, cx: &mut Context<Self>) {
-        if self.model_picker_tab != tab {
-            self.model_picker_tab = tab;
-            if let ModelPickerTab::Provider(provider) = tab {
-                // Selecting a rail re-runs that provider's catalog discovery,
-                // so each tab is fresh when viewed without probing every
-                // provider on open.
-                self.refresh_provider_model_discovery(provider);
-            }
-            // A different tab renumbers the rows under the keyboard cursor,
-            // and would otherwise inherit the old tab's scroll offset.
-            self.model_picker_highlight = None;
-            self.reveal_selected_picker_model();
-            cx.notify();
-        }
-    }
-
-    /// A sidebar rail click is an explicit "show me this tab": it exits search
-    /// mode even when the clicked tab is already selected. A live query spans
-    /// every provider and hides which tab is selected, so a click that left
-    /// the query in place would visibly do nothing — `select_model_picker_tab`
-    /// also bails when the tab is unchanged, which is exactly the state that
-    /// query leaves it in. Clearing the field first emits an edit, which
-    /// resets the keyboard highlight and re-reveals the current model under
-    /// the now-unfiltered list.
-    pub(super) fn select_model_picker_tab_from_rail(
-        &mut self,
-        tab: ModelPickerTab,
-        cx: &mut Context<Self>,
-    ) {
-        self.model_search.update(cx, |input, cx| input.clear(cx));
-        self.select_model_picker_tab(tab, cx);
-    }
-
-    pub(super) fn toggle_favorite_model(
-        &mut self,
-        provider: ProviderKind,
-        model: String,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(index) = self
-            .state
-            .favorite_models
-            .iter()
-            .position(|favorite| favorite.provider == provider && favorite.model == model)
-        {
-            self.state.favorite_models.remove(index);
-        } else {
-            self.state
-                .favorite_models
-                .push(FavoriteModel { provider, model });
-        }
-        self.save();
-        cx.notify();
-    }
-
-    pub(super) fn set_runtime_mode(&mut self, mode: RuntimeMode, cx: &mut Context<Self>) {
-        let Some((session_id, session_changed)) = self
-            .selected_session()
-            .map(|session| (session.id, session.runtime_mode != mode))
-        else {
-            return;
-        };
-        let remembered_changed = self.state.last_runtime_mode != mode;
-        if session_changed {
-            self.selected_session_mut()
-                .expect("selected session still exists")
-                .runtime_mode = mode;
-            self.apply_session_options(session_id, cx);
-        }
-        if session_changed || remembered_changed {
-            self.state.last_runtime_mode = mode;
-            self.save();
-            cx.notify();
-        }
-    }
-
-    pub(super) fn set_reasoning_effort(&mut self, effort: String, cx: &mut Context<Self>) {
-        if let Some(session) = self.selected_session_mut()
-            && session.reasoning_effort.as_deref() != Some(effort.as_str())
-        {
-            let session_id = session.id;
-            session.reasoning_effort = Some(effort.clone());
-            self.state.last_reasoning_effort = Some(effort);
-            self.remember_selected_model_traits();
-            self.apply_session_options(session_id, cx);
-            self.save();
-            cx.notify();
-        }
-    }
-
-    pub(super) fn set_service_tier(&mut self, tier: String, cx: &mut Context<Self>) {
-        if let Some(session) = self.selected_session_mut()
-            && session.service_tier.as_deref() != Some(tier.as_str())
-        {
-            let session_id = session.id;
-            session.service_tier = Some(tier.clone());
-            self.state.last_service_tier = Some(tier);
-            self.remember_selected_model_traits();
-            self.apply_session_options(session_id, cx);
-            self.save();
-            cx.notify();
-        }
-    }
-
-    pub(super) fn set_context_window(&mut self, window: String, cx: &mut Context<Self>) {
-        if let Some(session) = self.selected_session_mut()
-            && session.context_window.as_deref() != Some(window.as_str())
-        {
-            let session_id = session.id;
-            session.context_window = Some(window.clone());
-            self.state.last_context_window = Some(window);
-            self.remember_selected_model_traits();
-            self.apply_session_options(session_id, cx);
-            self.save();
-            cx.notify();
-        }
-    }
-
-    pub(super) fn set_agent_preset(&mut self, agent_preset: String, cx: &mut Context<Self>) {
-        let selectable = self
-            .provider_probe(ProviderKind::DeepSeek)
-            .is_some_and(|probe| {
-                probe
-                    .agent_presets
-                    .iter()
-                    .any(|preset| preset.id == agent_preset)
-            });
-        if !selectable {
-            return;
-        }
-        if let Some(session) = self.selected_session_mut()
-            && session.provider == ProviderKind::DeepSeek
-            && !session.has_started()
-            && !session.is_busy()
-            && session.agent_preset.as_deref() != Some(agent_preset.as_str())
-        {
-            let session_id = session.id;
-            session.agent_preset = Some(agent_preset);
-            // A provider cursor makes a session started, so this is normally a
-            // no-op. It also closes the narrow race where a blank runtime was
-            // prepared but had not reported its native session yet.
-            self.reset_session_runtime(session_id);
-            self.save();
-            cx.notify();
-        }
-    }
-
-    pub(super) fn cancel_turn(&mut self, cx: &mut Context<Self>) {
-        self.escape_stop_confirmation.clear();
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        // Worktree/checkpoint preparation has no safe interrupt contract. The
-        // composer deliberately shows a spinner rather than Stop until the
-        // provider runtime exists, and the keyboard action follows the same
-        // boundary.
-        if self.submission_preparations.contains(&session_id) {
-            return;
-        }
-        let retain_runtime = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .is_some_and(|session| retain_runtime_after_cancel(session.provider))
-            || self.session_has_live_detached_work(session_id);
-        // Goal operations queued behind a starting runtime would set the
-        // objective after this stop and begin pursuing it; the user asked to
-        // stop, so they leave with the turn.
-        self.pending_goal_operations.remove(&session_id);
-        let mut runtime = self.runtimes.remove(&session_id);
-        if let Some(runtime) = runtime.as_ref() {
-            runtime.driver.cancel();
-            if retain_runtime {
-                // A detached process keeps Codex's app-server resident, but
-                // Computer Use descendants still belong to the cancelled turn.
-                runtime.driver.cancel_computer_use();
-            }
-        }
-        // Do not leave already-received text in the smoothing queue: once the
-        // message is marked complete, a later delta would otherwise create a
-        // second assistant bubble. Show the received portion immediately.
-        // Buffered turn-completion events also must not start queued
-        // follow-ups: the user asked to stop, not to continue.
-        let mut keep_runtime = true;
-        if let Some(runtime) = runtime.as_mut() {
-            Self::collect_runtime_events(runtime);
-            while let Some(event) = runtime.pending_events.pop_front() {
-                keep_runtime &= self.handle_driver_event(session_id, runtime, event, false, cx);
-                if !keep_runtime {
-                    break;
-                }
-            }
-        }
-        self.pending_queue_drains.retain(|id| *id != session_id);
-        let has_active_turn = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .and_then(AgentSession::active_turn_id)
-            .is_some();
-        let previous_kinds = has_active_turn
-            .then(|| self.snapshot_selected_transcript_rows(session_id))
-            .flatten();
-        self.finish_streaming_assistant(session_id);
-        self.complete_turn_blocks(session_id);
-        self.settle_foreground_work(session_id, BackgroundWorkStatus::Stopped);
-        if let Some(runtime) = runtime.as_mut() {
-            runtime.stream_phase = None;
-            runtime.pending_permission = None;
-            runtime.pending_user_input = None;
-            runtime.pending_computer_approval = None;
-            runtime.computer_use_previews.clear();
-        }
-        if has_active_turn {
-            let needs_fallback = !self.turn_has_assistant_message(session_id);
-            if let Some(session) = self.state.session_mut(session_id) {
-                session.status = SessionStatus::Idle;
-                if needs_fallback {
-                    session.push_message(MessageRole::Assistant, tr!("session.stopped"));
-                }
-                session.finish_active_turn(TurnStatus::Interrupted);
-            }
-        }
-        if has_active_turn {
-            self.capture_latest_turn_checkpoint_for(session_id);
-            self.start_pending_checkpoint_captures(cx);
-        }
-        if let Some(previous_kinds) = previous_kinds.as_deref() {
-            self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
-        }
-        // A provider runtime owns its Michelle JavaScript REPL and Computer Use
-        // descendants. Normally Stop closes that process tree and the next
-        // prompt resumes the same provider thread with a fresh runtime. A
-        // detached process or subagent is the exception: its provider must
-        // remain resident so Michelle can keep observing and stopping it.
-        if retain_runtime && keep_runtime {
-            if let Some(runtime) = runtime.take() {
-                self.runtimes.insert(session_id, runtime);
-            }
-        } else if let Some(runtime) = runtime {
-            runtime.driver.close();
-        }
-        self.remeasure_transcript_tail();
-        self.save();
-        cx.notify();
-    }
-
-    pub(super) fn respond_permission(
-        &mut self,
-        request_id: String,
-        option_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        if let Some(runtime) = self.runtimes.get_mut(&session_id) {
-            runtime.driver.respond(request_id, option_id);
-            runtime.pending_permission = None;
-        }
-        if let Some(session) = self.selected_session_mut() {
-            session.status = SessionStatus::Working;
-        }
-        cx.notify();
-    }
-
-    pub(super) fn sync_user_input_answer(&mut self, cx: &mut Context<Self>) {
-        let answer = self
-            .selected_runtime()
-            .and_then(|runtime| runtime.pending_user_input.as_ref())
-            .and_then(|pending| {
-                pending
-                    .current_question()
-                    .map(|question| (pending, question))
-            })
-            .and_then(|(pending, question)| pending.custom_answers.get(&question.id))
-            .cloned()
-            .unwrap_or_default();
-        self.user_input_answer
-            .update(cx, |input, cx| input.set_content(answer, cx));
-    }
-
-    pub(super) fn update_user_input_custom_answer(
-        &mut self,
-        answer: impl AsRef<str>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let Some(pending) = self
-            .runtimes
-            .get_mut(&session_id)
-            .and_then(|runtime| runtime.pending_user_input.as_mut())
-        else {
-            return;
-        };
-        let Some(question_id) = pending
-            .current_question()
-            .map(|question| question.id.clone())
-        else {
-            return;
-        };
-        let answer = answer.as_ref().to_owned();
-        if answer.trim().is_empty() {
-            pending.custom_answers.remove(&question_id);
-        } else {
-            pending.custom_answers.insert(question_id.clone(), answer);
-            pending.selections.remove(&question_id);
-        }
-        cx.notify();
-    }
-
-    pub(super) fn submit_user_input_custom_answer(
-        &mut self,
-        answer: String,
-        cx: &mut Context<Self>,
-    ) {
-        if answer.trim().is_empty() {
-            return;
-        }
-        self.update_user_input_custom_answer(answer, cx);
-        self.advance_user_input(cx);
-    }
-
-    pub(super) fn select_user_input_option(&mut self, label: String, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let Some(pending) = self
-            .runtimes
-            .get_mut(&session_id)
-            .and_then(|runtime| runtime.pending_user_input.as_mut())
-        else {
-            return;
-        };
-        let Some((question_id, multi_select)) = pending
-            .current_question()
-            .map(|question| (question.id.clone(), question.multi_select))
-        else {
-            return;
-        };
-        let selected = pending.selections.entry(question_id.clone()).or_default();
-        if multi_select {
-            if let Some(index) = selected.iter().position(|answer| answer == &label) {
-                selected.remove(index);
-            } else {
-                selected.push(label);
-            }
-        } else {
-            selected.clear();
-            selected.push(label);
-        }
-        if selected.is_empty() {
-            pending.selections.remove(&question_id);
-        }
-        pending.custom_answers.remove(&question_id);
-        self.user_input_answer
-            .update(cx, |input, cx| input.clear(cx));
-        cx.notify();
-    }
-
-    pub(super) fn previous_user_input(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let Some(pending) = self
-            .runtimes
-            .get_mut(&session_id)
-            .and_then(|runtime| runtime.pending_user_input.as_mut())
-        else {
-            return;
-        };
-        if pending.question_index == 0 {
-            return;
-        }
-        pending.question_index -= 1;
-        self.sync_user_input_answer(cx);
-        cx.notify();
-    }
-
-    pub(super) fn advance_user_input(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let should_submit = {
-            let Some(pending) = self
-                .runtimes
-                .get_mut(&session_id)
-                .and_then(|runtime| runtime.pending_user_input.as_mut())
-            else {
-                return;
-            };
-            let Some(question) = pending.current_question() else {
-                return;
-            };
-            let answered = pending
-                .custom_answers
-                .get(&question.id)
-                .is_some_and(|answer| !answer.trim().is_empty())
-                || pending
-                    .selections
-                    .get(&question.id)
-                    .is_some_and(|answers| !answers.is_empty());
-            if !answered {
-                return;
-            }
-            if pending.question_index + 1 < pending.questions.len() {
-                pending.question_index += 1;
-                false
-            } else {
-                true
-            }
-        };
-
-        if should_submit {
-            let Some(runtime) = self.runtimes.get_mut(&session_id) else {
-                return;
-            };
-            let Some(pending) = runtime.pending_user_input.take() else {
-                return;
-            };
-            let answers = pending.answers();
-            runtime
-                .driver
-                .respond_user_input(pending.request_id, answers);
-            if let Some(session) = self.state.session_mut(session_id) {
-                session.status = SessionStatus::Working;
-            }
-            self.user_input_answer
-                .update(cx, |input, cx| input.clear(cx));
-        } else {
-            self.sync_user_input_answer(cx);
-        }
-        cx.notify();
-    }
-
-    pub(super) fn respond_computer_permission(
-        &mut self,
-        decision: &'static str,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let Some(mut runtime) = self.runtimes.remove(&session_id) else {
-            return;
-        };
-        let Some(pending) = runtime.pending_computer_approval.take() else {
-            self.runtimes.insert(session_id, runtime);
-            return;
-        };
-
-        if decision == "deny" {
-            runtime.driver.reject_computer_tool(
-                pending.request,
-                "The user denied control of this app.".into(),
-            );
-        } else {
-            let key = pending.target.grant_key();
-            runtime.computer_session_grants.insert(key);
-            if decision == "always" && pending.target.persistable() {
-                let grant = crate::computer_use::ComputerAppGrant {
-                    bundle_id: pending.target.bundle_id.clone(),
-                    app_name: pending.target.app_name.clone(),
-                };
-                if !self
-                    .state
-                    .computer_use_allowed_apps
-                    .iter()
-                    .any(|existing| existing.key() == grant.key())
-                {
-                    self.state.computer_use_allowed_apps.push(grant);
-                    self.save();
-                }
-            }
-            runtime.driver.run_computer_tool(pending.request);
-        }
-        if let Some(session) = self.state.session_mut(session_id) {
-            session.status = SessionStatus::Working;
-        }
-        self.runtimes.insert(session_id, runtime);
-        cx.notify();
-    }
-
-    pub(super) fn bring_computer_use_to_front(&mut self, window_id: u64, cx: &mut Context<Self>) {
-        if let Some(runtime) = self
-            .state
-            .selected_session
-            .and_then(|session_id| self.runtimes.get_mut(&session_id))
-            && let Some(index) = runtime.computer_use_previews.iter().position(|preview| {
-                preview
-                    .target
-                    .as_ref()
-                    .is_some_and(|target| target.window_id == window_id)
-            })
-        {
-            let preview = runtime.computer_use_previews.remove(index);
-            runtime.computer_use_previews.push(preview);
-        }
-        cx.notify();
-    }
-
-    pub(super) fn dismiss_computer_use(&mut self, window_id: u64, cx: &mut Context<Self>) {
-        if let Some(runtime) = self
-            .state
-            .selected_session
-            .and_then(|session_id| self.runtimes.get_mut(&session_id))
-        {
-            if let Some(preview) = runtime.computer_use_previews.iter_mut().find(|preview| {
-                preview
-                    .target
-                    .as_ref()
-                    .is_some_and(|target| target.window_id == window_id)
-            }) {
-                // Keep the hidden entry until the turn ends so the next
-                // screenshot cannot reopen a preview the user just closed.
-                preview.visible = false;
-                preview.decode_task = None;
-                preview.frames = Default::default();
-            }
-        }
-        cx.notify();
-    }
-
-    pub(super) fn add_project(&mut self, cx: &mut Context<Self>) {
-        if self.daemon.is_remote() {
-            self.show_toast(tr!("errors.remote_project_picker"));
-            cx.notify();
-            return;
-        }
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(tr!("project.add_project").into()),
-        });
-        cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = receiver.await
-                && let Some(path) = paths.into_iter().next()
-            {
-                let _ = this.update(cx, |this, cx| {
-                    if let Some(existing) = this.state.projects.iter().find(|p| p.path == path) {
-                        this.select_project(existing.id, cx);
-                        return;
-                    }
-                    let project = Project::from_path(path);
-                    let project_id = project.id;
-                    this.state.projects.push(project);
-                    this.create_session_for(project_id, this.state.last_provider, cx);
-                });
-            }
-        })
-        .detach();
-    }
-
-    pub(super) fn create_projectless_session(&mut self, cx: &mut Context<Self>) {
-        if let Some(draft_id) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| {
-                !session.has_started()
-                    && self.state.projects.iter().any(|project| {
-                        project.id == session.project_id
-                            && project.is_projectless()
-                            && !crate::projectless::is_legacy_root_path(&project.path)
-                    })
-            })
-            .map(|session| session.id)
-        {
-            self.select_session(draft_id, cx);
-            return;
-        }
-
-        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |michelle, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    match workspace.request(
-                        michelle_client::WorkspaceOperation::CreateProjectlessWorkspace {
-                            prompt: None,
-                        },
-                    )? {
-                        michelle_client::WorkspaceResult::ProjectlessWorkspace { cwd } => Ok(cwd),
-                        _ => anyhow::bail!("the daemon returned an invalid projectless response"),
-                    }
-                })
-                .await;
-            let _ = michelle.update(cx, |michelle, cx| match result {
-                Ok(cwd) => {
-                    let mut project = Project::from_path(cwd);
-                    project.name = Project::PROJECTLESS_NAME.to_owned();
-                    let project_id = project.id;
-                    michelle.state.projects.push(project);
-                    michelle.create_session_for(project_id, michelle.state.last_provider, cx);
-                }
-                Err(error) => {
-                    michelle.show_toast(tr!("errors.create_projectless_task", error = error));
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+        self.transcript_ui.anchor.set(None);
+        self.transcript_ui.anchor_end_space.set(Pixels::ZERO);
+        self.transcript_ui.anchor_following.set(false);
     }
 }
 

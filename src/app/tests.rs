@@ -1,7 +1,7 @@
-use super::composer::{
-    ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
-    next_picker_highlight, visible_branch_entries,
-};
+use super::branch_picker::model::visible_branch_entries;
+use super::composer::attachments::{dropped_file_mention, pasted_text_attachment_upload};
+use super::composer::model::merged_submission;
+use super::composer::{ComposerSubmitAction, composer_submit_action};
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::settings::visible_settings_pages;
 use super::{
@@ -28,6 +28,7 @@ use crate::model::{
     DriverEvent, Message, MessageRole, ProviderKind, ReasoningBlock, RuntimeEventCursor,
     SessionStatus, TranscriptBlock, TurnStatus, UserInputOption, UserInputQuestion,
 };
+use crate::ui::primitives::navigation::next_picker_highlight;
 
 #[test]
 fn structured_user_input_preserves_question_order_and_custom_answer_precedence() {
@@ -289,6 +290,29 @@ fn submissions_append_attachment_mentions_after_the_prompt() {
     );
     assert_eq!(merged_submission(" plain ", &[]).as_deref(), Some("plain"));
     assert_eq!(merged_submission("   ", &[]), None);
+}
+
+#[test]
+fn pasted_text_upload_preserves_utf8_whitespace_and_line_breaks() {
+    use base64::Engine as _;
+    let text = "  первая строка\r\nвторая\rтретья\n🙂\t  ";
+    let michelle_client::attachments::AttachmentUpload::File { data_base64 } =
+        pasted_text_attachment_upload(text).unwrap()
+    else {
+        panic!("pasted text must upload as a file");
+    };
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(data_base64)
+            .unwrap(),
+        text.as_bytes()
+    );
+    assert!(
+        pasted_text_attachment_upload(
+            &"x".repeat(michelle_client::attachments::MAX_ATTACHMENT_BYTES + 1)
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -1700,34 +1724,14 @@ fn worked_duration_uses_readable_units() {
 }
 
 #[test]
-fn sidebar_time_labels_prefer_the_live_turn_over_the_last_reply() {
-    use super::sidebar::{format_time_ago, session_time_label};
+fn recency_labels_use_compact_readable_units() {
+    use super::sidebar::format_time_ago;
 
     assert_eq!(format_time_ago(0), "just now");
     assert_eq!(format_time_ago(59), "just now");
     assert_eq!(format_time_ago(300), "5m");
     assert_eq!(format_time_ago(7_200), "2h");
     assert_eq!(format_time_ago(420 * 86_400), "420d");
-
-    // Never replied, nothing running: the row stays quiet.
-    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-    assert_eq!(session_time_label(&session, 1_000), None);
-
-    // A live turn counts up instead of showing the previous reply's age.
-    session.last_reply_at = Some(40);
-    session.begin_turn("go");
-    session.status = SessionStatus::Working;
-    session.turns[0].started_at = 100;
-    assert_eq!(
-        session_time_label(&session, 109).as_deref(),
-        Some("Working for 9s")
-    );
-
-    // Settled again: back to how long ago the agent last replied.
-    session.finish_active_turn(TurnStatus::Completed);
-    session.status = SessionStatus::Idle;
-    session.last_reply_at = Some(500);
-    assert_eq!(session_time_label(&session, 800).as_deref(), Some("5m"));
 }
 
 /// The time-label wake-up chain arms exactly one timer, aimed at the next
@@ -1915,14 +1919,12 @@ fn computer_use_navigation_is_available_in_all_builds() {
 
 #[test]
 fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
-    use super::ModelPickerTab;
-    use super::composer::visible_picker_models;
+    use super::model_picker::model::{ModelPickerRow, visible_picker_rows};
     use crate::model::{FavoriteModel, ProviderModel, ProviderProbe};
-
-    let probe = |provider: ProviderKind, model: &str| ProviderProbe {
+    let probe = |provider, model: &str| ProviderProbe {
         provider,
         installed: true,
-        path: Some(std::path::PathBuf::from(format!("/bin/{}", provider.id()))),
+        path: None,
         models: vec![ProviderModel::new(model, model)],
         agent_presets: Vec::new(),
     };
@@ -1935,125 +1937,101 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         model: "claude-sonnet-5".into(),
     }];
     let disabled = [ProviderKind::Claude];
-
-    // Provider tab and favorites both stop offering the switched-off provider.
-    let models = visible_picker_models(
-        &probes,
-        &favorites,
-        &disabled,
-        None,
-        ModelPickerTab::Provider(ProviderKind::Claude),
-        "",
-    );
-    assert!(models.is_empty());
-    let models = visible_picker_models(
-        &probes,
-        &favorites,
-        &disabled,
-        None,
-        ModelPickerTab::Favorites,
-        "",
-    );
-    assert!(models.is_empty());
-    let models = visible_picker_models(
-        &probes,
-        &favorites,
-        &disabled,
-        None,
-        ModelPickerTab::Provider(ProviderKind::Codex),
-        "",
-    );
-    assert_eq!(models.len(), 1);
-
-    // Search cannot resurface it either.
-    let models = visible_picker_models(
-        &probes,
-        &favorites,
-        &disabled,
-        None,
-        ModelPickerTab::Provider(ProviderKind::Codex),
-        "claude",
-    );
-    assert!(models.is_empty());
-
-    // A session already locked to the provider keeps its models.
-    let models = visible_picker_models(
+    let rows = visible_picker_rows(&probes, &favorites, &disabled, None, "");
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(
+        rows[0],
+        ModelPickerRow::Header(Some(ProviderKind::Codex))
+    ));
+    assert!(visible_picker_rows(&probes, &favorites, &disabled, None, "claude").is_empty());
+    let rows = visible_picker_rows(
         &probes,
         &favorites,
         &disabled,
         Some(ProviderKind::Claude),
-        ModelPickerTab::Provider(ProviderKind::Claude),
         "",
     );
-    assert_eq!(models.len(), 1);
+    assert_eq!(rows.len(), 4);
+    assert!(matches!(rows[0], ModelPickerRow::Header(None)));
+    assert!(matches!(
+        rows[2],
+        ModelPickerRow::Header(Some(ProviderKind::Claude))
+    ));
 }
 
 #[test]
-fn model_picker_subtitle_deduplicates_the_provider_name() {
-    use super::composer::model_picker_subtitle;
-
-    assert_eq!(
-        model_picker_subtitle(ProviderKind::DeepSeek, Some("DeepSeek")),
-        "DeepSeek"
-    );
-    assert_eq!(
-        model_picker_subtitle(ProviderKind::DeepSeek, Some("OpenAI")),
-        "OpenAI · DeepSeek"
-    );
-}
-
-#[test]
-fn tab_cycle_walks_favorites_then_usable_providers_in_rail_order() {
-    use super::ModelPickerTab;
-    use super::composer::visible_picker_tabs;
-    use crate::model::{ProviderModel, ProviderProbe};
-
-    let probe = |provider: ProviderKind, installed: bool| ProviderProbe {
+fn model_picker_groups_favorites_first_without_removing_provider_rows() {
+    use super::model_picker::model::{
+        ModelPickerRow, next_model_picker_highlight, visible_picker_rows,
+    };
+    use crate::model::{FavoriteModel, ProviderModel, ProviderProbe};
+    let probe = |provider, installed, names: &[&str]| ProviderProbe {
         provider,
         installed,
-        path: installed.then(|| std::path::PathBuf::from(format!("/bin/{}", provider.id()))),
-        models: vec![ProviderModel::new("model", "model")],
+        path: None,
+        models: names
+            .iter()
+            .map(|name| ProviderModel::new(*name, *name))
+            .collect(),
         agent_presets: Vec::new(),
     };
     let probes = [
-        probe(ProviderKind::Claude, true),
-        probe(ProviderKind::Codex, true),
-        probe(ProviderKind::Cursor, false),
+        probe(ProviderKind::Codex, true, &["GPT Sol", "GPT Terra"]),
+        probe(ProviderKind::Claude, true, &["Claude Sonnet"]),
+        probe(ProviderKind::Cursor, false, &["auto"]),
     ];
-
-    // Uninstalled providers never join the cycle; favorites leads.
-    assert_eq!(
-        visible_picker_tabs(&probes, &[], None),
-        vec![
-            ModelPickerTab::Favorites,
-            ModelPickerTab::Provider(ProviderKind::Claude),
-            ModelPickerTab::Provider(ProviderKind::Codex),
-        ]
+    let favorites = [
+        FavoriteModel {
+            provider: ProviderKind::Codex,
+            model: "GPT Terra".into(),
+        },
+        FavoriteModel {
+            provider: ProviderKind::Claude,
+            model: "Claude Sonnet".into(),
+        },
+        FavoriteModel {
+            provider: ProviderKind::Cursor,
+            model: "auto".into(),
+        },
+    ];
+    let rows = visible_picker_rows(&probes, &favorites, &[], None, "");
+    assert_eq!(rows.len(), 8);
+    assert!(matches!(rows[0], ModelPickerRow::Header(None)));
+    assert!(
+        matches!(&rows[1], ModelPickerRow::Model { model, in_favorites: true, .. } if model.id == "GPT Terra")
     );
-
-    // Switched-off providers leave the cycle like they leave the rail.
-    assert_eq!(
-        visible_picker_tabs(&probes, &[ProviderKind::Claude], None),
-        vec![
-            ModelPickerTab::Favorites,
-            ModelPickerTab::Provider(ProviderKind::Codex),
-        ]
-    );
-
-    // A locked session cycles between favorites and its own provider only,
-    // even when that provider was switched off after the session started.
-    assert_eq!(
-        visible_picker_tabs(&probes, &[ProviderKind::Claude], Some(ProviderKind::Claude)),
-        vec![
-            ModelPickerTab::Favorites,
-            ModelPickerTab::Provider(ProviderKind::Claude),
-        ]
-    );
+    assert!(matches!(
+        rows[3],
+        ModelPickerRow::Header(Some(ProviderKind::Claude))
+    ));
+    assert!(matches!(
+        rows[5],
+        ModelPickerRow::Header(Some(ProviderKind::Codex))
+    ));
+    assert!(rows[1].same_model(&rows[7]));
+    assert!(!rows[1].same_model_row(&rows[7]));
+    assert_eq!(next_model_picker_highlight(None, &rows, "down"), Some(1));
+    assert_eq!(next_model_picker_highlight(Some(2), &rows, "down"), Some(4));
+    assert_eq!(next_model_picker_highlight(Some(1), &rows, "up"), Some(7));
+    assert_eq!(next_model_picker_highlight(Some(4), &rows, "home"), Some(1));
+    assert_eq!(next_model_picker_highlight(Some(4), &rows, "end"), Some(7));
+    let rows = visible_picker_rows(&probes, &favorites, &[], None, "codex terra");
+    assert_eq!(rows.len(), 4);
+    assert!(rows[1].same_model(&rows[3]));
+    let rows = visible_picker_rows(&probes, &favorites, &[], None, "sol");
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(
+        rows[0],
+        ModelPickerRow::Header(Some(ProviderKind::Codex))
+    ));
+    let rows = visible_picker_rows(&probes, &favorites, &[], None, "sonnet terra");
+    assert!(rows.is_empty());
+    assert_eq!(next_model_picker_highlight(None, &rows, "down"), None);
 }
 
 #[test]
 fn the_picker_is_empty_only_once_detection_has_answered() {
-    use super::composer::picker_has_no_providers;
+    use super::model_picker::model::picker_has_no_providers;
     use crate::model::{ProviderModel, ProviderProbe};
 
     let probe = |provider: ProviderKind, installed: bool| ProviderProbe {
@@ -2099,8 +2077,8 @@ fn the_picker_is_empty_only_once_detection_has_answered() {
 }
 
 #[test]
-fn the_rail_draws_only_installed_providers_the_settings_left_on() {
-    use super::composer::picker_rail_shows_provider;
+fn picker_has_only_installed_providers_the_settings_left_on() {
+    use super::model_picker::model::picker_has_provider;
     use crate::model::{ProviderModel, ProviderProbe};
 
     let probe = |provider: ProviderKind, installed: bool| ProviderProbe {
@@ -2118,13 +2096,13 @@ fn the_rail_draws_only_installed_providers_the_settings_left_on() {
 
     // An undetected CLI and a switched-off provider both leave the rail
     // outright, rather than sitting in it dimmed.
-    assert!(!picker_rail_shows_provider(
+    assert!(!picker_has_provider(
         &probes,
         &[],
         None,
         ProviderKind::Cursor
     ));
-    assert!(!picker_rail_shows_provider(
+    assert!(!picker_has_provider(
         &probes,
         &[ProviderKind::Claude],
         None,
@@ -2133,7 +2111,7 @@ fn the_rail_draws_only_installed_providers_the_settings_left_on() {
 
     // A provider only the *current* session locks out stays drawn: that is a
     // fact about this session, not about what the user configured.
-    assert!(picker_rail_shows_provider(
+    assert!(picker_has_provider(
         &probes,
         &[],
         Some(ProviderKind::Codex),
@@ -2142,7 +2120,7 @@ fn the_rail_draws_only_installed_providers_the_settings_left_on() {
 
     // ...and the locked session keeps its own tab even once it is switched
     // off, since the picker is its only route to another model.
-    assert!(picker_rail_shows_provider(
+    assert!(picker_has_provider(
         &probes,
         &[ProviderKind::Claude],
         Some(ProviderKind::Claude),

@@ -326,6 +326,7 @@ impl Michelle {
             self.toggle_command_palette_action(&ToggleCommandPalette, window, cx);
         }
         let open_menus = self
+            .shell_ui
             .menus
             .borrow()
             .values()
@@ -334,8 +335,8 @@ impl Michelle {
             .collect::<Vec<_>>();
         self.task_switcher.previous_focus = if open_menus.is_empty() {
             window.focused(cx)
-        } else if self.settings_page.is_some() {
-            Some(self.settings_focus.clone())
+        } else if self.settings_ui.page.is_some() {
+            Some(self.settings_ui.focus.clone())
         } else {
             Some(self.composer_focus(cx))
         };
@@ -419,8 +420,8 @@ impl Michelle {
                 .iter()
                 .any(|session| session.id == selected && session.has_started())
         {
-            let was_in_settings = self.settings_page.is_some();
-            self.settings_page = None;
+            let was_in_settings = self.settings_ui.page.is_some();
+            self.settings_ui.page = None;
             self.select_session(selected, cx);
             if was_in_settings {
                 focus_after = Some(self.composer_focus(cx));

@@ -42,7 +42,7 @@ mod query;
 mod review_diff;
 mod terminal;
 mod theme;
-mod ui;
+pub mod ui;
 
 pub use michelle_client::{
     checkpoint, command_env, composer_complete, git_branch, git_commit, i18n, identity, model,
@@ -307,7 +307,7 @@ pub fn run() {
                                         target_os = "windows"
                                     )),
                                     traffic_light_position: cfg!(target_os = "macos")
-                                        .then(|| point(px(16.0), px(17.0))),
+                                        .then(|| point(px(19.0), px(19.0))),
                                 }),
                                 // Michelle moves its custom macOS titlebar explicitly. Keep
                                 // the NSWindow movable so native controls and Window-menu

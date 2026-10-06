@@ -23,10 +23,6 @@ impl Michelle {
         target: PanelResizeTarget,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let theme = Theme::current(cx);
-        let active = self
-            .panel_resize_drag
-            .is_some_and(|drag| drag.target == target);
         div()
             .id(id)
             .absolute()
@@ -36,22 +32,7 @@ impl Michelle {
             .h_full()
             .group("panel-resize-handle")
             .cursor_col_resize()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left(px(5.0))
-                    .w(px(2.0))
-                    .h_full()
-                    .bg(if active {
-                        theme.resize_handle
-                    } else {
-                        gpui::transparent_black()
-                    })
-                    .group_hover("panel-resize-handle", |element| {
-                        element.bg(theme.resize_handle)
-                    }),
-            )
+            .child(div().absolute().top_0().left(px(5.0)).w(px(2.0)).h_full())
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event, window, cx| {
@@ -99,39 +80,39 @@ impl Michelle {
     /// [`MichellePane::bind`]) and lets the cached-view geometry checks decide
     /// which islands a slide tick actually rebuilds.
     pub(super) fn panels_sliding(&self) -> bool {
-        self.sidebar_slide.is_some() || self.right_panel_slide.is_some()
+        self.shell_ui.sidebar_slide.is_some() || self.shell_ui.right_panel_slide.is_some()
     }
 
     /// Settle both panel slides for this frame and publish the widths the
     /// pane islands — which render later, during layout — have to agree with.
     fn settle_panel_slides(&mut self, window: &Window) -> PanelFrame {
         let was_sliding = self.panels_sliding();
-        if self.settings_page.is_some() {
+        if self.settings_ui.page.is_some() {
             // Settings covers the workspace, so there is no edge on screen to
             // move. Retire the slide rather than animate a layout nobody can
             // see; reopening the workspace finds the panels where they belong.
-            self.sidebar_slide = None;
-            self.right_panel_slide = None;
+            self.shell_ui.sidebar_slide = None;
+            self.shell_ui.right_panel_slide = None;
         }
         let (sidebar_content, right_panel_content) = self.effective_panel_widths(window);
         let sidebar = slide_width(
-            &mut self.sidebar_slide,
-            if self.sidebar_visible {
+            &mut self.shell_ui.sidebar_slide,
+            if self.shell_ui.sidebar_visible {
                 sidebar_content
             } else {
                 0.0
             },
         );
         let right_panel = slide_width(
-            &mut self.right_panel_slide,
-            if self.right_panel_visible {
+            &mut self.shell_ui.right_panel_slide,
+            if self.shell_ui.right_panel_visible {
                 right_panel_content
             } else {
                 0.0
             },
         );
-        self.sidebar_rendered_width = sidebar;
-        self.right_panel_rendered_width = right_panel;
+        self.shell_ui.sidebar_rendered_width = sidebar;
+        self.shell_ui.right_panel_rendered_width = right_panel;
         let sliding = self.panels_sliding();
         if was_sliding && !sliding {
             // The observer gate held root-state fan-out away from any island
@@ -146,8 +127,8 @@ impl Michelle {
             right_panel_content,
             sidebar,
             right_panel,
-            sidebar_sliding: self.sidebar_slide.is_some(),
-            right_panel_sliding: self.right_panel_slide.is_some(),
+            sidebar_sliding: self.shell_ui.sidebar_slide.is_some(),
+            right_panel_sliding: self.shell_ui.right_panel_slide.is_some(),
             sliding,
         }
     }
@@ -157,8 +138,8 @@ impl Michelle {
     /// mid-slide matches the column it is laid out in.
     fn chat_viewport_width(&self, window: &Window) -> f32 {
         f32::from(window.viewport_size().width)
-            - self.sidebar_rendered_width
-            - self.right_panel_rendered_width
+            - self.shell_ui.sidebar_rendered_width
+            - self.shell_ui.right_panel_rendered_width
     }
 
     /// [`MichellePane`] delegate for the sidebar island.
@@ -207,11 +188,11 @@ impl Michelle {
     /// window and keep requesting animation frames so the counter stays current.
     fn tick_fps(&mut self, window: &Window) {
         let now = Instant::now();
-        self.fps_frame_count = self.fps_frame_count.saturating_add(1);
-        if now.duration_since(self.fps_last_frame) >= Duration::from_secs(1) {
-            self.fps_value = self.fps_frame_count as u32;
-            self.fps_frame_count = 0;
-            self.fps_last_frame = now;
+        self.shell_ui.fps_frame_count = self.shell_ui.fps_frame_count.saturating_add(1);
+        if now.duration_since(self.shell_ui.fps_last_frame) >= Duration::from_secs(1) {
+            self.shell_ui.fps_value = self.shell_ui.fps_frame_count as u32;
+            self.shell_ui.fps_frame_count = 0;
+            self.shell_ui.fps_last_frame = now;
         }
         window.request_animation_frame();
     }
@@ -227,12 +208,12 @@ impl Render for Michelle {
             // `with_animation` would do, minus its element-id keying.
             window.request_animation_frame();
         }
-        if self.fps_counter_visible {
+        if self.shell_ui.fps_counter_visible {
             self.tick_fps(window);
         }
         let image_preview = self.render_image_preview(cx);
         let task_switcher = self.render_task_switcher(window, cx);
-        if self.settings_page.is_some() {
+        if self.settings_ui.page.is_some() {
             let command_palette = self.render_command_palette(window, cx);
             let commit_dialog = self.render_commit_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
@@ -332,7 +313,7 @@ impl Render for Michelle {
                         .w(px(panels.sidebar))
                         .when(panels.sidebar_sliding, |element| element.overflow_hidden())
                         .child(
-                            self.sidebar_pane.clone().cached(
+                            self.shell_ui.sidebar_pane.clone().cached(
                                 StyleRefinement::default()
                                     .w(px(panels.sidebar_content))
                                     .h_full()
@@ -350,13 +331,14 @@ impl Render for Michelle {
                     .flex_col()
                     .bg(theme.surface)
                     .when(panels.sidebar > 0.0, |element| {
-                        element.border_l_1().border_color(theme.sidebar_border)
+                        element.border_l(px(0.5)).border_color(theme.sidebar_border)
                     })
-                    .child(self.render_header(window, cx))
+                    .child(self.render_toolbar_main(window, cx))
                     .child(if empty {
                         self.render_empty_state(cx).into_any_element()
                     } else {
-                        self.transcript_pane
+                        self.shell_ui
+                            .transcript_pane
                             .clone()
                             .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
                             .into_any_element()
@@ -370,7 +352,7 @@ impl Render for Michelle {
                     })
                     .relative()
                     .children(toast)
-                    .when(self.sidebar_visible, |element| {
+                    .when(self.shell_ui.sidebar_visible, |element| {
                         element.child(self.render_panel_resize_handle(
                             "sidebar-resize-handle",
                             PanelResizeTarget::Sidebar,
@@ -393,7 +375,7 @@ impl Render for Michelle {
                         // uncovered from that edge inward rather than dragged
                         // across the screen.
                         .child(
-                            self.right_panel_pane.clone().cached(
+                            self.shell_ui.right_panel_pane.clone().cached(
                                 StyleRefinement::default()
                                     .absolute()
                                     .top_0()
@@ -456,126 +438,4 @@ mod tests {
     }
 }
 
-impl Michelle {
-    /// Arm the dismiss timer and build the floating toast layer, if a toast
-    /// is active. Every full-window surface (workspace and settings alike)
-    /// must include this, or a toast raised there stays invisible until the
-    /// user navigates away.
-    fn render_active_toast(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.start_toast_dismiss_timer(cx);
-        let toast = self
-            .toast
-            .as_ref()
-            .map(|toast| (toast.message.clone(), toast.tone, toast.id));
-        toast.map(|(message, tone, generation)| {
-            self.render_toast(message, tone, generation, cx)
-                .into_any_element()
-        })
-    }
-
-    fn render_toast(
-        &self,
-        message: String,
-        tone: ToastTone,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let theme = Theme::current(cx);
-        let (status_icon, status_color) = match tone {
-            ToastTone::Alert => ("exclamationmark.triangle", theme.danger),
-            ToastTone::Success => ("checkmark", theme.success),
-        };
-        let palette = MarkdownPalette::from_theme(&theme);
-        let text_ctx = MarkdownCtx::new(
-            format!("toast-{generation}"),
-            &palette,
-            self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
-            self.toast_selection.clone(),
-        );
-        let message = md::render::plain_text(
-            message,
-            md::render::SANS_FAMILY,
-            FontWeight::NORMAL,
-            theme.text,
-            &text_ctx,
-        );
-        let dismiss = div()
-            .id(SharedString::from(format!("dismiss-toast-{generation}")))
-            .tab_index(0)
-            .size(px(26.0))
-            .flex_none()
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text(tr!("common.dismiss_notification")))
-            .child(icon("xmark", 12.0, theme.text_tertiary))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.hide_toast();
-                cx.notify();
-                cx.stop_propagation();
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space" | "escape") {
-                    this.hide_toast();
-                    cx.notify();
-                    cx.stop_propagation();
-                }
-            }));
-
-        div()
-            .id(SharedString::from(format!("toast-layer-{generation}")))
-            .absolute()
-            .left_0()
-            .top(px(56.0))
-            .w_full()
-            .px(px(20.0))
-            .flex()
-            .justify_center()
-            .child(
-                div()
-                    .id(SharedString::from(format!("toast-{generation}")))
-                    .occlude()
-                    .max_w(px(560.0))
-                    .min_w_0()
-                    .px(px(10.0))
-                    .py(px(7.0))
-                    .rounded(px(10.0))
-                    .border_1()
-                    .border_color(theme.border_strong)
-                    .bg(theme.raised)
-                    .shadow_lg()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .text_size(sp(12.5))
-                    .line_height(sp(16.0))
-                    .text_color(theme.text)
-                    .on_hover(cx.listener(|this, hovering: &bool, _, cx| {
-                        this.set_toast_hovered(*hovering, cx);
-                    }))
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(md::render::frame_reset(self.toast_selection.clone()))
-                    .child(icon(status_icon, 14.0, status_color))
-                    .child(div().flex_1().min_w_0().whitespace_normal().child(message))
-                    .child(dismiss)
-                    .child(self.toast_selection_input()),
-            )
-            // Keep the toast top-centered just beneath Michelle's 48px header.
-            // GPUI's animation path honors the system reduce-motion preference
-            // and resolves immediately.
-            .with_animation(
-                SharedString::from(format!("toast-enter-{generation}")),
-                Animation::new(TOAST_ANIMATION_DURATION).with_easing(ease_out_quint()),
-                |element, delta| {
-                    element
-                        .top(px(48.0 + 8.0 * delta))
-                        .opacity(0.4 + 0.6 * delta)
-                },
-            )
-    }
-}
+impl Michelle {}

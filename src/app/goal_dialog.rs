@@ -12,6 +12,14 @@ use crate::model::{GoalOperation, MessageRole, ThreadGoal, ThreadGoalStatus};
 use crate::usage::format_tokens;
 
 use super::*;
+pub(super) mod model;
+#[cfg(test)]
+use model::edited_goal_status;
+
+pub(super) struct GoalUi {
+    pub(in crate::app) dialog: Option<goal_dialog::GoalDialogState>,
+    pub(in crate::app) request: Option<goal_dialog::GoalDialogRequest>,
+}
 
 actions!(michelle_goal_dialog, [ConfirmGoalDialog, DismissGoalDialog]);
 
@@ -61,7 +69,7 @@ impl Michelle {
         replace: bool,
         cx: &mut Context<Self>,
     ) {
-        self.goal_dialog_request = Some(GoalDialogRequest {
+        self.goal_ui.request = Some(GoalDialogRequest {
             session_id,
             prefill,
             replace,
@@ -92,7 +100,7 @@ impl Michelle {
             objective.update(cx, |input, cx| input.set_content(content, cx));
         }
         let objective_focus = objective.read(cx).focus();
-        self.goal_dialog = Some(GoalDialogState {
+        self.goal_ui.dialog = Some(GoalDialogState {
             session_id: request.session_id,
             replace: request.replace,
             objective,
@@ -110,8 +118,8 @@ impl Michelle {
     }
 
     fn close_goal_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.goal_dialog_request = None;
-        if self.goal_dialog.take().is_none() {
+        self.goal_ui.request = None;
+        if self.goal_ui.dialog.take().is_none() {
             return;
         }
         let focus = self.composer_focus(cx);
@@ -119,186 +127,16 @@ impl Michelle {
         cx.notify();
     }
 
-    /// Hand a goal operation to the session's runtime, starting one first
-    /// when none exists yet. Goals attach to the provider thread, not to any
-    /// turn — the Codex CLI opens its thread at launch, so `/goal` works
-    /// there before the first message. Michelle starts providers lazily, so the
-    /// goal path starts the runtime itself and the queued operations drain
-    /// the moment it installs.
-    pub(super) fn dispatch_goal_operation(
-        &mut self,
-        session_id: Uuid,
-        operation: GoalOperation,
-        cx: &mut Context<Self>,
-    ) {
-        self.record_goal_submission(session_id, &operation, cx);
-        self.begin_goal_pursuit_turn(session_id, &operation, cx);
-        if let Some(runtime) = self.runtimes.get(&session_id) {
-            runtime.driver.goal(operation);
-            return;
-        }
-        self.pending_goal_operations
-            .entry(session_id)
-            .or_default()
-            .push(operation);
-        self.start_goal_runtime(session_id, cx);
-    }
-
-    /// A submitted objective leaves a persistent transcript record — the
-    /// centered pill a system message renders as — the way a submission
-    /// leaves its user message. Pushed before the pursuit turn exists so it
-    /// stays turn-less and survives an unwound pursuit.
-    fn record_goal_submission(
-        &mut self,
-        session_id: Uuid,
-        operation: &GoalOperation,
-        cx: &mut Context<Self>,
-    ) {
-        let GoalOperation::Set {
-            objective: Some(objective),
-            ..
-        } = operation
-        else {
-            return;
-        };
-        let Some(session) = self.state.session_mut(session_id) else {
-            return;
-        };
-        session.set_title_from_prompt(objective);
-        let notice = tr!("goal.set_notice", objective = notice_objective(objective));
-        session.push_message(MessageRole::System, notice);
-        session.updated_at = crate::model::unix_time();
-        self.state.mark_session_dirty(session_id);
-        cx.notify();
-    }
-
-    /// Activating a goal on an idle thread makes Codex pursue it right away
-    /// (`apply_external_goal_set` → `continue_if_idle`), so begin its turn
-    /// optimistically — exactly how a submission's turn begins at accept —
-    /// instead of leaving the empty-task page up until the provider's start
-    /// report arrives seconds later. The provider's `turn/started` confirms
-    /// the turn; errors and a watchdog unwind an unconfirmed one.
-    fn begin_goal_pursuit_turn(
-        &mut self,
-        session_id: Uuid,
-        operation: &GoalOperation,
-        cx: &mut Context<Self>,
-    ) {
-        if !matches!(
-            operation,
-            GoalOperation::Set {
-                status: Some(ThreadGoalStatus::Active),
-                ..
-            }
-        ) {
-            return;
-        }
-        let Some(session) = self
-            .state
-            .session_mut(session_id)
-            .filter(|session| session.active_turn_id().is_none() && !session.status.is_busy())
-        else {
-            return;
-        };
-        let turn_id = session.begin_provider_turn();
-        session.status = SessionStatus::Connecting;
-        self.state.mark_session_dirty(session_id);
-        cx.notify();
-        // Continuation can legitimately never come — an inherited deferral,
-        // or a goal feature disabled provider-side. Do not let the working
-        // indicator outlive that silence.
-        cx.spawn(async move |michelle, cx| {
-            cx.background_executor()
-                .timer(std::time::Duration::from_secs(30))
-                .await;
-            let _ = michelle.update(cx, |michelle, cx| {
-                let stale = michelle
-                    .state
-                    .sessions
-                    .iter()
-                    .find(|session| session.id == session_id)
-                    .is_some_and(|session| {
-                        session.active_turn_id() == Some(turn_id)
-                            && session.active_turn_is_unconfirmed_pursuit()
-                    });
-                if stale {
-                    michelle.unwind_unconfirmed_pursuit_turn(session_id);
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
-    /// Remove an optimistic pursuit turn whose provider start never came,
-    /// returning the session to rest. Confirmed turns and submissions are
-    /// never touched: only a running provider turn without a user message
-    /// and without a provider start report qualifies.
-    pub(super) fn unwind_unconfirmed_pursuit_turn(&mut self, session_id: Uuid) {
-        let Some(session) = self
-            .state
-            .session_mut(session_id)
-            .filter(|session| session.active_turn_is_unconfirmed_pursuit())
-        else {
-            return;
-        };
-        if let Some(turn_id) = session.active_turn_id() {
-            session.unwind_unstarted_turn(turn_id);
-        }
-        if session.status.is_busy() {
-            session.status = SessionStatus::Idle;
-        }
-        self.state.mark_session_dirty(session_id);
-    }
-
-    /// Flush operations accepted before the runtime existed. Called after
-    /// any runtime install so the goal lands on the thread that was started
-    /// for it — whether the goal path or a racing submission started it.
-    pub(super) fn drain_pending_goal_operations(&mut self, session_id: Uuid) {
-        let Some(operations) = self.pending_goal_operations.remove(&session_id) else {
-            return;
-        };
-        if let Some(runtime) = self.runtimes.get(&session_id) {
-            for operation in operations {
-                runtime.driver.goal(operation);
-            }
-        }
-    }
-
     fn confirm_goal_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.goal_dialog.as_ref() else {
+        let Some(dialog) = self.goal_ui.dialog.as_ref() else {
             return;
         };
         let session_id = dialog.session_id;
         let replace = dialog.replace;
         let objective = dialog.objective.read(cx).content().trim().to_owned();
-        if objective.is_empty() {
+        if !self.save_goal_objective(session_id, objective, replace, cx) {
             return;
         }
-        let current_status = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .and_then(|session| session.thread_goal.as_ref())
-            .map(|goal| goal.status);
-        let (status, replace) = match current_status {
-            // Editing keeps a resumable status; finished goals restart.
-            Some(status) if !replace => (edited_goal_status(status), false),
-            // Replacing always pursues the new objective from scratch. A goal
-            // that vanished since the dialog opened degrades to a plain set.
-            Some(_) => (ThreadGoalStatus::Active, true),
-            None => (ThreadGoalStatus::Active, false),
-        };
-        self.dispatch_goal_operation(
-            session_id,
-            GoalOperation::Set {
-                objective: Some(objective),
-                status: Some(status),
-                replace,
-            },
-            cx,
-        );
         self.close_goal_dialog(window, cx);
     }
 
@@ -308,7 +146,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(session_id) = self.goal_dialog.as_ref().map(|dialog| dialog.session_id) else {
+        let Some(session_id) = self.goal_ui.dialog.as_ref().map(|dialog| dialog.session_id) else {
             return;
         };
         self.dispatch_goal_operation(
@@ -324,7 +162,7 @@ impl Michelle {
     }
 
     fn goal_dialog_clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(session_id) = self.goal_dialog.as_ref().map(|dialog| dialog.session_id) else {
+        let Some(session_id) = self.goal_ui.dialog.as_ref().map(|dialog| dialog.session_id) else {
             return;
         };
         self.dispatch_goal_operation(session_id, GoalOperation::Clear, cx);
@@ -336,10 +174,10 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if let Some(request) = self.goal_dialog_request.take() {
+        if let Some(request) = self.goal_ui.request.take() {
             self.materialize_goal_dialog(request, window, cx);
         }
-        let dialog = self.goal_dialog.as_ref()?;
+        let dialog = self.goal_ui.dialog.as_ref()?;
         let theme = Theme::current(cx);
         let current = self
             .state
@@ -714,16 +552,6 @@ fn notice_objective(objective: &str) -> String {
     }
     let clipped: String = objective.chars().take(NOTICE_OBJECTIVE_CHARS - 1).collect();
     format!("{}…", clipped.trim_end())
-}
-
-/// Saving an objective keeps a resumable status but restarts a finished one,
-/// mirroring Codex's `/goal edit` semantics.
-fn edited_goal_status(status: ThreadGoalStatus) -> ThreadGoalStatus {
-    if status.is_terminal() {
-        ThreadGoalStatus::Active
-    } else {
-        status
-    }
 }
 
 #[cfg(test)]

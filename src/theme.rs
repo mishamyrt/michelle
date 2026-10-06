@@ -1,21 +1,15 @@
-use gpui::{App, Global, Hsla, Rems, Window, WindowAppearance, hsla, rems, rgb, transparent_black};
+use gpui::{App, Global, Window, WindowAppearance};
+
+mod colors;
+mod dark;
+mod light;
+
+pub use crate::ui::sp;
+pub use colors::Theme;
 use serde::Deserialize;
 use std::{fs, io, path::Path};
 
 pub use michelle_client::theme::ThemePreference;
-
-/// Scaled pixels: a dimension authored at the default 14px UI font size,
-/// expressed in rems so the UI font size setting scales it. The window's rem
-/// size *is* the UI font size, so at the default setting this resolves to
-/// exactly the authored pixel value.
-///
-/// Chrome text sizes and their line heights go through here. Content surfaces
-/// that already derive from a font-size setting — markdown metrics, the file
-/// editor, diff rows, tool-output mono — stay in `px` so they never scale
-/// twice.
-pub fn sp(value: f32) -> Rems {
-    rems(value / michelle_client::persistence::DEFAULT_UI_FONT_SIZE)
-}
 
 fn resolves_to_dark(preference: ThemePreference, system_appearance: WindowAppearance) -> bool {
     match preference {
@@ -33,174 +27,6 @@ fn native_override(preference: ThemePreference) -> Option<bool> {
         ThemePreference::System => None,
         ThemePreference::Light => Some(false),
         ThemePreference::Dark => Some(true),
-    }
-}
-
-/// Michelle's visual language, take two: neutral graphite surfaces in the spirit
-/// of Cursor — color is reserved for meaning. On macOS the sidebar's semantic
-/// tint is installed as a native layer above Sidebar vibrancy; keeping this
-/// GPUI surface clear avoids incorrectly accumulating the alpha of nested Metal
-/// backgrounds. Selected, hovered, and pressed rows remain a 6% neutral layer.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct Theme {
-    #[serde(skip)]
-    pub is_dark: bool,
-    pub canvas: Hsla,
-    pub sidebar: Hsla,
-    pub sidebar_drag_background: Hsla,
-    pub sidebar_item_background: Hsla,
-    pub surface: Hsla,
-    pub raised: Hsla,
-    pub composer: Hsla,
-    pub inset: Hsla,
-    /// Terminal screen surface: paper-white in light mode, near-black in dark.
-    pub terminal: Hsla,
-    pub overlay: Hsla,
-    pub overlay_strong: Hsla,
-
-    pub border: Hsla,
-    pub border_strong: Hsla,
-    pub sidebar_border: Hsla,
-
-    pub text: Hsla,
-    pub text_secondary: Hsla,
-    pub text_tertiary: Hsla,
-    pub text_ghost: Hsla,
-
-    /// Brand coral. Logo, caret, live-activity pulses — nothing structural.
-    pub accent: Hsla,
-    pub resize_handle: Hsla,
-    /// Meter fills in the usage panel. Quota-meter blue by convention;
-    /// warning/danger take over as a lane fills.
-    pub gauge: Hsla,
-
-    /// Text-selection wash. Painted *under* the glyphs, so it stays
-    /// translucent and deliberately reads as the familiar browser blue rather
-    /// than as brand color.
-    pub selection: Hsla,
-    /// Inline `code` foreground and its rounded wash.
-    pub code_text: Hsla,
-    pub code_wash: Hsla,
-
-    /// Light fill for primary buttons (send, allow), dark glyph on top.
-    pub inverse: Hsla,
-    pub on_inverse: Hsla,
-
-    pub warning: Hsla,
-    pub success: Hsla,
-    pub favorite: Hsla,
-    pub danger: Hsla,
-    pub danger_soft: Hsla,
-}
-
-impl Theme {
-    /// The native sidebar layer owns its tint on macOS, so GPUI stays clear.
-    pub fn sidebar_surface(self) -> Hsla {
-        if cfg!(target_os = "macos") {
-            transparent_black()
-        } else {
-            self.sidebar
-        }
-    }
-
-    pub fn generation(cx: &App) -> u64 {
-        cx.try_global::<ActiveMichelleTheme>()
-            .map_or(0, |theme| theme.1)
-    }
-
-    pub fn current(cx: &App) -> Self {
-        if cx.has_global::<ActiveMichelleTheme>() {
-            cx.global::<ActiveMichelleTheme>().0
-        } else {
-            Self::dark()
-        }
-    }
-
-    pub fn dark() -> Self {
-        Self {
-            is_dark: true,
-            canvas: rgb(0x1A1A1A).into(),
-            sidebar: Hsla::from(rgb(0x181818)).opacity(0.92),
-            sidebar_drag_background: rgb(0x181818).into(),
-            sidebar_item_background: hsla(0.0, 0.0, 0.941, 0.06),
-            surface: rgb(0x1A1A1A).into(),
-            raised: rgb(0x232323).into(),
-            composer: rgb(0x212121).into(),
-            inset: rgb(0x151515).into(),
-            terminal: rgb(0x151515).into(),
-            overlay: hsla(220.0 / 360.0, 0.10, 0.90, 0.05),
-            overlay_strong: hsla(220.0 / 360.0, 0.10, 0.90, 0.09),
-
-            border: hsla(220.0 / 360.0, 0.10, 0.90, 0.07),
-            border_strong: hsla(220.0 / 360.0, 0.10, 0.90, 0.14),
-            sidebar_border: hsla(126.93 / 360.0, 0.000_000_1, 0.16077, 1.0),
-
-            text: rgb(0xE2E2E2).into(),
-            text_secondary: rgb(0xA3A3A3).into(),
-            text_tertiary: rgb(0x7D7D7D).into(),
-            text_ghost: rgb(0x575757).into(),
-
-            accent: rgb(0x0091FF).into(),
-            resize_handle: rgb(0x3B82F6).into(),
-            gauge: rgb(0x3B82F6).into(),
-
-            selection: hsla(211.0 / 360.0, 1.0, 0.50, 0.55),
-            code_text: rgb(0x82E087).into(),
-            code_wash: hsla(220.0 / 360.0, 0.10, 0.90, 0.08),
-
-            inverse: rgb(0xE7E9EC).into(),
-            on_inverse: rgb(0x17181C).into(),
-
-            warning: rgb(0xE0B36A).into(),
-            success: rgb(0x62C987).into(),
-            favorite: rgb(0xEAB308).into(),
-            danger: rgb(0xE2726A).into(),
-            danger_soft: hsla(4.0 / 360.0, 0.55, 0.63, 0.10),
-        }
-    }
-
-    pub fn light() -> Self {
-        Self {
-            is_dark: false,
-            canvas: rgb(0xF6F5F6).into(),
-            sidebar: Hsla::from(rgb(0xF4F4F4)).opacity(0.85),
-            sidebar_drag_background: rgb(0xFAFAFA).into(),
-            sidebar_item_background: hsla(0.0, 0.0, 0.078, 0.06),
-            surface: rgb(0xFFFFFF).into(),
-            raised: rgb(0xF4F4F4).into(),
-            composer: rgb(0xFFFFFF).into(),
-            inset: rgb(0xE6E6E6).into(),
-            terminal: rgb(0xFFFFFF).into(),
-            overlay: hsla(220.0 / 360.0, 0.10, 0.12, 0.05),
-            overlay_strong: hsla(220.0 / 360.0, 0.10, 0.12, 0.09),
-
-            border: hsla(220.0 / 360.0, 0.10, 0.12, 0.08),
-            border_strong: hsla(220.0 / 360.0, 0.10, 0.12, 0.15),
-            sidebar_border: hsla(0.0, 0.0, 0.078, 0.12),
-
-            text: rgb(0x363636).into(),
-            text_secondary: rgb(0x737373).into(),
-            text_tertiary: rgb(0xA2A2A2).into(),
-            text_ghost: rgb(0xD9D9D9).into(),
-
-            accent: rgb(0x0088FF).into(),
-            resize_handle: rgb(0x2563EB).into(),
-            gauge: rgb(0x2563EB).into(),
-
-            selection: hsla(211.0 / 360.0, 1.0, 0.50, 0.35),
-            code_text: rgb(0x289A2E).into(),
-            code_wash: hsla(220.0 / 360.0, 0.10, 0.12, 0.07),
-
-            inverse: rgb(0x202227).into(),
-            on_inverse: rgb(0xF8F8F9).into(),
-
-            warning: rgb(0xA66B20).into(),
-            success: rgb(0x2F8F52).into(),
-            favorite: rgb(0xCA8A04).into(),
-            danger: rgb(0xC64A42).into(),
-            danger_soft: hsla(4.0 / 360.0, 0.55, 0.52, 0.10),
-        }
     }
 }
 
@@ -290,18 +116,26 @@ fn load_themes_from_directory(directory: &Path) -> io::Result<Vec<ThemeDefinitio
 }
 
 #[derive(Clone, Copy)]
-struct ActiveMichelleTheme(Theme, u64);
+struct ActiveTheme(Theme);
+impl Global for ActiveTheme {}
 
-impl Global for ActiveMichelleTheme {}
+impl Theme {
+    pub fn current(cx: &App) -> Self {
+        cx.try_global::<ActiveTheme>()
+            .map_or_else(Self::dark, |active| active.0)
+    }
 
-/// Publish the resolved palette. [`Theme::current`] reads it back from the
-/// global, which is how every view gets its colors.
-fn set_active_theme(theme: Theme, cx: &mut App) {
-    let generation = Theme::generation(cx).wrapping_add(1);
-    cx.set_global(ActiveMichelleTheme(theme, generation));
+    pub fn generation(cx: &App) -> u64 {
+        crate::ui::appearance::generation(cx)
+    }
 }
 
-/// Resolve and publish the startup palette, before any window exists.
+fn set_theme(theme: Theme, cx: &mut App) {
+    crate::ui::appearance::set_colors(theme.ui_colors(), cx);
+    cx.set_global(ActiveTheme(theme));
+}
+
+/// Resolve and publish the startup theme, before any window exists.
 pub fn init(cx: &mut App) {
     let system_appearance = cx.window_appearance();
     let theme = if resolves_to_dark(ThemePreference::System, system_appearance) {
@@ -309,7 +143,7 @@ pub fn init(cx: &mut App) {
     } else {
         Theme::light()
     };
-    set_active_theme(theme, cx);
+    set_theme(theme, cx);
 }
 
 pub fn apply_theme_preference(
@@ -320,7 +154,7 @@ pub fn apply_theme_preference(
 ) {
     crate::platform::set_window_appearance(window, native_override(preference));
     let theme = definition.resolve(preference, cx.window_appearance());
-    set_active_theme(theme, cx);
+    set_theme(theme, cx);
     crate::platform::configure_sidebar_material(window, theme.is_dark, theme.sidebar);
     window.refresh();
 }
@@ -328,8 +162,38 @@ pub fn apply_theme_preference(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::rgb;
 
     const EXAMPLE: &str = include_str!("../docs/themes/example.toml");
+
+    #[gpui::test]
+    fn custom_themes_publish_app_and_control_colors_together(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            assert_eq!(Theme::current(cx), Theme::dark());
+            let definition = ThemeDefinition::parse(EXAMPLE).unwrap();
+            let mut theme = definition.light;
+            theme.text_secondary = rgb(0x112233).into();
+            theme.sidebar_item_background = rgb(0x223344).into();
+            theme.toolbar_button_bg = rgb(0x334455).into();
+            theme.toolbar_button_border = rgb(0x445566).into();
+            theme.composer = rgb(0x556677).into();
+
+            set_theme(theme, cx);
+            let generation = Theme::generation(cx);
+            let colors = crate::ui::colors(cx);
+            assert_eq!(Theme::current(cx), theme);
+            assert_eq!(colors, theme.ui_colors());
+            assert_eq!(colors.text_secondary, theme.text_secondary);
+            assert_eq!(colors.row_selection, theme.sidebar_item_background);
+            assert_eq!(colors.control_fill, theme.toolbar_button_bg);
+            assert_eq!(colors.control_border, theme.toolbar_button_border);
+
+            set_theme(definition.dark, cx);
+            assert_eq!(Theme::current(cx), definition.dark);
+            assert_eq!(crate::ui::colors(cx), definition.dark.ui_colors());
+            assert_ne!(Theme::generation(cx), generation);
+        });
+    }
 
     #[test]
     fn complete_palettes_resolve_independently_of_system_appearance() {

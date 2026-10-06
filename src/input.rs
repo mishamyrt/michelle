@@ -15,7 +15,7 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::theme::{Theme, sp};
+use crate::theme::Theme;
 
 actions!(
     composer,
@@ -562,10 +562,9 @@ pub enum InputEvent {
     BackspaceOnEmpty,
 }
 
-/// Clipboard payloads whose primary representation is an image or file list,
-/// emitted instead of a text splice by fields that opted in via
-/// [`TextInput::media_paste`]. The composer persists them and presents
-/// them as attachment chips.
+/// Clipboard payloads emitted instead of a text splice: images/files from
+/// [`TextInput::media_paste`] and large text from an opted-in composer.
+/// The composer persists them and presents them as attachment chips.
 #[derive(Clone)]
 pub struct MediaPaste(pub Vec<ClipboardEntry>);
 
@@ -623,6 +622,7 @@ fn pasted_text_for_mode(mode: FieldMode, text: &str) -> String {
 /// Tallest an [`auto_height`](TextInput::auto_height) field grows before
 /// its text scrolls under an overlay scrollbar instead of growing the card.
 const AUTO_HEIGHT_MAX: Pixels = px(300.);
+const LARGE_TEXT_PASTE_CHARS: usize = 4_000;
 
 /// The shared text engine under every box that takes typing — search inputs,
 /// the address bar, file editors, and the composer wrapper: native macOS
@@ -642,6 +642,7 @@ pub struct TextInput {
     /// Image and file pastes surface as [`MediaPaste`] instead of being
     /// swallowed by the text path.
     accepts_media_paste: bool,
+    attach_large_text_pastes: bool,
     /// Escape clears the field when it has content; an empty field lets the
     /// keystroke fall through to the surface's own escape.
     clear_on_escape: bool,
@@ -741,6 +742,7 @@ impl TextInput {
             submit_on_enter: false,
             auto_height: false,
             accepts_media_paste: false,
+            attach_large_text_pastes: false,
             clear_on_escape: false,
             select_all_on_focus_click: false,
             focus_click_select_all: false,
@@ -1724,6 +1726,10 @@ impl TextInput {
         let Some(text) = clipboard.text() else {
             return;
         };
+        if self.attach_large_text_pastes && text.chars().nth(LARGE_TEXT_PASTE_CHARS - 1).is_some() {
+            cx.emit(MediaPaste(vec![ClipboardEntry::from(text)]));
+            return;
+        }
         let text = pasted_text_for_mode(self.mode, &text);
         // A paste is its own undo step, never part of the typing around it —
         // the native NSTextView boundary, stricter than Zed's time grouping.
@@ -2562,7 +2568,7 @@ impl Element for InputElement {
         let theme = Theme::current(cx);
         let content_is_empty = content.is_empty();
         let (display_text, text_color, selected_range, marked_range) = if content_is_empty {
-            (input.placeholder.clone(), theme.text_ghost, None, None)
+            (input.placeholder.clone(), theme.text_tertiary, None, None)
         } else {
             (
                 content,
@@ -2822,8 +2828,8 @@ impl Render for TextInput {
                     .overflow_y_scroll()
                     .track_scroll(&scroll_handle)
                     .px(padding_x)
-                    .line_height(sp(22.0))
-                    .text_size(sp(13.5))
+                    .line_height(px(22.0))
+                    .text_size(px(13.5))
             })
             // A single-line field never wraps: the overlong remainder slides
             // horizontally under this clipped viewport to follow the caret —
@@ -2931,7 +2937,7 @@ pub enum ComposerEvent {
     BackspaceOnEmpty,
 }
 
-/// An image or file paste, re-emitted from the embedded field's
+/// An image, file, or large text paste, re-emitted from the embedded field's
 /// [`MediaPaste`]. The owning view persists the entries and presents them as
 /// attachment chips.
 #[derive(Clone)]
@@ -2945,6 +2951,7 @@ pub struct ComposerAttachmentPaste(pub Vec<ClipboardEntry>);
 /// owns only the prompt policy on top.
 pub struct ComposerInput {
     input: Entity<TextInput>,
+    pending_attachment_pastes: usize,
     /// Clone of the embedded field's handle, so `focus()` needs no `cx`.
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -2964,6 +2971,9 @@ impl ComposerInput {
         let _subscriptions = vec![
             cx.subscribe(&input, |composer, _, event: &InputEvent, cx| match event {
                 InputEvent::Submit(raw) => {
+                    if composer.has_pending_attachment_pastes() {
+                        return;
+                    }
                     // The prompt is consumed by sending it, and whitespace
                     // alone is nothing to send.
                     let value = raw.trim().to_owned();
@@ -2982,9 +2992,32 @@ impl ComposerInput {
         ];
         Self {
             input,
+            pending_attachment_pastes: 0,
             focus_handle,
             _subscriptions,
         }
+    }
+
+    /// Opt the main composer into text-file pastes; inline message editors
+    /// keep ordinary text pasting because they do not stage attachments.
+    pub fn attach_large_text_pastes(self, cx: &mut Context<Self>) -> Self {
+        self.input
+            .update(cx, |input, _| input.attach_large_text_pastes = true);
+        self
+    }
+
+    pub fn has_pending_attachment_pastes(&self) -> bool {
+        self.pending_attachment_pastes > 0
+    }
+
+    pub fn begin_attachment_paste(&mut self, cx: &mut Context<Self>) {
+        self.pending_attachment_pastes += 1;
+        cx.notify();
+    }
+
+    pub fn finish_attachment_paste(&mut self, cx: &mut Context<Self>) {
+        self.pending_attachment_pastes = self.pending_attachment_pastes.saturating_sub(1);
+        cx.notify();
     }
 
     /// Forwarded [`TextInput::set_padding_x`], for the embedded field the
@@ -3060,6 +3093,9 @@ impl Render for ComposerInput {
             // The embedded field propagates SubmitSteer; this ancestor
             // handler is where steering becomes a composer event.
             .on_action(cx.listener(|composer, _: &SubmitSteer, _, cx| {
+                if composer.has_pending_attachment_pastes() {
+                    return;
+                }
                 let value = composer.content(cx).trim().to_owned();
                 if value.is_empty() {
                     cx.emit(ComposerEvent::SteerQueued);
@@ -3150,13 +3186,124 @@ mod tests {
     ) -> (Entity<ComposerInput>, &'a mut gpui::VisualTestContext) {
         cx.update(super::init);
         let (harness, cx) = cx.add_window_view(|window, cx| {
-            let composer = cx.new(|cx| ComposerInput::new(window, cx));
+            let composer = cx.new(|cx| ComposerInput::new(window, cx).attach_large_text_pastes(cx));
             ComposerHarness { composer }
         });
         let composer = cx.read_entity(&harness, |harness, _| harness.composer.clone());
         cx.update(|window, cx| window.focus(&composer.read(cx).focus(), cx));
         cx.run_until_parked();
         (composer, cx)
+    }
+
+    #[gpui::test]
+    fn large_text_paste_emits_an_attachment_without_replacing_the_draft(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        let pasted = format!(
+            "  начало\r\n{}\rконец  ",
+            "🙂".repeat(super::LARGE_TEXT_PASTE_CHARS)
+        );
+        let events: Rc<RefCell<Vec<super::ComposerAttachmentPaste>>> = Rc::default();
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(
+                &composer,
+                move |_, event: &super::ComposerAttachmentPaste, _| {
+                    sink.borrow_mut().push(event.clone());
+                },
+            )
+            .detach();
+            composer.update(cx, |composer, cx| composer.set_content("Inspect this", cx));
+            cx.write_to_clipboard(ClipboardItem::new_string(pasted.clone()));
+        });
+        cx.simulate_keystrokes("secondary-v");
+        assert!(matches!(
+            events.borrow().as_slice(),
+            [super::ComposerAttachmentPaste(entries)]
+                if matches!(entries.as_slice(), [ClipboardEntry::String(text)] if text.text() == &pasted)
+        ));
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "Inspect this")
+        });
+    }
+
+    #[gpui::test]
+    fn text_paste_threshold_counts_characters_and_keeps_short_pastes_inline(
+        cx: &mut TestAppContext,
+    ) {
+        let (composer, cx) = setup_composer(cx);
+        let short = "🙂".repeat(super::LARGE_TEXT_PASTE_CHARS - 1);
+        let events: Rc<RefCell<Vec<super::ComposerAttachmentPaste>>> = Rc::default();
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(
+                &composer,
+                move |_, event: &super::ComposerAttachmentPaste, _| {
+                    sink.borrow_mut().push(event.clone());
+                },
+            )
+            .detach();
+            cx.write_to_clipboard(ClipboardItem::new_string(short.clone()));
+        });
+        cx.simulate_keystrokes("secondary-v");
+        assert!(events.borrow().is_empty());
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), short)
+        });
+        let long = format!("{short}🙂");
+        cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string(long)));
+        cx.simulate_keystrokes("secondary-v");
+        assert_eq!(events.borrow().len(), 1);
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), short)
+        });
+    }
+
+    #[gpui::test]
+    fn ordinary_text_fields_keep_large_pastes_inline(cx: &mut TestAppContext) {
+        let (input, cx) = setup_input(cx, "", px(300.));
+        let pasted = "x".repeat(super::LARGE_TEXT_PASTE_CHARS);
+        cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string(pasted.clone())));
+        cx.simulate_keystrokes("secondary-v");
+        cx.read_entity(&input, |input, _| assert_eq!(input.content(), pasted));
+    }
+
+    #[gpui::test]
+    fn pending_attachment_pastes_block_submission_until_every_upload_finishes(
+        cx: &mut TestAppContext,
+    ) {
+        let (composer, cx) = setup_composer(cx);
+        let events: Rc<RefCell<Vec<ComposerEvent>>> = Rc::default();
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&composer, move |_, event: &ComposerEvent, _| {
+                sink.borrow_mut().push(event.clone());
+            })
+            .detach();
+            composer.update(cx, |composer, cx| {
+                composer.set_content("Inspect this", cx);
+                composer.begin_attachment_paste(cx);
+                composer.begin_attachment_paste(cx);
+            });
+        });
+        events.borrow_mut().clear();
+        cx.simulate_keystrokes("enter secondary-enter");
+        assert!(events.borrow().is_empty());
+        composer.update(cx, |composer, cx| composer.finish_attachment_paste(cx));
+        cx.simulate_keystrokes("enter");
+        assert!(events.borrow().is_empty());
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "Inspect this")
+        });
+        composer.update(cx, |composer, cx| composer.finish_attachment_paste(cx));
+        cx.simulate_keystrokes("enter");
+        assert!(
+            events.borrow().iter().any(
+                |event| matches!(event, ComposerEvent::Submit(text) if text == "Inspect this")
+            )
+        );
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "")
+        });
     }
 
     #[gpui::test]

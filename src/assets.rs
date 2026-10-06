@@ -7,12 +7,12 @@ use std::{
 use anyhow::Result;
 use gpui::{App, AssetSource, SharedString};
 
-mod symbols;
+use crate::ui::icons::sf_symbols::{self as symbols, SfSymbolWeight};
 
 /// Brand marks stay embedded; ordinary icons are resolved from macOS once.
 #[derive(Clone, Default)]
 pub struct Assets {
-    system_icons: Arc<OnceLock<HashMap<&'static str, Vec<u8>>>>,
+    system_icons: Arc<OnceLock<HashMap<&'static str, [symbols::SystemSymbol; 4]>>>,
 }
 
 impl Assets {
@@ -157,7 +157,21 @@ pub fn register_fonts(cx: &App) -> Result<()> {
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        if let Some(bytes) = self.system_icons.get().and_then(|icons| icons.get(path)) {
+        let (symbol_name, weight, natural) = symbols::parse_font_icon_path(path)
+            .map_or((path, SfSymbolWeight::Regular, false), |(name, weight)| {
+                (name, weight, true)
+            });
+        if let Some(image) = self
+            .system_icons
+            .get()
+            .and_then(|icons| icons.get(symbol_name))
+            .map(|images| &images[weight as usize])
+        {
+            let bytes = if natural {
+                &image.natural_svg
+            } else {
+                &image.square_svg
+            };
             return Ok(Some(Cow::Owned(bytes.clone())));
         }
         Ok(ICONS
@@ -169,10 +183,12 @@ impl AssetSource for Assets {
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         Ok(ICONS
             .iter()
-            .map(|(name, _)| *name)
-            .chain(symbols::SYMBOLS.iter().copied())
+            .map(|(name, _)| SharedString::from(*name))
+            .chain(symbols::SYMBOLS.iter().flat_map(|&name| {
+                std::iter::once(SharedString::from(name))
+                    .chain(SfSymbolWeight::ALL.map(|weight| weight.path(name)))
+            }))
             .filter(|name| name.starts_with(path))
-            .map(SharedString::from)
             .collect())
     }
 }

@@ -428,14 +428,14 @@ activity.plan_steps: Шаги плана
 activity.tool_call: Вызов инструмента
 activity.tool_calls: Вызовы инструментов
 
-mode.supervised: С подтверждением
-mode.auto_accept_edits: Автоодобрение правок
-mode.auto: Автоматический
+mode.supervised: Запрашивать разрешения
+mode.auto_accept_edits: Принимать правки
+mode.auto: Авто
 mode.full_access: Полный доступ
-mode.supervised_description: Спрашивать перед выполнением команд и изменением файлов
-mode.auto_accept_edits_description: Одобрять правки автоматически, спрашивать перед остальными действиями
-mode.auto_description: ИИ одобряет обычные действия, а рискованные требуют вашего подтверждения
-mode.full_access_description: Разрешить команды и правки без подтверждения
+mode.supervised_description: Спрашивать перед командами и правками
+mode.auto_accept_edits_description: Остальные действия — с подтверждением
+mode.auto_description: Спрашивать только о рискованных действиях
+mode.full_access_description: Команды и правки без подтверждения
 agent_preset.standard: Стандартный режим
 agent_preset.code: Режим кода
 agent_preset.minimal: Минимальный режим
@@ -483,7 +483,7 @@ models.no_providers_title: Нет доступных провайдеров
 models.no_providers_description: Установите CLI агента или включите провайдера в настройках.
 models.open_provider_settings: Открыть настройки провайдеров
 models.choose: Выбрать модель
-models.favorites: Избранное
+models.favorites: Избранные
 models.add_favorite: Добавить в избранное
 models.remove_favorite: Удалить из избранного
 models.standard: Стандартный
@@ -619,8 +619,8 @@ branches.title: Ветки
 branches.choose: Выберите ветку
 branches.checked_out_elsewhere: Используется в другом рабочем дереве
 workspace.work_in: Среда исполнения
-workspace.local: Локальный проект
-workspace.new_worktree: Новый Worktree
+workspace.local: В папке проекта
+workspace.new_worktree: В отдельном worktree
 workspace.workspace: рабочая папка
 workspace.worktree: Рабочее дерево
 terminal.starting: Запуск терминала…
@@ -682,6 +682,7 @@ errors.rewind_task: "Не удалось откатить задачу: %{error}
 errors.project_not_found: Проект не найден
 errors.prepare_task_project_not_found: "Не удалось подготовить задачу: проект не найден"
 errors.store_pasted_image: "Не удалось прикрепить вставленное изображение: %{error}"
+errors.store_pasted_text: "Не удалось прикрепить вставленный текст: %{error}"
 errors.create_worktree: "Не удалось создать рабочее дерево: %{error}"
 errors.prepared_runtime_unavailable: Подготовленная среда агента недоступна
 errors.start_agent: "Не удалось запустить агента: %{error}"

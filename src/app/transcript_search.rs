@@ -61,7 +61,7 @@ impl TranscriptSearch {
 
 impl Michelle {
     pub(super) fn refresh_transcript_search_localized_text(&mut self, cx: &mut Context<Self>) {
-        let Some(search) = &self.transcript_search else {
+        let Some(search) = &self.transcript_ui.search else {
             return;
         };
         search
@@ -70,13 +70,14 @@ impl Michelle {
     }
 
     pub(super) fn transcript_search_open(&self) -> bool {
-        self.transcript_search
+        self.transcript_ui
+            .search
             .as_ref()
             .is_some_and(|search| search.open)
     }
 
     fn ensure_transcript_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.transcript_search.is_some() {
+        if self.transcript_ui.search.is_some() {
             return;
         }
         let query = cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.find")));
@@ -89,7 +90,7 @@ impl Michelle {
             },
         )
         .detach();
-        self.transcript_search = Some(TranscriptSearch {
+        self.transcript_ui.search = Some(TranscriptSearch {
             open: false,
             query,
             matches: Vec::new(),
@@ -112,7 +113,8 @@ impl Michelle {
         }
         let previous_focus = window.focused(cx);
         let seed = self
-            .transcript_selection
+            .transcript_ui
+            .selection
             .selection
             .borrow()
             .selected_text()
@@ -120,7 +122,8 @@ impl Michelle {
         self.ensure_transcript_search(window, cx);
 
         let search = self
-            .transcript_search
+            .transcript_ui
+            .search
             .as_mut()
             .expect("ensure_transcript_search just created it");
         if !search.open {
@@ -143,7 +146,12 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(search) = self.transcript_search.as_mut().filter(|search| search.open) else {
+        let Some(search) = self
+            .transcript_ui
+            .search
+            .as_mut()
+            .filter(|search| search.open)
+        else {
             return;
         };
         search.open = false;
@@ -161,7 +169,7 @@ impl Michelle {
     }
 
     pub(super) fn reset_transcript_search_for_session(&mut self) {
-        let Some(search) = self.transcript_search.as_mut() else {
+        let Some(search) = self.transcript_ui.search.as_mut() else {
             return;
         };
         search.open = false;
@@ -175,13 +183,18 @@ impl Michelle {
     }
 
     fn refresh_transcript_search(&mut self, cx: &mut Context<Self>) {
-        let Some(search) = self.transcript_search.as_ref().filter(|search| search.open) else {
+        let Some(search) = self
+            .transcript_ui
+            .search
+            .as_ref()
+            .filter(|search| search.open)
+        else {
             return;
         };
         let query = search.query.read(cx).content().to_owned();
         self.sync_transcript_rows();
         let origin_row = self.active_transcript_rows().logical_scroll_top().item_ix;
-        let row_kinds = self.transcript_row_kinds.borrow().clone();
+        let row_kinds = self.transcript_model.row_kinds.borrow().clone();
 
         let mut matches = Vec::new();
         let mut matches_by_message = HashMap::new();
@@ -238,7 +251,8 @@ impl Michelle {
                 .unwrap_or(0)
         });
         let search = self
-            .transcript_search
+            .transcript_ui
+            .search
             .as_mut()
             .expect("search remains present while it is refreshed");
         search.matches = matches;
@@ -252,7 +266,8 @@ impl Michelle {
 
     pub(super) fn navigate_transcript_search(&mut self, backwards: bool, cx: &mut Context<Self>) {
         let Some(search) = self
-            .transcript_search
+            .transcript_ui
+            .search
             .as_mut()
             .filter(|search| search.open && !search.matches.is_empty())
         else {
@@ -275,7 +290,8 @@ impl Michelle {
         message_index: usize,
     ) -> Option<SearchHighlights> {
         let search = self
-            .transcript_search
+            .transcript_ui
+            .search
             .as_ref()
             .filter(|search| search.open)?;
         let matches = search.matches_by_message.get(&message_index)?.clone();
@@ -300,7 +316,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let target = self.transcript_search.as_mut().and_then(|search| {
+        let target = self.transcript_ui.search.as_mut().and_then(|search| {
             if !search.open || !search.pending_reveal {
                 return None;
             }
@@ -328,7 +344,7 @@ impl Michelle {
         &self,
         target: &TranscriptSearchTarget,
     ) -> Option<Bounds<Pixels>> {
-        let registry = self.transcript_selection.registry.borrow();
+        let registry = self.transcript_ui.selection.registry.borrow();
         registry
             .entries()
             .iter()
@@ -341,9 +357,9 @@ impl Michelle {
     }
 
     fn detach_transcript_search_from_tail(&self) {
-        self.transcript_anchor_following.set(false);
-        self.transcript_tail_recheck.set(false);
-        self.transcript_is_scrolled.set(true);
+        self.transcript_ui.anchor_following.set(false);
+        self.transcript_ui.tail_recheck.set(false);
+        self.transcript_ui.is_scrolled.set(true);
     }
 
     fn reveal_transcript_search_geometry(
@@ -353,7 +369,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let still_current = self.transcript_search.as_ref().is_some_and(|search| {
+        let still_current = self.transcript_ui.search.as_ref().is_some_and(|search| {
             search.open
                 && search.generation == target.generation
                 && search.current == Some(target.current)
@@ -373,7 +389,12 @@ impl Michelle {
 
         // Reveal inside a capped user bubble before positioning the transcript.
         // Search keeps full text geometry even when those glyphs are clipped.
-        if let Some(viewport) = self.user_message_viewports.borrow().get(&target.message_id) {
+        if let Some(viewport) = self
+            .transcript_ui
+            .user_message_viewports
+            .borrow()
+            .get(&target.message_id)
+        {
             let scroll = &viewport.scroll_handle;
             let bounds = scroll.bounds();
             let margin = px(18.0);
@@ -422,7 +443,8 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let search = self
-            .transcript_search
+            .transcript_ui
+            .search
             .as_ref()
             .filter(|search| search.open)?;
         let theme = Theme::current(cx);
@@ -448,7 +470,7 @@ impl Michelle {
         let next_focus = self.transcript_control_focus("transcript-find-next", cx);
         let close_focus = self.transcript_control_focus("transcript-find-close", cx);
 
-        let previous = icon_button("transcript-find-previous", "arrow.up", theme)
+        let previous = icon_button("transcript-find-previous", "arrow.up", theme.ui_colors())
             .track_focus(&previous_focus)
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
@@ -457,7 +479,7 @@ impl Michelle {
             .when(has_matches, |button| {
                 button.on_activation(cx, |this, _, cx| this.navigate_transcript_search(true, cx))
             });
-        let next = icon_button("transcript-find-next", "arrow.down", theme)
+        let next = icon_button("transcript-find-next", "arrow.down", theme.ui_colors())
             .track_focus(&next_focus)
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
@@ -466,7 +488,7 @@ impl Michelle {
             .when(has_matches, |button| {
                 button.on_activation(cx, |this, _, cx| this.navigate_transcript_search(false, cx))
             });
-        let close = icon_button("transcript-find-close", "xmark", theme)
+        let close = icon_button("transcript-find-close", "xmark", theme.ui_colors())
             .track_focus(&close_focus)
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))

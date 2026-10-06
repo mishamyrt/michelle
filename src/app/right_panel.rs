@@ -3,7 +3,66 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 
-const TAB_SCROLL_FADE_WIDTH: f32 = 24.0;
+pub(super) mod files;
+pub(super) mod model;
+mod review;
+use review::{review_diff_directory_paths, review_diff_tree_rows};
+pub(super) mod session_state;
+mod terminals;
+mod workspace;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum RightPanelSurface {
+    Terminal(Uuid),
+    BackgroundWork {
+        key: BackgroundWorkKey,
+        title: String,
+    },
+    Files,
+    Diff,
+    File(String),
+}
+
+pub(super) struct RightPanelUi {
+    pub(in crate::app) surfaces: Vec<RightPanelSurface>,
+    pub(in crate::app) active_surface: Option<usize>,
+    pub(in crate::app) tabs_scroll_handle: ScrollHandle,
+    pub(in crate::app) files_scroll_handle: ScrollHandle,
+    pub(in crate::app) files_scrollbar: Rc<ScrollbarState>,
+    pub(in crate::app) diff_filter: Entity<TextInput>,
+    /// Unified diff rows and changed-file tree rows are independently
+    /// virtualized. Large generated patches stay proportional to what is on
+    /// screen rather than the size of the repository change.
+    pub(in crate::app) diff_list_state: ListState,
+    pub(in crate::app) diff_scrollbar: Rc<ScrollbarState>,
+    /// Selection spans and visible glyph geometry for the Review surface.
+    /// Kept separate from the transcript because both surfaces paint at once.
+    pub(in crate::app) diff_selection: TranscriptSelection,
+    pub(in crate::app) diff_tree_list_state: ListState,
+    pub(in crate::app) diff_tree_scrollbar: Rc<ScrollbarState>,
+    pub(in crate::app) editor_scroll_handle: ScrollHandle,
+    pub(in crate::app) editor_scrollbar: Rc<ScrollbarState>,
+    /// Rendered-markdown preview of the visible file editor, cached per path
+    /// the way `skills_detail_markdown` caches the skill document.
+    pub(in crate::app) file_preview_markdown: RefCell<Option<(String, MarkdownView)>>,
+    pub(in crate::app) file_preview_selection: TranscriptSelection,
+    pub(in crate::app) file_preview_scroll_handle: ScrollHandle,
+    pub(in crate::app) file_preview_scrollbar: Rc<ScrollbarState>,
+    pub(in crate::app) pending_tab_reveal: Option<usize>,
+    pub(in crate::app) pending_terminal_focus: Option<Uuid>,
+    pub(in crate::app) expanded_paths: HashSet<PathBuf>,
+    pub(in crate::app) files_selected_path: Option<String>,
+    pub(in crate::app) file_tree_width: f32,
+    /// Find-and-replace over the visible file editor. Created on first use of
+    /// the primary find shortcut and kept for the window's lifetime so the
+    /// query and toggles survive closing the bar; `open` says whether it shows.
+    pub(in crate::app) file_search: Option<file_search::FileSearch>,
+    pub(in crate::app) diff_selected_file: Option<usize>,
+    pub(in crate::app) diff_expanded_paths: HashSet<String>,
+    pub(in crate::app) diff_tree_rows: RefCell<Vec<right_panel::ReviewDiffTreeRow>>,
+    pub(in crate::app) diff_tree_cursor: Option<usize>,
+}
+
 const REVIEW_DIFF_FILE_HEADER_HEIGHT: f32 = 36.0;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -210,76 +269,6 @@ fn review_diff_gap_directions(
         (GapPosition::Between, false) => &[ExpansionDirection::Both],
         (GapPosition::Between, true) => &[ExpansionDirection::Start, ExpansionDirection::End],
     }
-}
-
-fn review_diff_directory_paths(files: &[crate::review_diff::File]) -> HashSet<String> {
-    let mut paths = HashSet::new();
-    for file in files {
-        let parts = file.path.split('/').collect::<Vec<_>>();
-        let mut path = String::new();
-        for part in parts.iter().take(parts.len().saturating_sub(1)) {
-            if !path.is_empty() {
-                path.push('/');
-            }
-            path.push_str(part);
-            paths.insert(path.clone());
-        }
-    }
-    paths
-}
-
-fn review_diff_tree_rows(
-    files: &[crate::review_diff::File],
-    expanded_paths: &HashSet<String>,
-    filter: &str,
-) -> Vec<ReviewDiffTreeRow> {
-    let filter = filter.trim().to_ascii_lowercase();
-    let filtering = !filter.is_empty();
-    let mut indexes = files
-        .iter()
-        .enumerate()
-        .filter(|(_, file)| {
-            filtering
-                .then(|| file.path.to_ascii_lowercase().contains(&filter))
-                .unwrap_or(true)
-        })
-        .map(|(index, _)| index)
-        .collect::<Vec<_>>();
-    indexes.sort_by_key(|index| files[*index].path.to_ascii_lowercase());
-
-    let mut rows = Vec::new();
-    let mut emitted_directories = HashSet::new();
-    for file_index in indexes {
-        let parts = files[file_index].path.split('/').collect::<Vec<_>>();
-        let mut directory = String::new();
-        let mut visible = true;
-        for (depth, part) in parts.iter().take(parts.len().saturating_sub(1)).enumerate() {
-            if !directory.is_empty() {
-                directory.push('/');
-            }
-            directory.push_str(part);
-            let expanded = filtering || expanded_paths.contains(&directory);
-            if emitted_directories.insert(directory.clone()) && visible {
-                rows.push(ReviewDiffTreeRow::Directory {
-                    path: directory.clone(),
-                    name: (*part).to_owned(),
-                    depth,
-                    expanded,
-                });
-            }
-            if !expanded {
-                visible = false;
-                break;
-            }
-        }
-        if visible {
-            rows.push(ReviewDiffTreeRow::File {
-                file_index,
-                depth: parts.len().saturating_sub(1),
-            });
-        }
-    }
-    rows
 }
 
 /// How wide and tall a diff row is drawn. The Review panel is a reading
@@ -825,34 +814,6 @@ fn file_highlighter_language(relative_path: &str) -> &'static str {
     }
 }
 
-/// Reads a file for the editor, returning its text and whether it can be saved.
-///
-/// One unbounded `read_to_string`, so callers keep it off the UI thread; the
-/// only caller is [`Michelle::read_right_panel_file_into_editor`].
-fn read_right_panel_file(
-    workspace: &michelle_client::WorkspaceClient,
-    project_path: &Path,
-    relative_path: &str,
-) -> (String, bool) {
-    match workspace.request(michelle_client::WorkspaceOperation::ReadTextFile {
-        root: project_path.to_path_buf(),
-        relative_path: PathBuf::from(relative_path),
-    }) {
-        Ok(michelle_client::WorkspaceResult::TextFile { content }) => (content, true),
-        Ok(_) => (
-            tr!(
-                "files.unable_to_edit",
-                error = "the daemon returned an invalid file response"
-            ),
-            false,
-        ),
-        Err(error) => (
-            tr!("files.unable_to_edit", error = error.to_string()),
-            false,
-        ),
-    }
-}
-
 impl RightPanelSurface {
     pub(super) fn new_terminal() -> Self {
         Self::Terminal(Uuid::new_v4())
@@ -865,7 +826,7 @@ impl RightPanelSurface {
         }
     }
 
-    fn label(&self) -> String {
+    pub(super) fn label(&self) -> String {
         match self {
             Self::Terminal(_) => tr!("right_panel.terminal"),
             Self::BackgroundWork { key, title } => {
@@ -885,7 +846,7 @@ impl RightPanelSurface {
         }
     }
 
-    fn icon_path(&self) -> &'static str {
+    pub(super) fn icon_path(&self) -> &'static str {
         match self {
             Self::Terminal(_) => "terminal",
             Self::BackgroundWork { key, .. } => work_kind_icon(key.kind),
@@ -896,32 +857,7 @@ impl RightPanelSurface {
     }
 }
 
-fn right_panel_tab_label(surface: &RightPanelSurface, files_selected_path: Option<&str>) -> String {
-    let label = match surface {
-        RightPanelSurface::Files => files_selected_path
-            .and_then(|path| Path::new(path).file_name())
-            .and_then(|name| name.to_str())
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| tr!("right_panel.files")),
-        _ => surface.label(),
-    };
-    single_line_label(&label)
-}
-
-fn right_panel_tab_icon(
-    surface: &RightPanelSurface,
-    files_selected_path: Option<&str>,
-) -> &'static str {
-    match surface {
-        RightPanelSurface::Files => files_selected_path
-            .map(file_icon_for_path)
-            .unwrap_or_else(|| surface.icon_path()),
-        _ => surface.icon_path(),
-    }
-}
-
-fn reusable_surface_index(
+pub(super) fn reusable_surface_index(
     surfaces: &[RightPanelSurface],
     requested: &RightPanelSurface,
 ) -> Option<usize> {
@@ -934,124 +870,6 @@ fn reusable_surface_index(
             surfaces.iter().position(|surface| surface == requested)
         }
     }
-}
-
-#[derive(Clone, Copy)]
-enum TabScrollFadeSide {
-    Left,
-    Right,
-}
-
-fn tab_scroll_fade_visibility(offset_x: Pixels, max_offset: Pixels) -> (bool, bool) {
-    let scrolled = -offset_x;
-    let threshold = px(0.5);
-    (scrolled > threshold, max_offset - scrolled > threshold)
-}
-
-fn fade_safe_tab_offset(
-    current_offset: Pixels,
-    max_offset: Pixels,
-    item_left: Pixels,
-    item_right: Pixels,
-    viewport_left: Pixels,
-    viewport_right: Pixels,
-) -> Pixels {
-    let inset = px(TAB_SCROLL_FADE_WIDTH);
-    let mut offset = current_offset;
-    let visible_left = item_left + offset;
-    let visible_right = item_right + offset;
-    if visible_left < viewport_left + inset {
-        offset += viewport_left + inset - visible_left;
-    } else if visible_right > viewport_right - inset {
-        offset -= visible_right - (viewport_right - inset);
-    }
-    offset.clamp(-max_offset, px(0.0))
-}
-
-fn tab_scroll_reveal_guard(
-    scroll_handle: ScrollHandle,
-    tab_index: usize,
-    michelle: WeakEntity<Michelle>,
-) -> impl IntoElement {
-    canvas(
-        move |_, window, _| {
-            if let Some(item) = scroll_handle.bounds_for_item(tab_index) {
-                let viewport = scroll_handle.bounds();
-                let offset = scroll_handle.offset();
-                let safe_offset = fade_safe_tab_offset(
-                    offset.x,
-                    scroll_handle.max_offset().x,
-                    item.left(),
-                    item.right(),
-                    viewport.left(),
-                    viewport.right(),
-                );
-                if safe_offset != offset.x {
-                    scroll_handle.set_offset(point(safe_offset, offset.y));
-                }
-            }
-
-            window.on_next_frame(move |_, cx| {
-                let _ = michelle.update(cx, |this, cx| {
-                    if this.right_panel_pending_tab_reveal == Some(tab_index) {
-                        this.right_panel_pending_tab_reveal = None;
-                        cx.notify();
-                    }
-                });
-            });
-        },
-        |_, _, _, _| {},
-    )
-    .absolute()
-    .size_full()
-}
-
-fn tab_scroll_fade(
-    scroll_handle: ScrollHandle,
-    side: TabScrollFadeSide,
-    surface: Hsla,
-) -> impl IntoElement {
-    canvas(
-        move |bounds, _, _| {
-            let (show_left, show_right) =
-                tab_scroll_fade_visibility(scroll_handle.offset().x, scroll_handle.max_offset().x);
-            let visible = match side {
-                TabScrollFadeSide::Left => show_left,
-                TabScrollFadeSide::Right => show_right,
-            };
-            visible.then(|| {
-                let transparent = surface.opacity(0.0);
-                let background = match side {
-                    TabScrollFadeSide::Left => linear_gradient(
-                        90.0,
-                        linear_color_stop(surface, 0.0),
-                        linear_color_stop(transparent, 1.0),
-                    ),
-                    TabScrollFadeSide::Right => linear_gradient(
-                        90.0,
-                        linear_color_stop(transparent, 0.0),
-                        linear_color_stop(surface, 1.0),
-                    ),
-                };
-                fill(bounds, background)
-            })
-        },
-        |_, fade, window, _| {
-            if let Some(fade) = fade {
-                window.paint_quad(fade);
-            }
-        },
-    )
-    .absolute()
-    .top_0()
-    .bottom_0()
-    .when(matches!(side, TabScrollFadeSide::Left), |element| {
-        element.left_0()
-    })
-    .when(matches!(side, TabScrollFadeSide::Right), |element| {
-        element.right_0()
-    })
-    .w(px(TAB_SCROLL_FADE_WIDTH))
 }
 
 #[allow(clippy::items_after_test_module)]
@@ -1391,13 +1209,13 @@ mod tests {
     /// it inline, so the frame that revealed the tab paid for the whole file.
     #[test]
     fn the_file_editor_render_path_does_no_filesystem_work() {
-        let source = include_str!("right_panel.rs");
+        let source = include_str!("right_panel/files.rs");
         let start = source
-            .find("\n    fn ensure_right_panel_file_editor(")
+            .find("\n    pub(in crate::app) fn ensure_right_panel_file_editor(")
             .expect("ensure fn");
         let body = &source[start + 1..];
         let end = body
-            .find("\n    /// Reads a file into its editor")
+            .find("\n    pub(in crate::app) fn save_right_panel_file(")
             .unwrap_or(body.len());
         let body = &body[..end];
 
@@ -1549,51 +1367,6 @@ mod tests {
     }
 
     #[test]
-    fn files_tab_uses_the_selected_file_name_and_icon() {
-        let files = RightPanelSurface::Files;
-        assert_eq!(right_panel_tab_label(&files, None), "Files");
-        assert_eq!(
-            right_panel_tab_label(&files, Some("packages/desktop/bun.lock")),
-            "bun.lock"
-        );
-        assert_eq!(
-            right_panel_tab_icon(&files, Some("packages/desktop/bun.lock")),
-            "icons/file-types/bun.svg"
-        );
-
-        let file = RightPanelSurface::File("src/main.rs".into());
-        assert_eq!(right_panel_tab_label(&file, None), "main.rs");
-        assert_eq!(
-            right_panel_tab_icon(&file, None),
-            "icons/file-types/rust.svg"
-        );
-    }
-
-    #[test]
-    fn right_panel_tab_titles_stay_on_one_line() {
-        let source = include_str!("right_panel.rs");
-        let header = source
-            .split_once("\n    fn render_right_panel_header(")
-            .expect("right panel header renderer")
-            .1
-            .split_once("\n    fn render_right_panel_chooser(")
-            .expect("right panel header renderer end")
-            .0;
-
-        assert!(header.contains(".truncate()"));
-        assert!(!header.contains(".line_clamp(1)"));
-
-        let background = RightPanelSurface::BackgroundWork {
-            key: BackgroundWorkKey::new(BackgroundWorkKind::Process, "process-1"),
-            title: "node -e '\n  const value = 1'".into(),
-        };
-        assert_eq!(
-            right_panel_tab_label(&background, None),
-            "node -e ' const value = 1'"
-        );
-    }
-
-    #[test]
     fn only_reuses_single_instance_surface_tabs() {
         let terminal = RightPanelSurface::new_terminal();
         let background = RightPanelSurface::BackgroundWork {
@@ -1658,398 +1431,40 @@ mod tests {
         assert_eq!(restored.active_surface, Some(0));
         assert_eq!(restored.file_tree_width, 248.0);
     }
-
-    #[test]
-    fn tab_scroll_fades_only_show_toward_hidden_content() {
-        assert_eq!(
-            tab_scroll_fade_visibility(px(0.0), px(120.0)),
-            (false, true)
-        );
-        assert_eq!(
-            tab_scroll_fade_visibility(px(-40.0), px(120.0)),
-            (true, true)
-        );
-        assert_eq!(
-            tab_scroll_fade_visibility(px(-120.0), px(120.0)),
-            (true, false)
-        );
-        assert_eq!(tab_scroll_fade_visibility(px(0.0), px(0.0)), (false, false));
-    }
-
-    #[test]
-    fn selected_tab_offset_clears_fade_overlays() {
-        assert_eq!(
-            fade_safe_tab_offset(
-                px(-100.0),
-                px(300.0),
-                px(90.0),
-                px(190.0),
-                px(0.0),
-                px(300.0),
-            ),
-            px(-66.0)
-        );
-        assert_eq!(
-            fade_safe_tab_offset(
-                px(-100.0),
-                px(324.0),
-                px(300.0),
-                px(400.0),
-                px(0.0),
-                px(300.0),
-            ),
-            px(-124.0)
-        );
-        assert_eq!(
-            fade_safe_tab_offset(px(0.0), px(0.0), px(0.0), px(100.0), px(0.0), px(300.0),),
-            px(0.0)
-        );
-    }
 }
 
 impl Michelle {
-    pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
-        match transcript_link_route(target, self.selected_workspace_path()) {
-            TranscriptLinkRoute::ProjectFile(relative_path) => {
-                self.open_right_panel_surface(RightPanelSurface::Files, cx);
-                self.open_right_panel_file(relative_path, cx);
-            }
-            TranscriptLinkRoute::Finder(path) => {
-                if self.daemon.is_remote() {
-                    self.show_toast(tr!("errors.remote_host_path"));
-                    cx.notify();
-                } else {
-                    crate::platform::reveal_in_file_manager(&path, cx);
-                }
-            }
-            TranscriptLinkRoute::External => return false,
-        }
-        true
-    }
-
-    /// Open a path a tool reported, from an activity in the transcript.
-    ///
-    /// Providers name a changed file however they like — absolute, or relative
-    /// to the session's workspace — so resolve it before routing. Inside the
-    /// workspace it opens in the file viewer; anywhere else it goes to the file
-    /// manager, the same split a file link in the transcript takes.
-    pub(super) fn open_activity_file(&mut self, path: &str, cx: &mut Context<Self>) {
-        let path = Path::new(path.trim());
-        let resolved = if path.is_absolute() {
-            path.to_path_buf()
-        } else if let Some(workspace) = self.selected_workspace_path() {
-            workspace.join(path)
-        } else {
-            return;
-        };
-        self.open_transcript_link(&resolved.to_string_lossy(), cx);
-    }
-
-    pub(super) fn store_selected_right_panel_state(&mut self) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let state = self.take_active_right_panel_state();
-        self.right_panel_session_states.insert(session_id, state);
-    }
-
-    pub(super) fn restore_right_panel_state(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let state = RightPanelSessionState::take_or_closed(
-            &mut self.right_panel_session_states,
-            session_id,
-        );
-        self.replace_active_right_panel_state(state);
-        self.sync_right_panel_diff_tree_rows(cx);
-        // A read in flight when this session was switched away from had its
-        // result dropped, and the flag it left behind would stop the editor
-        // ever asking again. Clear it and read afresh, which also picks up
-        // edits made while another session was on screen.
-        for editor in self.right_panel_file_editors.values_mut() {
-            editor.reading = false;
-        }
-        // The find bar pointed into the editors that were just swapped out;
-        // its match list means nothing here, and restored editors may carry
-        // washes stored mid-search.
-        self.reset_file_search_for_session(cx);
-        self.reload_clean_right_panel_file_editors(cx);
-        self.state.right_panel_visible = self.right_panel_visible;
-        if self.active_right_panel_surface() == Some(&RightPanelSurface::Diff) {
-            self.refresh_right_panel_diff(cx);
-        }
-        if matches!(
-            self.active_right_panel_surface(),
-            Some(RightPanelSurface::Files | RightPanelSurface::File(_))
-        ) {
-            self.refresh_right_panel_working_tree(cx);
-        }
-        self.ensure_right_panel_terminals(cx);
-        if self.right_panel_visible {
-            self.request_active_terminal_focus();
-        }
-    }
-
-    pub(super) fn remove_right_panel_session_state(&mut self, session_id: Uuid) {
-        let state = if self.state.selected_session == Some(session_id) {
-            let state = self.take_active_right_panel_state();
-            self.replace_active_right_panel_state(RightPanelSessionState::empty(false));
-            Some(state)
-        } else {
-            self.right_panel_session_states.remove(&session_id)
-        };
-        if let Some(state) = state {
-            for surface in &state.surfaces {
-                if let Some(terminal_id) = surface.terminal_id() {
-                    self.right_panel_terminals.remove(&terminal_id);
-                }
-            }
-        }
-    }
-
-    fn take_active_right_panel_state(&mut self) -> RightPanelSessionState {
-        RightPanelSessionState {
-            visible: self.right_panel_visible,
-            surfaces: std::mem::take(&mut self.right_panel_surfaces),
-            active_surface: self.right_panel_active_surface.take(),
-            tabs_scroll_handle: std::mem::replace(
-                &mut self.right_panel_tabs_scroll_handle,
-                ScrollHandle::new(),
-            ),
-            pending_tab_reveal: self.right_panel_pending_tab_reveal.take(),
-            expanded_paths: std::mem::take(&mut self.right_panel_expanded_paths),
-            files_selected_path: self.right_panel_files_selected_path.take(),
-            file_tree_width: self.right_panel_file_tree_width,
-            file_editors: std::mem::take(&mut self.right_panel_file_editors),
-            diff_source: self.right_panel_diff_source,
-            diff_snapshot: self.right_panel_diff_snapshot.take(),
-            diff_selected_file: self.right_panel_diff_selected_file.take(),
-            diff_expanded_paths: std::mem::take(&mut self.right_panel_diff_expanded_paths),
-        }
-    }
-
-    fn replace_active_right_panel_state(&mut self, state: RightPanelSessionState) {
-        self.right_panel_visible = state.visible;
-        self.right_panel_surfaces = state.surfaces;
-        self.right_panel_active_surface = state.active_surface;
-        self.right_panel_tabs_scroll_handle = state.tabs_scroll_handle;
-        self.right_panel_pending_tab_reveal = state.pending_tab_reveal;
-        self.right_panel_expanded_paths = state.expanded_paths;
-        self.right_panel_files_selected_path = state.files_selected_path;
-        self.right_panel_file_tree_width = state.file_tree_width;
-        self.right_panel_file_editors = state.file_editors;
-        self.right_panel_diff_generation = self.right_panel_diff_generation.wrapping_add(1);
-        self.right_panel_diff_selection.clear();
-        self.right_panel_diff_source = state.diff_source;
-        self.right_panel_diff_snapshot = state.diff_snapshot;
-        self.right_panel_diff_loading = false;
-        self.right_panel_diff_error = None;
-        self.right_panel_diff_selected_file = state.diff_selected_file;
-        self.right_panel_diff_expanded_paths = state.diff_expanded_paths;
-        self.right_panel_diff_tree_cursor = None;
-        self.right_panel_diff_tree_rows.borrow_mut().clear();
-        self.right_panel_diff_tree_list_state.reset(0);
-        let line_count = self
-            .right_panel_diff_snapshot
-            .as_ref()
-            .map_or(0, |snapshot| snapshot.lines.len());
-        self.right_panel_diff_list_state.reset(line_count);
+    pub(super) fn activate_right_panel_surface(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.right_panel_ui.active_surface = Some(index);
+        self.reveal_right_panel_tab(index);
+        self.request_active_terminal_focus();
+        cx.notify();
     }
 
     fn reveal_right_panel_tab(&mut self, index: usize) {
-        self.right_panel_pending_tab_reveal = Some(index);
-        self.right_panel_tabs_scroll_handle.scroll_to_item(index);
+        self.right_panel_ui.pending_tab_reveal = Some(index);
+        self.right_panel_ui.tabs_scroll_handle.scroll_to_item(index);
     }
 
     fn active_right_panel_surface(&self) -> Option<&RightPanelSurface> {
-        self.right_panel_active_surface
-            .and_then(|index| self.right_panel_surfaces.get(index))
+        self.right_panel_ui
+            .active_surface
+            .and_then(|index| self.right_panel_ui.surfaces.get(index))
     }
 
     pub(super) fn request_active_terminal_focus(&mut self) {
-        self.right_panel_pending_terminal_focus = self
+        self.right_panel_ui.pending_terminal_focus = self
             .active_right_panel_surface()
             .and_then(RightPanelSurface::terminal_id);
     }
 
-    /// The file the active editor surface is showing, whether via a File tab
-    /// or the Files browser's selection — regardless of whether the panel is
-    /// currently visible, which is a per-caller decision: save works on a
-    /// hidden panel, find does not.
-    pub(super) fn visible_right_panel_file_path(&self) -> Option<String> {
-        match self.active_right_panel_surface() {
-            Some(RightPanelSurface::Files) => self.right_panel_files_selected_path.clone(),
-            Some(RightPanelSurface::File(path)) => Some(path.clone()),
-            _ => None,
-        }
-    }
-
-    fn right_panel_file_is_dirty(&self, relative_path: &str) -> bool {
-        self.right_panel_file_editors
-            .get(relative_path)
-            .is_some_and(|editor| editor.dirty)
-    }
-
-    fn right_panel_surface_is_dirty(&self, surface: &RightPanelSurface) -> bool {
-        match surface {
-            RightPanelSurface::Files => self
-                .right_panel_files_selected_path
-                .as_deref()
-                .is_some_and(|path| self.right_panel_file_is_dirty(path)),
-            RightPanelSurface::File(path) => self.right_panel_file_is_dirty(path),
-            _ => false,
-        }
-    }
-
     fn ensure_initial_right_panel_file_editor_width(&mut self) {
-        if self.right_panel_file_editors.is_empty() {
-            self.right_panel_width = widened_panel_width_for_file_editor(
-                self.right_panel_width,
-                self.right_panel_file_tree_width,
+        if self.right_panel_model.file_editors.is_empty() {
+            self.shell_ui.right_panel_width = widened_panel_width_for_file_editor(
+                self.shell_ui.right_panel_width,
+                self.right_panel_ui.file_tree_width,
             );
         }
-    }
-
-    pub(super) fn open_right_panel_surface(
-        &mut self,
-        surface: RightPanelSurface,
-        cx: &mut Context<Self>,
-    ) {
-        let reusable_index = reusable_surface_index(&self.right_panel_surfaces, &surface);
-        if matches!(&surface, RightPanelSurface::File(_)) {
-            self.ensure_initial_right_panel_file_editor_width();
-        }
-        if surface == RightPanelSurface::Diff {
-            if reusable_index.is_none() {
-                self.right_panel_width = widened_panel_width_for_review(self.right_panel_width);
-            }
-            self.refresh_right_panel_diff(cx);
-        }
-        if matches!(
-            surface,
-            RightPanelSurface::Files | RightPanelSurface::File(_)
-        ) {
-            self.refresh_right_panel_working_tree(cx);
-        }
-        if let Some(terminal_id) = surface.terminal_id() {
-            self.ensure_right_panel_terminal(terminal_id, cx);
-        }
-        let index = match reusable_index {
-            Some(index) => index,
-            None => {
-                self.right_panel_surfaces.push(surface);
-                self.right_panel_surfaces.len() - 1
-            }
-        };
-        self.right_panel_active_surface = Some(index);
-        self.reveal_right_panel_tab(index);
-        self.request_active_terminal_focus();
-        self.set_right_panel_visible(true, cx);
-        cx.notify();
-    }
-
-    pub(super) fn open_turn_diff(&mut self, turn_id: Uuid, cx: &mut Context<Self>) {
-        let Some((session_id, turn_count)) = self.selected_session().and_then(|session| {
-            session
-                .turns
-                .iter()
-                .find(|turn| turn.id == turn_id)
-                .map(|turn| (session.id, turn.turn_count))
-        }) else {
-            return;
-        };
-        self.right_panel_diff_source = ReviewDiffSource::LastTurn {
-            session_id,
-            turn_id,
-            turn_count,
-        };
-        self.right_panel_diff_selection.clear();
-        self.right_panel_diff_snapshot = None;
-        self.right_panel_diff_selected_file = None;
-        self.open_right_panel_surface(RightPanelSurface::Diff, cx);
-    }
-
-    fn open_right_panel_file(&mut self, relative_path: String, cx: &mut Context<Self>) {
-        self.ensure_initial_right_panel_file_editor_width();
-        let Some(active) = self.right_panel_active_surface else {
-            self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx);
-            return;
-        };
-        match self.right_panel_surfaces.get(active).cloned() {
-            Some(RightPanelSurface::Files) => {
-                let dirty_file_would_be_replaced = self
-                    .right_panel_files_selected_path
-                    .as_deref()
-                    .is_some_and(|current_path| {
-                        current_path != relative_path
-                            && self.right_panel_file_is_dirty(current_path)
-                    });
-                if dirty_file_would_be_replaced {
-                    self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx);
-                    return;
-                }
-
-                self.right_panel_files_selected_path = Some(relative_path);
-                self.set_right_panel_visible(true, cx);
-                cx.notify();
-            }
-            Some(RightPanelSurface::File(current_path)) => {
-                if current_path == relative_path {
-                    return;
-                }
-                if self.right_panel_file_is_dirty(&current_path) {
-                    self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx);
-                    return;
-                }
-
-                let requested = RightPanelSurface::File(relative_path);
-                if let Some(existing) =
-                    reusable_surface_index(&self.right_panel_surfaces, &requested)
-                {
-                    self.right_panel_surfaces.remove(active);
-                    let existing = if existing > active {
-                        existing - 1
-                    } else {
-                        existing
-                    };
-                    self.right_panel_active_surface = Some(existing);
-                    self.reveal_right_panel_tab(existing);
-                } else {
-                    self.right_panel_surfaces[active] = requested;
-                    self.reveal_right_panel_tab(active);
-                }
-                self.set_right_panel_visible(true, cx);
-                cx.notify();
-            }
-            _ => self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx),
-        }
-    }
-
-    fn close_right_panel_surface(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index >= self.right_panel_surfaces.len() {
-            return;
-        }
-        if let Some(terminal_id) = self.right_panel_surfaces[index].terminal_id() {
-            self.right_panel_terminals.remove(&terminal_id);
-        }
-        self.right_panel_surfaces.remove(index);
-        self.right_panel_active_surface = if self.right_panel_surfaces.is_empty() {
-            None
-        } else {
-            Some(match self.right_panel_active_surface {
-                Some(active) if active > index => active - 1,
-                Some(active) if active == index => index.saturating_sub(1),
-                Some(active) => active.min(self.right_panel_surfaces.len() - 1),
-                None => 0,
-            })
-        };
-        if let Some(active) = self.right_panel_active_surface {
-            self.reveal_right_panel_tab(active);
-            self.request_active_terminal_focus();
-        } else {
-            self.right_panel_pending_tab_reveal = None;
-            self.right_panel_pending_terminal_focus = None;
-            self.set_right_panel_visible(false, cx);
-        }
-        cx.notify();
     }
 
     pub(super) fn close_window_or_right_panel_tab_action(
@@ -2058,40 +1473,15 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(active) = self.right_panel_active_surface {
+        if let Some(active) = self.right_panel_ui.active_surface {
             self.close_right_panel_surface(active, cx);
-            if self.right_panel_surfaces.is_empty() {
+            if self.right_panel_ui.surfaces.is_empty() {
                 let focus_handle = self.composer_focus(cx);
                 window.focus(&focus_handle, cx);
             }
         } else {
             crate::platform::hide_window(window);
         }
-    }
-
-    pub(super) fn render_right_panel_toggle(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let theme = Theme::current(cx);
-        div()
-            .id("toggle-right-panel")
-            .w(px(26.0))
-            .h(px(26.0))
-            .flex_none()
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
-            .child(icon("sidebar.right", 14.0, theme.text_tertiary))
-            .tooltip(|window, cx| Tooltip::new(tr!("right_panel.toggle")).build(window, cx))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(cx.listener(|this, _, _, cx| {
-                cx.stop_propagation();
-                this.set_right_panel_visible(!this.right_panel_visible, cx);
-            }))
     }
 
     pub(super) fn render_right_panel(
@@ -2104,13 +1494,13 @@ impl Michelle {
         let active_terminal_id = self
             .active_right_panel_surface()
             .and_then(RightPanelSurface::terminal_id);
-        if self.right_panel_pending_terminal_focus == active_terminal_id
+        if self.right_panel_ui.pending_terminal_focus == active_terminal_id
             && let Some(terminal_id) = active_terminal_id
-            && let Some(terminal) = self.right_panel_terminals.get(&terminal_id)
+            && let Some(terminal) = self.right_panel_model.terminals.get(&terminal_id)
         {
             let focus_handle = terminal.read(cx).focus_handle(cx);
             window.focus(&focus_handle, cx);
-            self.right_panel_pending_terminal_focus = None;
+            self.right_panel_ui.pending_terminal_focus = None;
         }
         let body = match self.active_right_panel_surface().cloned() {
             None => self.render_right_panel_chooser(cx).into_any_element(),
@@ -2124,7 +1514,8 @@ impl Michelle {
                 .render_right_panel_diff(width, window, cx)
                 .into_any_element(),
             Some(RightPanelSurface::Terminal(terminal_id)) => self
-                .right_panel_terminals
+                .right_panel_model
+                .terminals
                 .get(&terminal_id)
                 .cloned()
                 .inspect(|terminal| {
@@ -2156,268 +1547,13 @@ impl Michelle {
             .border_color(theme.border_strong)
             .bg(theme.surface)
             .relative()
-            .child(self.render_right_panel_header(window, cx))
+            .child(self.render_toolbar_right_panel(window, cx))
             .child(body)
             .child(self.render_panel_resize_handle(
                 "right-panel-resize-handle",
                 PanelResizeTarget::RightPanel,
                 cx,
             ))
-    }
-
-    fn ensure_right_panel_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
-        if self.daemon.is_remote() {
-            // A desktop PTY would interpret the daemon's cwd on the wrong
-            // machine. Keep the surface unavailable until the protocol grows
-            // a daemon-owned streaming terminal.
-            self.right_panel_terminals.remove(&terminal_id);
-            return;
-        }
-        let Some(working_directory) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
-            self.right_panel_terminals.remove(&terminal_id);
-            return;
-        };
-        let matches_project = self
-            .right_panel_terminals
-            .get(&terminal_id)
-            .is_some_and(|terminal| terminal.read(cx).working_directory() == working_directory);
-        if !matches_project {
-            self.right_panel_terminals.insert(
-                terminal_id,
-                cx.new(|cx| TerminalView::new(working_directory.clone(), cx)),
-            );
-        }
-    }
-
-    pub(super) fn ensure_right_panel_terminals(&mut self, cx: &mut Context<Self>) {
-        let active_terminal_ids = self
-            .right_panel_surfaces
-            .iter()
-            .filter_map(RightPanelSurface::terminal_id)
-            .collect::<Vec<_>>();
-        let retained_terminal_ids = active_terminal_ids
-            .iter()
-            .copied()
-            .chain(self.right_panel_session_states.values().flat_map(|state| {
-                state
-                    .surfaces
-                    .iter()
-                    .filter_map(RightPanelSurface::terminal_id)
-            }))
-            .collect::<HashSet<_>>();
-        self.right_panel_terminals
-            .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
-        for terminal_id in active_terminal_ids {
-            self.ensure_right_panel_terminal(terminal_id, cx);
-        }
-    }
-
-    fn render_right_panel_header(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
-        let theme = Theme::current(cx);
-        let active_surface = self.right_panel_active_surface;
-        let mut tabs = div()
-            .id("right-panel-tabs")
-            .h_full()
-            .min_w_0()
-            .flex_1()
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .overflow_x_scroll()
-            .track_scroll(&self.right_panel_tabs_scroll_handle);
-        for (index, surface) in self.right_panel_surfaces.iter().cloned().enumerate() {
-            let active = active_surface == Some(index);
-            let dirty = self.right_panel_surface_is_dirty(&surface);
-            let label = SharedString::from(right_panel_tab_label(
-                &surface,
-                self.right_panel_files_selected_path.as_deref(),
-            ));
-            let icon_path =
-                right_panel_tab_icon(&surface, self.right_panel_files_selected_path.as_deref());
-            let uses_file_icon = matches!(&surface, RightPanelSurface::File(_))
-                || matches!(&surface, RightPanelSurface::Files)
-                    && self.right_panel_files_selected_path.is_some();
-            let activate_weak = cx.entity().downgrade();
-            let close_weak = cx.entity().downgrade();
-            tabs = tabs.child(
-                div()
-                    .id(SharedString::from(format!("right-panel-tab-{index}")))
-                    .h(px(28.0))
-                    .min_w(px(100.0))
-                    .max_w(px(176.0))
-                    .px(px(8.0))
-                    .rounded(px(6.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .cursor_default()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .when(active, |element| element.bg(theme.overlay_strong))
-                    .when(!active, |element| {
-                        element.hover(|element| element.bg(theme.overlay))
-                    })
-                    .child(if uses_file_icon {
-                        file_icon(icon_path, 13.0, theme.text_secondary).into_any_element()
-                    } else {
-                        icon(icon_path, 13.0, theme.text_secondary).into_any_element()
-                    })
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .text_color(if active {
-                                theme.text
-                            } else {
-                                theme.text_secondary
-                            })
-                            .child(label),
-                    )
-                    .when(dirty, |element| {
-                        element.child(
-                            div()
-                                .id(SharedString::from(format!("right-panel-tab-dirty-{index}")))
-                                .size(px(7.0))
-                                .flex_none()
-                                .rounded_full()
-                                .bg(theme.warning)
-                                .tooltip(|window, cx| {
-                                    Tooltip::new(tr!(
-                                        "files.unsaved_changes",
-                                        shortcut =
-                                            crate::platform::primary_shortcut("⌘S", "Ctrl+S")
-                                    ))
-                                    .build(window, cx)
-                                }),
-                        )
-                    })
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("close-right-panel-tab-{index}")))
-                            .w(px(16.0))
-                            .h(px(16.0))
-                            .rounded(px(4.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .hover(|element| element.bg(theme.overlay_strong))
-                            .child(icon("xmark", 10.0, theme.text_tertiary))
-                            .on_click(move |_, _, cx| {
-                                cx.stop_propagation();
-                                let _ = close_weak.update(cx, |this, cx| {
-                                    this.close_right_panel_surface(index, cx);
-                                });
-                            }),
-                    )
-                    .on_click(move |_, _, cx| {
-                        let _ = activate_weak.update(cx, |this, cx| {
-                            this.right_panel_active_surface = Some(index);
-                            this.reveal_right_panel_tab(index);
-                            this.request_active_terminal_focus();
-                            cx.notify();
-                        });
-                    }),
-            );
-        }
-        tabs = tabs.child(div().w(px(TAB_SCROLL_FADE_WIDTH)).h(px(1.0)).flex_none());
-
-        let mut header = div()
-            .id("right-panel-header")
-            .h(px(48.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .pl(px(10.0))
-            .pr(px(14.0))
-            .child(
-                div()
-                    .relative()
-                    .h_full()
-                    .min_w_0()
-                    .flex_1()
-                    .overflow_hidden()
-                    .child(tabs)
-                    .when_some(self.right_panel_pending_tab_reveal, |element, tab_index| {
-                        element.child(tab_scroll_reveal_guard(
-                            self.right_panel_tabs_scroll_handle.clone(),
-                            tab_index,
-                            cx.entity().downgrade(),
-                        ))
-                    })
-                    .child(tab_scroll_fade(
-                        self.right_panel_tabs_scroll_handle.clone(),
-                        TabScrollFadeSide::Left,
-                        theme.surface,
-                    ))
-                    .child(tab_scroll_fade(
-                        self.right_panel_tabs_scroll_handle.clone(),
-                        TabScrollFadeSide::Right,
-                        theme.surface,
-                    )),
-            );
-
-        if !self.right_panel_surfaces.is_empty() {
-            let weak = cx.entity().downgrade();
-            let existing_surfaces = self.right_panel_surfaces.clone();
-            let options = [
-                RightPanelSurface::new_terminal(),
-                RightPanelSurface::Files,
-                RightPanelSurface::Diff,
-            ];
-            let handle = self.menu_handle("add-right-panel-surface", cx);
-            header = header.child(
-                div()
-                    .flex_none()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(dropdown_menu(
-                        icon_button("add-right-panel-surface", "plus", theme),
-                        "add-right-panel-surface-menu",
-                        &handle,
-                        MenuAlign::BelowRight,
-                        move |_| {
-                            options
-                                .clone()
-                                .into_iter()
-                                .map(|surface| {
-                                    let weak = weak.clone();
-                                    let open_surface = surface.clone();
-                                    let already_open =
-                                        reusable_surface_index(&existing_surfaces, &surface)
-                                            .is_some();
-                                    MenuItem::new(surface.label(), move |_, cx| {
-                                        let _ = weak.update(cx, |this, cx| {
-                                            this.open_right_panel_surface(open_surface.clone(), cx);
-                                        });
-                                    })
-                                    .icon(surface.icon_path())
-                                    .selected(already_open)
-                                })
-                                .collect()
-                        },
-                    )),
-            );
-        }
-
-        self.window_drag_region(
-            header.child(self.render_right_panel_toggle(cx)).children(
-                self.render_client_window_controls(
-                    super::window_chrome::WindowControlSide::Right,
-                    window,
-                    cx,
-                ),
-            ),
-            cx,
-        )
     }
 
     fn render_right_panel_chooser(&self, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -2554,7 +1690,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        if let Some(relative_path) = self.right_panel_files_selected_path.clone() {
+        if let Some(relative_path) = self.right_panel_ui.files_selected_path.clone() {
             self.render_right_panel_file(relative_path, panel_width, window, cx)
         } else {
             self.render_right_panel_working_tree(None, cx)
@@ -2577,7 +1713,7 @@ impl Michelle {
         let project_name = project.display_name();
         // Read only. The walk is filesystem I/O, so it happens in
         // `refresh_right_panel_working_tree`, never in a frame.
-        let entries = self.right_panel_working_tree.clone();
+        let entries = self.right_panel_model.working_tree.clone();
 
         let mut list = div().flex().flex_col().py(px(6.0));
         for entry in entries {
@@ -2628,8 +1764,9 @@ impl Michelle {
                 );
             list = if is_dir {
                 list.child(row.on_click(cx.listener(move |this, _, _, cx| {
-                    if !this.right_panel_expanded_paths.remove(&absolute_path) {
-                        this.right_panel_expanded_paths
+                    if !this.right_panel_ui.expanded_paths.remove(&absolute_path) {
+                        this.right_panel_ui
+                            .expanded_paths
                             .insert(absolute_path.clone());
                     }
                     this.refresh_right_panel_working_tree(cx);
@@ -2679,12 +1816,12 @@ impl Michelle {
                             .id("right-panel-files-scroll")
                             .size_full()
                             .overflow_y_scroll()
-                            .track_scroll(&self.right_panel_files_scroll_handle)
+                            .track_scroll(&self.right_panel_ui.files_scroll_handle)
                             .child(list),
                     )
                     .child(scrollbar::vertical(
-                        &self.right_panel_files_scroll_handle,
-                        &self.right_panel_files_scrollbar,
+                        &self.right_panel_ui.files_scroll_handle,
+                        &self.right_panel_ui.files_scrollbar,
                     )),
             )
     }
@@ -2697,7 +1834,8 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
-        let file_tree_width = fitted_file_tree_width(panel_width, self.right_panel_file_tree_width);
+        let file_tree_width =
+            fitted_file_tree_width(panel_width, self.right_panel_ui.file_tree_width);
         let (editor_state, writable, _) =
             self.ensure_right_panel_file_editor(&relative_path, window, cx);
 
@@ -2808,178 +1946,6 @@ impl Michelle {
             )
     }
 
-    fn ensure_right_panel_file_editor(
-        &mut self,
-        relative_path: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> (Entity<TextInput>, bool, bool) {
-        if let Some(editor) = self.right_panel_file_editors.get(relative_path) {
-            return (editor.state.clone(), editor.writable, editor.dirty);
-        }
-
-        // Reached from `render`, so the file cannot be read here. The editor
-        // starts empty and locked, and `read_right_panel_file_into_editor`
-        // fills it in from the background executor a frame or two later.
-        let language = file_highlighter_language(relative_path);
-        let state = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .multi_line()
-                .syntax(Some(language))
-                .read_only(true)
-        });
-
-        self.right_panel_file_editors.insert(
-            relative_path.to_owned(),
-            RightPanelFileEditor {
-                state: state.clone(),
-                disk_content: String::new(),
-                writable: false,
-                dirty: false,
-                reading: false,
-                read_epoch: 0,
-            },
-        );
-
-        // Dirty tracking follows content edits. Observing raw notifies would
-        // also fire for caret blinks and selection drags, cloning the whole
-        // file's text for each one.
-        let subscribed_path = relative_path.to_owned();
-        cx.subscribe(
-            &state,
-            move |this: &mut Self, state, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Edited) {
-                    return;
-                }
-                let value = state.read(cx).content().to_owned();
-                if let Some(editor) = this
-                    .right_panel_file_editors
-                    .get_mut(subscribed_path.as_str())
-                {
-                    let dirty = editor.writable && value != editor.disk_content;
-                    if editor.dirty != dirty {
-                        editor.dirty = dirty;
-                        cx.notify();
-                    }
-                }
-                // Any content change — typing, a replace, a reload from disk —
-                // moves the text out from under an open find's match list.
-                this.refresh_file_search_for_edit(subscribed_path.as_str(), cx);
-            },
-        )
-        .detach();
-
-        let focused_path = relative_path.to_owned();
-        cx.subscribe(&state, move |this: &mut Self, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Focus) {
-                this.reload_right_panel_file_if_clean(focused_path.as_str(), cx);
-            }
-        })
-        .detach();
-
-        self.read_right_panel_file_into_editor(relative_path.to_owned(), cx);
-        (state, false, false)
-    }
-
-    /// Reads a file into its editor off the UI thread.
-    ///
-    /// One `read_to_string` of an arbitrarily large file — hundreds of frames
-    /// for a big one — so it never runs in a frame. The editor keeps whatever
-    /// it is already showing until the read lands.
-    ///
-    /// The result is applied only if the same session is still selected and the
-    /// editor is still the one that asked, so a read started before a project
-    /// or session switch cannot write another workspace's text into the view.
-    fn read_right_panel_file_into_editor(&mut self, relative_path: String, cx: &mut Context<Self>) {
-        let project_path = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf);
-        let (Some(project_path), Some(session_id)) = (project_path, self.state.selected_session)
-        else {
-            // Nothing to read from. Say so in the editor rather than leaving it
-            // looking like an empty file.
-            if let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) {
-                editor.reading = false;
-                editor.disk_content = tr!("files.no_project_is_open");
-                editor.writable = false;
-                let state = editor.state.clone();
-                let content = editor.disk_content.clone();
-                state.update(cx, |state, cx| state.set_content(content, cx));
-            }
-            return;
-        };
-        let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) else {
-            return;
-        };
-        // A second asker would only duplicate the read and race to apply it.
-        if editor.reading {
-            return;
-        }
-        editor.reading = true;
-        editor.read_epoch += 1;
-        let epoch = editor.read_epoch;
-        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-
-        cx.spawn(async move |michelle, cx| {
-            let read = cx
-                .background_executor()
-                .spawn({
-                    let project_path = project_path.clone();
-                    let relative_path = relative_path.clone();
-                    async move { read_right_panel_file(&workspace, &project_path, &relative_path) }
-                })
-                .await;
-            michelle
-                .update(cx, |michelle, cx| {
-                    if michelle.state.selected_session != Some(session_id)
-                        || michelle
-                            .selected_workspace_path()
-                            .is_none_or(|path| path != project_path)
-                    {
-                        // The editor moved into another session's stored state, or
-                        // the project changed. Clear the flag so a later reload can
-                        // ask again, and drop the text.
-                        if let Some(editor) =
-                            michelle.right_panel_file_editors.get_mut(&relative_path)
-                        {
-                            editor.reading = false;
-                        }
-                        return;
-                    }
-                    let (content, writable) = read;
-                    let Some(editor) = michelle.right_panel_file_editors.get_mut(&relative_path)
-                    else {
-                        return;
-                    };
-                    // A save landed while the read was in flight, so this text
-                    // describes the file as it was before that save.
-                    if editor.read_epoch != epoch {
-                        return;
-                    }
-                    editor.reading = false;
-                    // An edit landed while the read was in flight; the user's text
-                    // wins over the copy on disk.
-                    if editor.dirty {
-                        return;
-                    }
-                    if editor.disk_content == content && editor.writable == writable {
-                        return;
-                    }
-                    editor.disk_content = content.clone();
-                    editor.writable = writable;
-                    editor.dirty = false;
-                    let state = editor.state.clone();
-                    state.update(cx, |state, cx| {
-                        state.set_read_only(!writable);
-                        state.set_content(content, cx);
-                    });
-                    cx.notify();
-                })
-                .ok();
-        })
-        .detach();
-    }
-
     /// The editor body: a line-number gutter beside soft-wrapped text.
     ///
     /// The gutter is *painted*, not laid out — one canvas that shapes only the
@@ -3024,7 +1990,7 @@ impl Michelle {
             heights.iter().fold(Pixels::ZERO, |total, h| total + *h)
         };
 
-        let viewport = self.right_panel_editor_scroll_handle.clone();
+        let viewport = self.right_panel_ui.editor_scroll_handle.clone();
         let number_color = theme.text_ghost;
         let gutter = canvas(
             |_, _, _| (),
@@ -3094,7 +2060,7 @@ impl Michelle {
                             .id(SharedString::from(format!("file-editor-{relative_path}")))
                             .size_full()
                             .overflow_y_scroll()
-                            .track_scroll(&self.right_panel_editor_scroll_handle)
+                            .track_scroll(&self.right_panel_ui.editor_scroll_handle)
                             .child(
                                 div()
                                     .w_full()
@@ -3114,8 +2080,8 @@ impl Michelle {
                             ),
                     )
                     .child(scrollbar::vertical(
-                        &self.right_panel_editor_scroll_handle,
-                        &self.right_panel_editor_scrollbar,
+                        &self.right_panel_ui.editor_scroll_handle,
+                        &self.right_panel_ui.editor_scrollbar,
                     )),
             )
     }
@@ -3142,7 +2108,7 @@ impl Michelle {
     ) -> Div {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
-        let mut cache = self.file_preview_markdown.borrow_mut();
+        let mut cache = self.right_panel_ui.file_preview_markdown.borrow_mut();
         if !matches!(cache.as_ref(), Some((cached, _)) if cached == relative_path) {
             *cache = Some((relative_path.to_owned(), MarkdownView::new()));
         }
@@ -3152,15 +2118,15 @@ impl Michelle {
             format!("file-preview-{relative_path}"),
             &palette,
             MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size),
-            self.file_preview_selection.clone(),
+            self.right_panel_ui.file_preview_selection.clone(),
         )
         .with_math_enabled(self.state.render_math)
         .with_math_context_menu(self.menu_handle("file-preview-math", cx))
-        .with_link_handler(self.markdown_link_handler.clone());
+        .with_link_handler(self.transcript_ui.markdown_link_handler.clone());
         let document = md::render::markdown(view, &ctx);
 
         let selection_input = {
-            let selection = self.file_preview_selection.clone();
+            let selection = self.right_panel_ui.file_preview_selection.clone();
             canvas(
                 |_, _, _| (),
                 move |_, _, window, _| md::render::install_selection_input(window, &selection),
@@ -3180,10 +2146,12 @@ impl Michelle {
                     .id(SharedString::from(format!("file-preview-{relative_path}")))
                     .size_full()
                     .overflow_y_scroll()
-                    .track_scroll(&self.file_preview_scroll_handle)
+                    .track_scroll(&self.right_panel_ui.file_preview_scroll_handle)
                     // Painted before the document, so the frame's selection
                     // registry holds exactly this frame's text elements.
-                    .child(md::render::frame_reset(self.file_preview_selection.clone()))
+                    .child(md::render::frame_reset(
+                        self.right_panel_ui.file_preview_selection.clone(),
+                    ))
                     .child(
                         div()
                             .px(px(16.0))
@@ -3195,128 +2163,9 @@ impl Michelle {
             )
             .child(selection_input)
             .child(scrollbar::vertical(
-                &self.file_preview_scroll_handle,
-                &self.file_preview_scrollbar,
+                &self.right_panel_ui.file_preview_scroll_handle,
+                &self.right_panel_ui.file_preview_scrollbar,
             ))
-    }
-
-    /// Picks up an external edit to a file the user has not modified here.
-    ///
-    /// Reaches the filesystem, so it queues a background read rather than
-    /// blocking; the editor keeps showing its current text until that lands.
-    fn reload_right_panel_file_if_clean(&mut self, relative_path: &str, cx: &mut Context<Self>) {
-        if self
-            .right_panel_file_editors
-            .get(relative_path)
-            .is_none_or(|editor| editor.dirty)
-        {
-            return;
-        }
-        self.read_right_panel_file_into_editor(relative_path.to_owned(), cx);
-    }
-
-    pub(super) fn reload_clean_right_panel_file_editors(&mut self, cx: &mut Context<Self>) {
-        let paths = self
-            .right_panel_file_editors
-            .iter()
-            .filter(|(_, editor)| !editor.dirty)
-            .map(|(path, _)| path.clone())
-            .collect::<Vec<_>>();
-        for path in paths {
-            self.reload_right_panel_file_if_clean(&path, cx);
-        }
-    }
-
-    pub(super) fn save_right_panel_file_action(
-        &mut self,
-        _: &SaveFile,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(relative_path) = self.visible_right_panel_file_path() else {
-            return;
-        };
-        let Some(project_path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
-            return;
-        };
-        let Some(editor) = self.right_panel_file_editors.get(&relative_path) else {
-            return;
-        };
-        if !editor.writable {
-            self.show_toast(if editor.reading {
-                tr!("files.could_not_save_opening", path = relative_path)
-            } else {
-                tr!("files.could_not_save_read_only", path = relative_path)
-            });
-            cx.notify();
-            return;
-        }
-
-        let content = editor.state.read(cx).content().to_owned();
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let epoch = if let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) {
-            editor.reading = false;
-            editor.read_epoch += 1;
-            editor.read_epoch
-        } else {
-            return;
-        };
-        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |michelle, cx| {
-            let result = cx
-                .background_executor()
-                .spawn({
-                    let project_path = project_path.clone();
-                    let relative_path = relative_path.clone();
-                    let content = content.clone();
-                    async move {
-                        match workspace.request(
-                            michelle_client::WorkspaceOperation::WriteTextFile {
-                                root: project_path,
-                                relative_path: PathBuf::from(relative_path),
-                                content,
-                            },
-                        )? {
-                            michelle_client::WorkspaceResult::Ack => Ok(()),
-                            _ => anyhow::bail!("the daemon returned an invalid file response"),
-                        }
-                    }
-                })
-                .await;
-            let _ = michelle.update(cx, |michelle, cx| {
-                if michelle.state.selected_session != Some(session_id)
-                    || michelle
-                        .selected_workspace_path()
-                        .is_none_or(|path| path != project_path)
-                {
-                    return;
-                }
-                match result {
-                    Ok(()) => {
-                        if let Some(editor) =
-                            michelle.right_panel_file_editors.get_mut(&relative_path)
-                            && editor.read_epoch == epoch
-                        {
-                            let current = editor.state.read(cx).content();
-                            editor.disk_content = content.clone();
-                            editor.dirty = current != content;
-                        }
-                    }
-                    Err(error) => michelle.show_toast(tr!(
-                        "files.could_not_save",
-                        path = relative_path,
-                        error = error.to_string()
-                    )),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     fn render_right_panel_diff(
@@ -3327,11 +2176,11 @@ impl Michelle {
     ) -> Div {
         let theme = Theme::current(cx);
         let toolbar = self.render_right_panel_diff_toolbar(cx);
-        let content = match self.right_panel_diff_snapshot.clone() {
+        let content = match self.right_panel_model.diff_snapshot.clone() {
             Some(snapshot) => {
                 let tree_width = fitted_file_tree_width(
                     panel_width,
-                    self.right_panel_file_tree_width.max(220.0),
+                    self.right_panel_ui.file_tree_width.max(220.0),
                 );
                 div()
                     .flex_1()
@@ -3357,17 +2206,20 @@ impl Michelle {
                     )
                     .into_any_element()
             }
-            None if self.right_panel_diff_loading => self
+            None if self.right_panel_model.diff_loading => self
                 .render_right_panel_empty_message(
                     tr!("diff.loading"),
                     tr!("diff.loading_description"),
                     cx,
                 )
                 .into_any_element(),
-            None if self.right_panel_diff_error.is_some() => self
+            None if self.right_panel_model.diff_error.is_some() => self
                 .render_right_panel_empty_message(
                     tr!("diff.unavailable"),
-                    self.right_panel_diff_error.clone().unwrap_or_default(),
+                    self.right_panel_model
+                        .diff_error
+                        .clone()
+                        .unwrap_or_default(),
                     cx,
                 )
                 .into_any_element(),
@@ -3388,7 +2240,7 @@ impl Michelle {
             .flex()
             .flex_col()
             .child(md::render::frame_reset(
-                self.right_panel_diff_selection.clone(),
+                self.right_panel_ui.diff_selection.clone(),
             ))
             .child(toolbar)
             .child(content)
@@ -3397,7 +2249,7 @@ impl Michelle {
 
     fn render_right_panel_diff_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let selected = self.right_panel_diff_source;
+        let selected = self.right_panel_model.diff_source;
         let latest_turn = self.latest_review_turn_source();
         let source_label = self.review_diff_source_label(selected);
         let weak = cx.entity().downgrade();
@@ -3463,14 +2315,15 @@ impl Michelle {
         );
 
         let (additions, deletions, truncated) = self
-            .right_panel_diff_snapshot
+            .right_panel_model
+            .diff_snapshot
             .as_ref()
             .map_or((0, 0, false), |snapshot| {
                 (snapshot.additions, snapshot.deletions, snapshot.truncated)
             });
         let refresh_focus = self.transcript_control_focus("right-panel-diff-refresh", cx);
-        let refresh_icon: AnyElement = if self.right_panel_diff_loading {
-            motion::spin(icon("arrow.clockwise", 12.0, theme.text_tertiary))
+        let refresh_icon: AnyElement = if self.right_panel_model.diff_loading {
+            motion::spinner(12.0, theme.text_tertiary)
         } else {
             icon("arrow.clockwise", 12.0, theme.text_tertiary).into_any_element()
         };
@@ -3558,7 +2411,7 @@ impl Michelle {
             .overflow_hidden()
             .child(
                 list(
-                    self.right_panel_diff_list_state.clone(),
+                    self.right_panel_ui.diff_list_state.clone(),
                     move |index, _window, cx| {
                         entity
                             .upgrade()
@@ -3574,8 +2427,8 @@ impl Michelle {
             )
             .when_some(sticky_header, |container, header| container.child(header))
             .child(scrollbar::vertical(
-                &self.right_panel_diff_list_state,
-                &self.right_panel_diff_scrollbar,
+                &self.right_panel_ui.diff_list_state,
+                &self.right_panel_ui.diff_scrollbar,
             ))
             .into_any_element()
     }
@@ -3585,7 +2438,7 @@ impl Michelle {
         snapshot: &ReviewDiffSnapshot,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let scroll_top = self.right_panel_diff_list_state.logical_scroll_top();
+        let scroll_top = self.right_panel_ui.diff_list_state.logical_scroll_top();
         let (header_index, next_header_index) = snapshot.file_headers_around(scroll_top.item_ix)?;
         let needs_sticky = header_index < scroll_top.item_ix
             || (header_index == scroll_top.item_ix && scroll_top.offset_in_item > px(0.));
@@ -3598,9 +2451,10 @@ impl Michelle {
         let top_offset = next_header_index
             .and_then(|next_header_index| {
                 let bounds = self
-                    .right_panel_diff_list_state
+                    .right_panel_ui
+                    .diff_list_state
                     .bounds_for_item(next_header_index)?;
-                let viewport = self.right_panel_diff_list_state.viewport_bounds();
+                let viewport = self.right_panel_ui.diff_list_state.viewport_bounds();
                 let y_in_viewport = bounds.origin.y - viewport.origin.y;
                 (y_in_viewport < bounds.size.height).then_some(y_in_viewport - bounds.size.height)
             })
@@ -3676,7 +2530,7 @@ impl Michelle {
     }
 
     fn render_right_panel_diff_line(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        let Some(snapshot) = self.right_panel_diff_snapshot.as_ref() else {
+        let Some(snapshot) = self.right_panel_model.diff_snapshot.as_ref() else {
             return div().into_any_element();
         };
         let Some(line) = snapshot.lines.get(index) else {
@@ -3854,7 +2708,7 @@ impl Michelle {
                 line,
                 index,
                 "review-diff",
-                &self.right_panel_diff_selection,
+                &self.right_panel_ui.diff_selection,
                 style,
                 &theme,
             ),
@@ -3929,28 +2783,10 @@ impl Michelle {
             }))
     }
 
-    fn expand_right_panel_diff_gap(
-        &mut self,
-        line_index: usize,
-        direction: crate::review_diff::ExpansionDirection,
-        cx: &mut Context<Self>,
-    ) {
-        let expansion = self
-            .right_panel_diff_snapshot
-            .as_mut()
-            .and_then(|snapshot| Arc::make_mut(snapshot).expand_gap(line_index, direction));
-        let Some(expansion) = expansion else {
-            return;
-        };
-        self.right_panel_diff_list_state
-            .splice(line_index..line_index + 1, expansion.replacement_count);
-        cx.notify();
-    }
-
     /// One listener set covers every selectable code line registered while
     /// the virtualized Review list paints this frame.
     fn right_panel_diff_selection_input(&self) -> impl IntoElement {
-        let selection = self.right_panel_diff_selection.clone();
+        let selection = self.right_panel_ui.diff_selection.clone();
         canvas(
             |_, _, _| (),
             move |_, _, window, _| md::render::install_selection_input(window, &selection),
@@ -3982,7 +2818,7 @@ impl Michelle {
                     .child(
                         TextField::new(
                             "right-panel-diff-filter",
-                            self.right_panel_diff_filter.clone(),
+                            self.right_panel_ui.diff_filter.clone(),
                         )
                         .icon("magnifyingglass", 13.0)
                         .w_full(),
@@ -4003,7 +2839,7 @@ impl Michelle {
                     }))
                     .child(
                         list(
-                            self.right_panel_diff_tree_list_state.clone(),
+                            self.right_panel_ui.diff_tree_list_state.clone(),
                             move |index, _window, cx| {
                                 entity
                                     .upgrade()
@@ -4023,8 +2859,8 @@ impl Michelle {
                         .py(px(4.0)),
                     )
                     .child(scrollbar::vertical(
-                        &self.right_panel_diff_tree_list_state,
-                        &self.right_panel_diff_tree_scrollbar,
+                        &self.right_panel_ui.diff_tree_list_state,
+                        &self.right_panel_ui.diff_tree_scrollbar,
                     )),
             )
     }
@@ -4035,11 +2871,17 @@ impl Michelle {
         tree_focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(row) = self.right_panel_diff_tree_rows.borrow().get(index).cloned() else {
+        let Some(row) = self
+            .right_panel_ui
+            .diff_tree_rows
+            .borrow()
+            .get(index)
+            .cloned()
+        else {
             return div().h(px(30.0)).into_any_element();
         };
         let theme = Theme::current(cx);
-        let cursor = tree_focused && self.right_panel_diff_tree_cursor == Some(index);
+        let cursor = tree_focused && self.right_panel_ui.diff_tree_cursor == Some(index);
         match row {
             ReviewDiffTreeRow::Directory {
                 path,
@@ -4090,13 +2932,13 @@ impl Michelle {
                         .on_click(cx.listener(move |this, _, window, cx| {
                             let focus = this.transcript_control_focus("right-panel-diff-tree", cx);
                             focus.focus(window, cx);
-                            this.right_panel_diff_tree_cursor = Some(index);
+                            this.right_panel_ui.diff_tree_cursor = Some(index);
                             this.toggle_right_panel_diff_directory(path.clone(), cx);
                         })),
                 )
                 .into_any_element(),
             ReviewDiffTreeRow::File { file_index, depth } => {
-                let Some(snapshot) = self.right_panel_diff_snapshot.as_ref() else {
+                let Some(snapshot) = self.right_panel_model.diff_snapshot.as_ref() else {
                     return div().h(px(30.0)).into_any_element();
                 };
                 let Some(file) = snapshot.files.get(file_index) else {
@@ -4104,7 +2946,7 @@ impl Michelle {
                 };
                 let path = file.path.clone();
                 let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
-                let selected = self.right_panel_diff_selected_file == Some(file_index);
+                let selected = self.right_panel_ui.diff_selected_file == Some(file_index);
                 let (status, status_color) = match file.status {
                     crate::review_diff::FileStatus::Added => ("A", theme.success),
                     crate::review_diff::FileStatus::Deleted => ("D", theme.danger),
@@ -4177,7 +3019,7 @@ impl Michelle {
                                 let focus =
                                     this.transcript_control_focus("right-panel-diff-tree", cx);
                                 focus.focus(window, cx);
-                                this.right_panel_diff_tree_cursor = Some(index);
+                                this.right_panel_ui.diff_tree_cursor = Some(index);
                                 this.select_right_panel_diff_file(file_index, cx);
                             })),
                     )
@@ -4220,110 +3062,6 @@ impl Michelle {
             )
     }
 
-    /// Re-reads whichever workspace surface is on screen.
-    pub(super) fn refresh_workspace_surfaces(&mut self, cx: &mut Context<Self>) {
-        match self.active_right_panel_surface() {
-            Some(RightPanelSurface::Diff) => self.refresh_right_panel_diff(cx),
-            Some(RightPanelSurface::Files | RightPanelSurface::File(_)) => {
-                self.refresh_right_panel_working_tree(cx)
-            }
-            _ => {}
-        }
-    }
-
-    /// Re-walks the project's working tree.
-    ///
-    /// `read_dir` plus a `stat` per entry, recursively over expanded
-    /// directories — filesystem I/O, so it runs on the background executor and
-    /// the panel keeps drawing the previous listing until the result lands.
-    /// Called when the tree's inputs change, never from a frame.
-    fn refresh_right_panel_working_tree(&mut self, cx: &mut Context<Self>) {
-        let Some(project_path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
-            self.right_panel_working_tree.clear();
-            return;
-        };
-        // The tree on disk moves under us, and the expanded set may just have
-        // changed, so a cached listing is only good until something asks again.
-        self.working_trees.invalidate(&project_path);
-        match self.working_trees.read(&project_path) {
-            Query::Ready(entries) => self.right_panel_working_tree = (*entries).clone(),
-            Query::Pending => {}
-            Query::Missing(token) => {
-                let expanded = self.right_panel_expanded_paths.clone();
-                let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-                cx.spawn(async move |michelle, cx| {
-                    let entries = cx
-                        .background_executor()
-                        .spawn({
-                            let path = project_path.clone();
-                            async move {
-                                match workspace.request(
-                                    michelle_client::WorkspaceOperation::ListTree {
-                                        root: path,
-                                        expanded_paths: expanded.into_iter().collect(),
-                                    },
-                                ) {
-                                    Ok(michelle_client::WorkspaceResult::WorkingTree {
-                                        entries,
-                                    }) => entries
-                                        .into_iter()
-                                        .map(|entry| WorkingTreeEntry {
-                                            file_icon: (!entry.is_dir)
-                                                .then(|| file_icon_for_name(&entry.name)),
-                                            relative_path: entry.relative_path,
-                                            absolute_path: entry.absolute_path,
-                                            name: entry.name,
-                                            is_dir: entry.is_dir,
-                                            expanded: entry.expanded,
-                                            depth: entry.depth,
-                                        })
-                                        .collect(),
-                                    Ok(_) | Err(_) => Vec::new(),
-                                }
-                            }
-                        })
-                        .await;
-                    michelle
-                        .update(cx, |michelle, cx| {
-                            if michelle.working_trees.fulfill(token, entries.clone())
-                                && michelle
-                                    .selected_workspace_path()
-                                    .is_some_and(|path| path == project_path)
-                            {
-                                michelle.right_panel_working_tree = entries;
-                                cx.notify();
-                            }
-                        })
-                        .ok();
-                })
-                .detach();
-            }
-        }
-    }
-
-    fn latest_review_turn_source(&self) -> Option<ReviewDiffSource> {
-        let session = self.selected_session()?;
-        session
-            .turns
-            .iter()
-            .rev()
-            .find(|turn| {
-                turn.turn_count > 0
-                    && turn
-                        .checkpoint
-                        .as_ref()
-                        .is_some_and(|checkpoint| checkpoint.status == CheckpointStatus::Ready)
-            })
-            .map(|turn| ReviewDiffSource::LastTurn {
-                session_id: session.id,
-                turn_id: turn.id,
-                turn_count: turn.turn_count,
-            })
-    }
-
     fn review_diff_source_label(&self, source: ReviewDiffSource) -> String {
         match source {
             ReviewDiffSource::LastTurn { .. }
@@ -4342,164 +3080,31 @@ impl Michelle {
         }
     }
 
-    pub(super) fn set_right_panel_diff_source(
-        &mut self,
-        source: ReviewDiffSource,
-        cx: &mut Context<Self>,
-    ) {
-        if self.right_panel_diff_source != source {
-            self.right_panel_diff_selection.clear();
-            self.right_panel_diff_source = source;
-            self.right_panel_diff_snapshot = None;
-            self.right_panel_diff_error = None;
-            self.right_panel_diff_selected_file = None;
-            self.right_panel_diff_expanded_paths.clear();
-            self.right_panel_diff_tree_cursor = None;
-            self.right_panel_diff_tree_rows.borrow_mut().clear();
-            self.right_panel_diff_tree_list_state.reset(0);
-            self.right_panel_diff_list_state.reset(0);
-        }
-        self.open_right_panel_surface(RightPanelSurface::Diff, cx);
-    }
-
-    /// Captures one stable Git range and turns it into render-ready rows. Git,
-    /// patch parsing, and syntax tokenization all stay off the UI thread; the
-    /// generation check prevents an old source or session from landing late.
-    fn refresh_right_panel_diff(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
-            self.right_panel_diff_selection.clear();
-            self.right_panel_diff_snapshot = None;
-            self.right_panel_diff_loading = false;
-            self.right_panel_diff_error = Some(tr!("diff.unavailable"));
-            return;
-        };
-        let Some(project_path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
-            self.right_panel_diff_selection.clear();
-            self.right_panel_diff_snapshot = None;
-            self.right_panel_diff_loading = false;
-            self.right_panel_diff_error = Some(tr!("diff.unavailable"));
-            return;
-        };
-
-        self.right_panel_diff_generation = self.right_panel_diff_generation.wrapping_add(1);
-        let generation = self.right_panel_diff_generation;
-        let source = self.right_panel_diff_source;
-        let had_snapshot = self.right_panel_diff_snapshot.is_some();
-        let previous_directories = self
-            .right_panel_diff_snapshot
-            .as_ref()
-            .map_or_else(HashSet::new, |snapshot| {
-                review_diff_directory_paths(&snapshot.files)
-            });
-        let selected_path = self.right_panel_diff_selected_file.and_then(|index| {
-            self.right_panel_diff_snapshot
-                .as_ref()
-                .and_then(|snapshot| snapshot.files.get(index))
-                .map(|file| file.path.clone())
-        });
-        self.right_panel_diff_loading = true;
-        self.right_panel_diff_error = None;
-        cx.notify();
-
-        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |michelle, cx| {
-            let result = cx
-                .background_executor()
-                .spawn({
-                    let project_path = project_path.clone();
-                    async move {
-                        match workspace.request(
-                            michelle_client::WorkspaceOperation::CollectReviewDiff {
-                                cwd: project_path,
-                                source: crate::review_diff::wire_source(source),
-                            },
-                        )? {
-                            michelle_client::WorkspaceResult::ReviewDiff { data } => {
-                                Ok(crate::review_diff::parse_collected(
-                                    source,
-                                    &data.numstat,
-                                    &data.patch,
-                                    data.complete_context,
-                                ))
-                            }
-                            _ => anyhow::bail!("the daemon returned an invalid diff response"),
-                        }
-                    }
-                })
-                .await;
-            michelle
-                .update(cx, |michelle, cx| {
-                    let still_current = michelle.state.selected_session == Some(session_id)
-                        && michelle.right_panel_diff_generation == generation
-                        && michelle.right_panel_diff_source == source
-                        && michelle
-                            .selected_workspace_path()
-                            .is_some_and(|path| path == project_path);
-                    if !still_current {
-                        return;
-                    }
-
-                    michelle.right_panel_diff_loading = false;
-                    match result {
-                        Ok(snapshot) => {
-                            michelle.right_panel_diff_selection.clear();
-                            let directories = review_diff_directory_paths(&snapshot.files);
-                            if had_snapshot {
-                                michelle
-                                    .right_panel_diff_expanded_paths
-                                    .retain(|path| directories.contains(path));
-                                michelle
-                                    .right_panel_diff_expanded_paths
-                                    .extend(directories.difference(&previous_directories).cloned());
-                            } else {
-                                michelle.right_panel_diff_expanded_paths = directories;
-                            }
-                            michelle.right_panel_diff_selected_file = selected_path
-                                .as_deref()
-                                .and_then(|path| {
-                                    snapshot.files.iter().position(|file| file.path == path)
-                                })
-                                .or_else(|| (!snapshot.files.is_empty()).then_some(0));
-                            let line_count = snapshot.lines.len();
-                            michelle.right_panel_diff_snapshot = Some(Arc::new(snapshot));
-                            michelle.right_panel_diff_error = None;
-                            michelle.right_panel_diff_list_state.reset(line_count);
-                            michelle.sync_right_panel_diff_tree_rows(cx);
-                        }
-                        Err(error) => {
-                            let message = error.to_string();
-                            if michelle.right_panel_diff_snapshot.is_some() {
-                                michelle.show_toast(tr!("diff.refresh_failed", error = message));
-                            } else {
-                                michelle.right_panel_diff_error = Some(message);
-                            }
-                        }
-                    }
-                    cx.notify();
-                })
-                .ok();
-        })
-        .detach();
-    }
-
     pub(super) fn sync_right_panel_diff_tree_rows(&mut self, cx: &mut Context<Self>) {
-        let filter = self.right_panel_diff_filter.read(cx).content().to_owned();
-        let previous_cursor_row = self
-            .right_panel_diff_tree_cursor
-            .and_then(|index| self.right_panel_diff_tree_rows.borrow().get(index).cloned());
-        let rows = self
-            .right_panel_diff_snapshot
-            .as_ref()
-            .map_or_else(Vec::new, |snapshot| {
-                review_diff_tree_rows(
-                    &snapshot.files,
-                    &self.right_panel_diff_expanded_paths,
-                    &filter,
-                )
-            });
+        let filter = self
+            .right_panel_ui
+            .diff_filter
+            .read(cx)
+            .content()
+            .to_owned();
+        let previous_cursor_row = self.right_panel_ui.diff_tree_cursor.and_then(|index| {
+            self.right_panel_ui
+                .diff_tree_rows
+                .borrow()
+                .get(index)
+                .cloned()
+        });
+        let rows =
+            self.right_panel_model
+                .diff_snapshot
+                .as_ref()
+                .map_or_else(Vec::new, |snapshot| {
+                    review_diff_tree_rows(
+                        &snapshot.files,
+                        &self.right_panel_ui.diff_expanded_paths,
+                        &filter,
+                    )
+                });
         let cursor = previous_cursor_row
             .as_ref()
             .and_then(|previous| {
@@ -4520,7 +3125,7 @@ impl Michelle {
                 })
             })
             .or_else(|| {
-                self.right_panel_diff_selected_file.and_then(|selected| {
+                self.right_panel_ui.diff_selected_file.and_then(|selected| {
                     rows.iter().position(|row| {
                         matches!(
                             row,
@@ -4532,24 +3137,26 @@ impl Michelle {
             })
             .or_else(|| (!rows.is_empty()).then_some(0));
         let row_count = rows.len();
-        *self.right_panel_diff_tree_rows.borrow_mut() = rows;
-        self.right_panel_diff_tree_cursor = cursor;
-        self.right_panel_diff_tree_list_state
+        *self.right_panel_ui.diff_tree_rows.borrow_mut() = rows;
+        self.right_panel_ui.diff_tree_cursor = cursor;
+        self.right_panel_ui
+            .diff_tree_list_state
             .reset_with_uniform_height(row_count, px(30.0));
     }
 
     fn toggle_right_panel_diff_directory(&mut self, path: String, cx: &mut Context<Self>) {
-        if !self.right_panel_diff_expanded_paths.remove(&path) {
-            self.right_panel_diff_expanded_paths.insert(path);
+        if !self.right_panel_ui.diff_expanded_paths.remove(&path) {
+            self.right_panel_ui.diff_expanded_paths.insert(path);
         }
         self.sync_right_panel_diff_tree_rows(cx);
         cx.notify();
     }
 
     fn select_right_panel_diff_file(&mut self, file_index: usize, cx: &mut Context<Self>) {
-        self.right_panel_diff_selected_file = Some(file_index);
+        self.right_panel_ui.diff_selected_file = Some(file_index);
         if let Some(line) = self
-            .right_panel_diff_snapshot
+            .right_panel_model
+            .diff_snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.files.get(file_index))
             .and_then(|file| file.diff_line)
@@ -4558,7 +3165,8 @@ impl Michelle {
             // which can reveal only the file header and leave its diff body
             // off-screen. A tree selection is an explicit jump, so top-anchor
             // the header and expose the content immediately below it.
-            self.right_panel_diff_list_state
+            self.right_panel_ui
+                .diff_list_state
                 .scroll_to(gpui::ListOffset {
                     item_ix: line,
                     offset_in_item: px(0.0),
@@ -4573,12 +3181,13 @@ impl Michelle {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.right_panel_diff_tree_rows.borrow().clone();
+        let rows = self.right_panel_ui.diff_tree_rows.borrow().clone();
         if rows.is_empty() {
             return;
         }
         let current = self
-            .right_panel_diff_tree_cursor
+            .right_panel_ui
+            .diff_tree_cursor
             .filter(|index| *index < rows.len())
             .unwrap_or(0);
         let key = event.keystroke.key.as_str();
@@ -4646,11 +3255,25 @@ impl Michelle {
             _ => return,
         };
         if let Some(target) = target {
-            self.right_panel_diff_tree_cursor = Some(target);
-            self.right_panel_diff_tree_list_state
+            self.right_panel_ui.diff_tree_cursor = Some(target);
+            self.right_panel_ui
+                .diff_tree_list_state
                 .scroll_to_reveal_item(target);
             cx.notify();
         }
         cx.stop_propagation();
+    }
+}
+
+impl Michelle {
+    pub(super) fn save_right_panel_file_action(
+        &mut self,
+        _: &SaveFile,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(path) = self.visible_right_panel_file_path() {
+            self.save_right_panel_file(path, cx);
+        }
     }
 }

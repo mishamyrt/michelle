@@ -7,10 +7,6 @@ const OUTPUT_CACHE_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 /// last detached work settled. Claude re-enters the model a few seconds after
 /// the settle; a first token that slow is a wake in progress, not a no-show.
 const BACKGROUND_RESUME_GRACE: Duration = Duration::from_secs(30);
-const BACKGROUND_SUMMARY_MENU_ID: &str = "background-work-summary";
-const OPEN_IN_MENU_ID: &str = "open-in-app";
-const TASK_ID_COPY_CONTROL_ID: &str = "background-summary-copy-task-id";
-const AGENT_THREAD_ID_COPY_CONTROL_ID: &str = "background-summary-copy-agent-thread-id";
 
 #[derive(Default)]
 pub(super) struct BackgroundWorkRegistry {
@@ -36,44 +32,6 @@ impl Default for BackgroundOutputViewport {
         Self {
             scroll_handle: ScrollHandle::new(),
             scrollbar: ScrollbarState::new(),
-        }
-    }
-}
-
-#[derive(Clone)]
-struct BackgroundSummaryEntry {
-    item: BackgroundWorkItem,
-    row_focus: FocusHandle,
-    stop_focus: FocusHandle,
-}
-
-#[derive(Clone)]
-struct EnvironmentSummary {
-    commit_status: Option<String>,
-    commit_focus: FocusHandle,
-    compare_focus: FocusHandle,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct TaskIdentifiers {
-    task_id: Uuid,
-    agent_cli_thread_id: Option<String>,
-}
-
-#[derive(Clone)]
-struct TaskIdentifierSection {
-    values: TaskIdentifiers,
-    task_id_copy_focus: FocusHandle,
-    agent_cli_thread_id_copy_focus: FocusHandle,
-    task_id_copied: bool,
-    agent_cli_thread_id_copied: bool,
-}
-
-impl From<&AgentSession> for TaskIdentifiers {
-    fn from(session: &AgentSession) -> Self {
-        Self {
-            task_id: session.id,
-            agent_cli_thread_id: session.provider_native_id().map(str::to_owned),
         }
     }
 }
@@ -323,7 +281,7 @@ impl BackgroundWorkRegistry {
             })
     }
 
-    fn ordered_items(&self) -> Vec<&BackgroundWorkItem> {
+    pub(super) fn ordered_items(&self) -> Vec<&BackgroundWorkItem> {
         self.order
             .iter()
             .rev()
@@ -418,7 +376,7 @@ pub(super) fn work_status_label(status: BackgroundWorkStatus) -> String {
     }
 }
 
-fn work_status_icon(status: BackgroundWorkStatus) -> &'static str {
+pub(super) fn work_status_icon(status: BackgroundWorkStatus) -> &'static str {
     match status {
         BackgroundWorkStatus::Starting
         | BackgroundWorkStatus::Running
@@ -430,29 +388,11 @@ fn work_status_icon(status: BackgroundWorkStatus) -> &'static str {
     }
 }
 
-fn background_summary_process_status_icon(
-    kind: BackgroundWorkKind,
+pub(super) fn rendered_work_status_icon(
     status: BackgroundWorkStatus,
-) -> Option<&'static str> {
-    if !matches!(
-        kind,
-        BackgroundWorkKind::Process | BackgroundWorkKind::Monitor
-    ) {
-        return None;
-    }
-
-    match status {
-        BackgroundWorkStatus::Starting
-        | BackgroundWorkStatus::Running
-        | BackgroundWorkStatus::Monitoring
-        | BackgroundWorkStatus::Completed
-        | BackgroundWorkStatus::Failed => Some(work_status_icon(status)),
-        _ => None,
-    }
-}
-
-fn rendered_work_status_icon(status: BackgroundWorkStatus, size: f32, color: Hsla) -> AnyElement {
-    let icon = icon(work_status_icon(status), size, color);
+    size: f32,
+    color: Hsla,
+) -> AnyElement {
     if matches!(
         status,
         BackgroundWorkStatus::Starting
@@ -460,9 +400,9 @@ fn rendered_work_status_icon(status: BackgroundWorkStatus, size: f32, color: Hsl
             | BackgroundWorkStatus::Monitoring
     ) {
         // Background work runs for minutes; don't price its pane at full rate.
-        motion::spin_slow(icon)
+        motion::spinner_slow(size, color)
     } else {
-        icon.into_any_element()
+        icon(work_status_icon(status), size, color).into_any_element()
     }
 }
 
@@ -505,7 +445,9 @@ fn work_elapsed(item: &BackgroundWorkItem) -> String {
 
 impl Michelle {
     pub(super) fn background_output_refresh_delay(&self) -> Option<Duration> {
-        self.background_work
+        self.sessions
+            .runtime
+            .background_work
             .values()
             .filter_map(BackgroundWorkRegistry::output_refresh_delay)
             .min()
@@ -557,14 +499,16 @@ impl Michelle {
         session_id: Uuid,
         event: BackgroundWorkEvent,
     ) {
-        self.background_work
+        self.sessions
+            .runtime
+            .background_work
             .entry(session_id)
             .or_default()
             .apply(event);
     }
 
     pub(super) fn mark_background_work_lost(&mut self, session_id: Uuid) {
-        if let Some(registry) = self.background_work.get_mut(&session_id) {
+        if let Some(registry) = self.sessions.runtime.background_work.get_mut(&session_id) {
             registry.mark_live_lost();
         }
     }
@@ -574,25 +518,31 @@ impl Michelle {
         session_id: Uuid,
         status: BackgroundWorkStatus,
     ) {
-        if let Some(registry) = self.background_work.get_mut(&session_id) {
+        if let Some(registry) = self.sessions.runtime.background_work.get_mut(&session_id) {
             registry.settle_foreground(status);
         }
     }
 
     pub(super) fn session_has_live_background_work(&self, session_id: Uuid) -> bool {
-        self.background_work
+        self.sessions
+            .runtime
+            .background_work
             .get(&session_id)
             .is_some_and(BackgroundWorkRegistry::has_live)
     }
 
     pub(super) fn session_has_live_detached_work(&self, session_id: Uuid) -> bool {
-        self.background_work
+        self.sessions
+            .runtime
+            .background_work
             .get(&session_id)
             .is_some_and(BackgroundWorkRegistry::has_live_detached)
     }
 
     pub(super) fn background_work_counts(&self, session_id: Uuid) -> (usize, usize) {
-        self.background_work
+        self.sessions
+            .runtime
+            .background_work
             .get(&session_id)
             .map(BackgroundWorkRegistry::counts)
             .unwrap_or_default()
@@ -603,7 +553,9 @@ impl Michelle {
         session_id: Uuid,
         activity_id: &str,
     ) -> Option<&BackgroundWorkItem> {
-        self.background_work
+        self.sessions
+            .runtime
+            .background_work
             .get(&session_id)?
             .items
             .values()
@@ -612,16 +564,18 @@ impl Michelle {
 
     pub(super) fn maybe_refresh_background_work(&mut self, cx: &mut Context<Self>) {
         let mut output_changed = false;
-        for registry in self.background_work.values_mut() {
+        for registry in self.sessions.runtime.background_work.values_mut() {
             output_changed |= registry.refresh_output_cache();
         }
         if output_changed {
             cx.notify();
         }
         let selected = self.state.selected_session;
-        for (session_id, runtime) in &mut self.runtimes {
+        for (session_id, runtime) in &mut self.sessions.runtime.runtimes {
             let should_refresh = selected == Some(*session_id)
                 || self
+                    .sessions
+                    .runtime
                     .background_work
                     .get(session_id)
                     .is_some_and(BackgroundWorkRegistry::has_live);
@@ -633,10 +587,11 @@ impl Michelle {
             }
         }
 
-        if self.last_background_work_tick.elapsed() >= BACKGROUND_WORK_TICK_INTERVAL
+        if self.sessions.runtime.last_background_work_tick.elapsed()
+            >= BACKGROUND_WORK_TICK_INTERVAL
             && selected.is_some_and(|session_id| self.session_has_live_background_work(session_id))
         {
-            self.last_background_work_tick = Instant::now();
+            self.sessions.runtime.last_background_work_tick = Instant::now();
             cx.notify();
         }
 
@@ -645,6 +600,8 @@ impl Michelle {
         // left there is nothing to wait for, so the held turn settles the way
         // its result would have — through the ordinary finish path.
         let unparked = self
+            .sessions
+            .runtime
             .runtimes
             .iter()
             .filter(|(_, runtime)| runtime.last_active_at.elapsed() >= BACKGROUND_RESUME_GRACE)
@@ -660,7 +617,7 @@ impl Michelle {
             })
             .collect::<Vec<_>>();
         for session_id in unparked {
-            let Some(mut runtime) = self.runtimes.remove(&session_id) else {
+            let Some(mut runtime) = self.sessions.runtime.runtimes.remove(&session_id) else {
                 continue;
             };
             let keep_runtime = self.handle_driver_event(
@@ -674,7 +631,7 @@ impl Michelle {
                 cx,
             );
             if keep_runtime {
-                self.runtimes.insert(session_id, runtime);
+                self.sessions.runtime.runtimes.insert(session_id, runtime);
             }
             self.state.mark_session_dirty(session_id);
             cx.notify();
@@ -688,6 +645,8 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) {
         let control_id = self
+            .sessions
+            .runtime
             .background_work
             .get(&session_id)
             .and_then(|registry| registry.items.get(&key))
@@ -697,6 +656,8 @@ impl Michelle {
             return;
         };
         let Some(driver) = self
+            .sessions
+            .runtime
             .runtimes
             .get(&session_id)
             .map(|runtime| runtime.driver.clone())
@@ -720,6 +681,8 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) {
         let Some(title) = self
+            .sessions
+            .runtime
             .background_work
             .get(&session_id)
             .and_then(|registry| registry.items.get(&key))
@@ -731,196 +694,6 @@ impl Michelle {
             self.select_session(session_id, cx);
         }
         self.open_right_panel_surface(RightPanelSurface::BackgroundWork { key, title }, cx);
-    }
-
-    pub(super) fn render_background_work_summary(&self, cx: &mut Context<Self>) -> AnyElement {
-        let session = self.selected_session();
-        let session_id = session.map(|session| session.id);
-        let identifiers = session.map(|session| TaskIdentifierSection {
-            values: TaskIdentifiers::from(session),
-            task_id_copy_focus: self.transcript_control_focus(TASK_ID_COPY_CONTROL_ID, cx),
-            agent_cli_thread_id_copy_focus: self
-                .transcript_control_focus(AGENT_THREAD_ID_COPY_CONTROL_ID, cx),
-            task_id_copied: self.control_was_copied(TASK_ID_COPY_CONTROL_ID),
-            agent_cli_thread_id_copied: self.control_was_copied(AGENT_THREAD_ID_COPY_CONTROL_ID),
-        });
-        let entries = session_id
-            .and_then(|session_id| self.background_work.get(&session_id))
-            .map(|registry| {
-                registry
-                    .ordered_items()
-                    .into_iter()
-                    .cloned()
-                    .map(|item| {
-                        let kind = item.key.kind as u8;
-                        let provider_id = &item.key.provider_id;
-                        BackgroundSummaryEntry {
-                            row_focus: self.transcript_control_focus(
-                                format!("background-summary-row-{provider_id}-{kind}"),
-                                cx,
-                            ),
-                            stop_focus: self.transcript_control_focus(
-                                format!("background-summary-stop-{provider_id}-{kind}"),
-                                cx,
-                            ),
-                            item,
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let workspace_path = session
-            .and_then(|session| self.workspace_path_for_session(session))
-            .or_else(|| {
-                self.selected_project()
-                    .map(|project| project.path.as_path())
-            });
-        let snapshot = workspace_path.and_then(|path| {
-            self.visible_branch_snapshot
-                .as_ref()
-                .filter(|(snapshot_path, _)| snapshot_path == path)
-                .map(|(_, snapshot)| snapshot)
-        });
-        let change_counts = snapshot
-            .map(|snapshot| (snapshot.additions, snapshot.deletions))
-            .filter(|(additions, deletions)| *additions > 0 || *deletions > 0);
-        let environment = Some(EnvironmentSummary {
-            commit_status: self.commit_operation_status_label(),
-            commit_focus: self.transcript_control_focus("environment-summary-commit", cx),
-            compare_focus: self.transcript_control_focus("environment-summary-compare", cx),
-        });
-        let (processes, agents) = session_id
-            .map(|session_id| self.background_work_counts(session_id))
-            .unwrap_or_default();
-        let has_live_work = processes > 0 || agents > 0;
-        let summary = background_work_count_summary(processes, agents);
-        let theme = Theme::current(cx);
-        let refresh_weak = cx.entity().downgrade();
-        let handle = self.menu_handle_with(BACKGROUND_SUMMARY_MENU_ID, cx, move |open, _, cx| {
-            if open {
-                let _ = refresh_weak.update(cx, |this, cx| {
-                    this.refresh_selected_branch_snapshot(cx);
-                });
-            }
-        });
-        let trigger = div()
-            .id("environment-summary-trigger")
-            .size(px(28.0))
-            .relative()
-            .rounded(px(7.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .focus_visible(|style| {
-                style
-                    .bg(theme.overlay)
-                    .border_1()
-                    .border_color(theme.accent)
-            })
-            .hover(|style| style.bg(theme.overlay))
-            .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text(if summary.is_empty() {
-                tr!("environment.summary")
-            } else {
-                summary
-            }))
-            .child(icon("info.circle", 15.0, theme.text_tertiary))
-            .when(has_live_work, |trigger| {
-                trigger.child(
-                    div()
-                        .absolute()
-                        .top(px(4.0))
-                        .right(px(4.0))
-                        .child(pulse_dot(5.0, theme.accent)),
-                )
-            });
-        let git_status = change_counts.map(|(additions, deletions)| {
-            let focus = self.transcript_control_focus("header-git-status", cx);
-            div()
-                .id("header-git-status")
-                .track_focus(&focus)
-                .tab_index(0)
-                .h(px(28.0))
-                .px(px(7.0))
-                .rounded(px(7.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .cursor_default()
-                .text_size(sp(12.5))
-                .font_weight(FontWeight::MEDIUM)
-                .focus_visible(|style| {
-                    style
-                        .bg(theme.overlay)
-                        .border_1()
-                        .border_color(theme.accent)
-                })
-                .hover(|style| style.bg(theme.overlay))
-                .active(|style| style.bg(theme.overlay_strong))
-                .when(additions > 0, |button| {
-                    button.child(
-                        div()
-                            .text_color(theme.success)
-                            .child(format!("+{additions}")),
-                    )
-                })
-                .when(deletions > 0, |button| {
-                    button.child(
-                        div()
-                            .text_color(theme.danger)
-                            .child(format!("-{deletions}")),
-                    )
-                })
-                .tooltip(Tooltip::text(tr!("environment.changes")))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                    cx.stop_propagation();
-                })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.set_right_panel_diff_source(ReviewDiffSource::Uncommitted, cx);
-                }))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.set_right_panel_diff_source(ReviewDiffSource::Uncommitted, cx);
-                        cx.stop_propagation();
-                    }
-                }))
-                .into_any_element()
-        });
-        let open_in = self.render_open_in_control(workspace_path, cx);
-        let entries = Rc::new(entries);
-        let weak = cx.entity().downgrade();
-        let info = popover(
-            trigger,
-            &handle,
-            MenuAlign::BelowRight,
-            move |handle, _, cx| {
-                render_background_summary_card(
-                    handle,
-                    session_id.unwrap_or_else(Uuid::nil),
-                    identifiers.clone(),
-                    environment.clone(),
-                    entries.clone(),
-                    weak.clone(),
-                    cx,
-                )
-            },
-        );
-        div()
-            .id("header-environment-controls")
-            .tab_group()
-            .tab_stop(false)
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .children(git_status)
-            .children(open_in)
-            .child(info)
-            .into_any_element()
     }
 
     /// Resolve the "open project in app" targets once, off-thread; the header
@@ -935,29 +708,24 @@ impl Michelle {
                 return;
             }
             let _ = this.update(cx, |this, cx| {
-                this.open_in_apps = Rc::new(apps);
+                this.shell_model.open_in_apps = Rc::new(apps);
                 cx.notify();
             });
         })
         .detach();
     }
 
-    /// The app the primary "open in" button targets: the persisted choice
-    /// while it is still installed, otherwise the file manager.
-    fn preferred_open_in_app(&self) -> Option<&crate::platform::ExternalApp> {
-        self.state
-            .open_in_app
-            .as_deref()
-            .and_then(|id| self.open_in_apps.iter().find(|app| app.id == id))
-            .or_else(|| self.open_in_apps.iter().find(|app| app.id == "finder"))
-            .or_else(|| self.open_in_apps.first())
-    }
-
     /// Open the workspace folder in the catalog app `app_id` and remember it
     /// as the preferred target. Launch Services delivers the open
     /// asynchronously, so this one-shot action never blocks a frame.
-    fn open_workspace_in_app(&mut self, path: &Path, app_id: &str, cx: &mut Context<Self>) {
+    pub(super) fn open_workspace_in_app(
+        &mut self,
+        path: &Path,
+        app_id: &str,
+        cx: &mut Context<Self>,
+    ) {
         let Some(bundle_id) = self
+            .shell_model
             .open_in_apps
             .iter()
             .find(|app| app.id == app_id)
@@ -973,131 +741,6 @@ impl Michelle {
         }
     }
 
-    /// The split "open project in app" control: an icon button launching the
-    /// preferred app, and a chevron opening the menu of every installed
-    /// target. Hidden while there is no local folder to open or app detection
-    /// has not landed yet.
-    fn render_open_in_control(
-        &self,
-        workspace_path: Option<&Path>,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        if self.daemon.is_remote() {
-            return None;
-        }
-        let path: Rc<Path> = Rc::from(workspace_path?);
-        let preferred = self.preferred_open_in_app()?;
-        let preferred_id = preferred.id;
-        let preferred_label = preferred.label;
-        let preferred_icon = preferred.icon.clone();
-        let apps = self.open_in_apps.clone();
-        let theme = Theme::current(cx);
-        let handle = self.menu_handle(OPEN_IN_MENU_ID, cx);
-        let focus = self.transcript_control_focus("header-open-in", cx);
-
-        let primary_path = path.clone();
-        let key_path = path.clone();
-        let primary = div()
-            .id("header-open-in")
-            .track_focus(&focus)
-            .tab_index(0)
-            .h_full()
-            .px(px(6.0))
-            .rounded_tl(px(6.0))
-            .rounded_bl(px(6.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .focus_visible(|style| {
-                style
-                    .bg(theme.overlay)
-                    .border_1()
-                    .border_color(theme.accent)
-            })
-            .hover(|style| style.bg(theme.overlay))
-            .active(|style| style.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text(tr!("open_in.open", app = preferred_label)))
-            .child(img(preferred_icon).size(px(16.0)).flex_none())
-            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                this.open_workspace_in_app(&primary_path, preferred_id, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.open_workspace_in_app(&key_path, preferred_id, cx);
-                    cx.stop_propagation();
-                }
-            }));
-
-        let caret = div()
-            .id("header-open-in-caret")
-            .h_full()
-            .w(px(18.0))
-            .rounded_tr(px(6.0))
-            .rounded_br(px(6.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .focus_visible(|style| {
-                style
-                    .bg(theme.overlay)
-                    .border_1()
-                    .border_color(theme.accent)
-            })
-            .hover(|style| style.bg(theme.overlay))
-            .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text(tr!("open_in.choose")))
-            .child(icon("chevron.down", 11.0, theme.text_tertiary));
-
-        let weak = cx.entity().downgrade();
-        let menu = dropdown_menu(
-            caret,
-            "header-open-in-menu",
-            &handle,
-            MenuAlign::BelowRight,
-            move |_| {
-                apps.iter()
-                    .map(|app| {
-                        let weak = weak.clone();
-                        let path = path.clone();
-                        let app_id = app.id;
-                        MenuItem::new(app.label, move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.open_workspace_in_app(&path, app_id, cx);
-                            });
-                        })
-                        .image(app.icon.clone())
-                        .selected(app.id == preferred_id)
-                    })
-                    .collect()
-            },
-        );
-
-        // One outlined group, so the two segments read as a single split
-        // button even though only the hovered half fills.
-        Some(
-            div()
-                .h(px(28.0))
-                .rounded(px(7.0))
-                .border_1()
-                .border_color(theme.border_strong)
-                .flex_none()
-                .flex()
-                .items_center()
-                .child(primary)
-                .child(div().w(px(1.0)).h_full().flex_none().bg(theme.border))
-                .child(menu)
-                .into_any_element(),
-        )
-    }
-
     pub(super) fn render_background_work_surface(
         &self,
         key: &BackgroundWorkKey,
@@ -1105,7 +748,8 @@ impl Michelle {
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let session_id = self.state.selected_session;
-        let registry = session_id.and_then(|session_id| self.background_work.get(&session_id));
+        let registry = session_id
+            .and_then(|session_id| self.sessions.runtime.background_work.get(&session_id));
         let item = registry.and_then(|registry| registry.items.get(key));
         let Some(item) = item else {
             return div()
@@ -1416,556 +1060,6 @@ fn background_work_selection_input(selection: TranscriptSelection) -> impl IntoE
     .h(px(0.0))
 }
 
-fn background_work_count_summary(processes: usize, agents: usize) -> String {
-    let mut parts = Vec::new();
-    if processes > 0 {
-        parts.push(if processes == 1 {
-            tr!("background.process_count_one")
-        } else {
-            tr!("background.process_count", count = processes)
-        });
-    }
-    if agents > 0 {
-        parts.push(if agents == 1 {
-            tr!("background.agent_count_one")
-        } else {
-            tr!("background.agent_count", count = agents)
-        });
-    }
-    parts.join(" · ")
-}
-
-fn render_background_summary_card(
-    handle: &ContextMenuHandle,
-    session_id: Uuid,
-    identifiers: Option<TaskIdentifierSection>,
-    environment: Option<EnvironmentSummary>,
-    entries: Rc<Vec<BackgroundSummaryEntry>>,
-    weak: WeakEntity<Michelle>,
-    cx: &mut App,
-) -> AnyElement {
-    let theme = Theme::current(cx);
-    let processes = entries
-        .iter()
-        .filter(|entry| entry.item.key.kind != BackgroundWorkKind::Subagent)
-        .cloned()
-        .collect::<Vec<_>>();
-    let agents = entries
-        .iter()
-        .filter(|entry| entry.item.key.kind == BackgroundWorkKind::Subagent)
-        .cloned()
-        .collect::<Vec<_>>();
-    let mut content = div()
-        .id("background-summary-scroll")
-        .max_h(px(420.0))
-        .overflow_y_scroll()
-        .p(px(8.0))
-        .flex()
-        .flex_col()
-        .gap(px(8.0));
-    let has_environment = environment.is_some();
-    let has_background = !processes.is_empty() || !agents.is_empty();
-    let has_identifiers = identifiers.is_some();
-    if let Some(environment) = environment {
-        content = content.child(render_environment_summary_section(
-            environment,
-            handle.clone(),
-            weak.clone(),
-            &theme,
-        ));
-    }
-    if has_environment && has_background {
-        content = content.child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border));
-    }
-    if !processes.is_empty() {
-        content = content.child(render_background_summary_section(
-            tr!("background.processes"),
-            processes,
-            session_id,
-            handle.clone(),
-            weak.clone(),
-            &theme,
-        ));
-    }
-    if !agents.is_empty() {
-        content = content.child(render_background_summary_section(
-            tr!("background.agents"),
-            agents,
-            session_id,
-            handle.clone(),
-            weak.clone(),
-            &theme,
-        ));
-    }
-    if has_identifiers && (has_environment || has_background) {
-        content = content.child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border));
-    }
-    if let Some(identifiers) = identifiers {
-        content = content.child(render_task_identifiers_section(identifiers, weak, &theme));
-    }
-    div()
-        .id("background-summary-card")
-        .track_focus(handle.focus_handle())
-        .w(px(300.0))
-        .rounded(px(12.0))
-        .border_1()
-        .border_color(theme.border_strong)
-        .overflow_hidden()
-        .bg(theme.raised)
-        .shadow_lg()
-        .child(content)
-        .into_any_element()
-}
-
-fn render_task_identifiers_section(
-    section: TaskIdentifierSection,
-    weak: WeakEntity<Michelle>,
-    theme: &Theme,
-) -> Div {
-    let mut rows = vec![render_task_identifier_row(
-        tr!("environment.task_id"),
-        section.values.task_id.to_string(),
-        TASK_ID_COPY_CONTROL_ID,
-        &section.task_id_copy_focus,
-        section.task_id_copied,
-        weak.clone(),
-        theme,
-    )];
-    if let Some(thread_id) = section.values.agent_cli_thread_id {
-        rows.push(render_task_identifier_row(
-            tr!("environment.agent_cli_thread_id"),
-            thread_id,
-            AGENT_THREAD_ID_COPY_CONTROL_ID,
-            &section.agent_cli_thread_id_copy_focus,
-            section.agent_cli_thread_id_copied,
-            weak,
-            theme,
-        ));
-    }
-
-    div()
-        .w_full()
-        .tab_group()
-        .tab_stop(false)
-        .flex()
-        .flex_col()
-        .gap(px(7.0))
-        .children(rows)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_task_identifier_row(
-    label: String,
-    value: String,
-    control_id: &'static str,
-    focus: &FocusHandle,
-    copied: bool,
-    weak: WeakEntity<Michelle>,
-    theme: &Theme,
-) -> Div {
-    let tooltip = Tooltip::text(if copied {
-        tr!("common.copied")
-    } else {
-        tr!("common.copy_named", name = label.clone())
-    });
-    let copy_value = value.clone();
-    let copy_action = Rc::new(move |cx: &mut App| {
-        cx.write_to_clipboard(ClipboardItem::new_string(copy_value.clone()));
-        let _ = weak.update(cx, |this, cx| {
-            this.show_control_copied(control_id, cx);
-        });
-    });
-    let key_copy_action = copy_action.clone();
-    let copy_button = div()
-        .id(control_id)
-        .track_focus(focus)
-        .tab_index(0)
-        .size(px(24.0))
-        .rounded(px(6.0))
-        .flex_none()
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_default()
-        .focus_visible(|style| {
-            style
-                .bg(theme.overlay)
-                .border_1()
-                .border_color(theme.accent)
-        })
-        .hover(|style| style.bg(theme.overlay_strong))
-        .active(|style| style.bg(theme.overlay))
-        .tooltip(tooltip)
-        .child(icon(
-            if copied { "checkmark" } else { "doc.on.doc" },
-            12.0,
-            theme.text_tertiary,
-        ))
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .on_click(move |_, _, cx| {
-            copy_action(cx);
-            cx.stop_propagation();
-        })
-        .on_key_down(move |event: &KeyDownEvent, _, cx| {
-            if !event.keystroke.modifiers.modified()
-                && matches!(event.keystroke.key.as_str(), "enter" | "space")
-            {
-                key_copy_action(cx);
-                cx.stop_propagation();
-            }
-        });
-
-    div()
-        .w_full()
-        .flex()
-        .flex_col()
-        .gap(px(3.0))
-        .child(
-            div().h(px(20.0)).px(px(8.0)).flex().items_center().child(
-                div()
-                    .text_size(sp(12.0))
-                    .text_color(theme.text_tertiary)
-                    .child(label),
-            ),
-        )
-        .child(
-            div()
-                .w_full()
-                .h(px(28.0))
-                .pl(px(8.0))
-                .rounded(px(6.0))
-                .bg(theme.inset)
-                .flex()
-                .items_center()
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .truncate()
-                        .text_size(sp(11.5))
-                        .font_family(md::render::MONO_FAMILY)
-                        .text_color(theme.text_secondary)
-                        .child(value),
-                )
-                .child(copy_button),
-        )
-}
-
-fn render_environment_summary_section(
-    environment: EnvironmentSummary,
-    handle: ContextMenuHandle,
-    weak: WeakEntity<Michelle>,
-    theme: &Theme,
-) -> Div {
-    let commit_handle = handle.clone();
-    let commit_weak = weak.clone();
-    let commit_pending = environment.commit_status.is_some();
-    let commit = render_environment_action_row(
-        "environment-summary-commit",
-        &environment.commit_focus,
-        "point.topleft.down.to.point.bottomright.curvepath",
-        environment
-            .commit_status
-            .unwrap_or_else(|| tr!("environment.commit_or_push")),
-        !commit_pending,
-        commit_pending,
-        None,
-        theme,
-        move |window, cx| {
-            commit_handle.close(window, cx);
-            window.refresh();
-            let _ = commit_weak.update(cx, |this, cx| {
-                this.open_commit_dialog(window, cx);
-            });
-        },
-    );
-
-    let compare_handle = handle;
-    let compare_weak = weak;
-    let compare = render_environment_action_row(
-        "environment-summary-compare",
-        &environment.compare_focus,
-        "icons/github.svg",
-        tr!("environment.compare_branch"),
-        true,
-        false,
-        Some(icon("arrow.up.right", 13.0, theme.text_tertiary).into_any_element()),
-        theme,
-        move |window, cx| {
-            compare_handle.close(window, cx);
-            window.refresh();
-            let _ = compare_weak.update(cx, |this, cx| {
-                this.set_right_panel_diff_source(ReviewDiffSource::Branch, cx);
-            });
-        },
-    );
-
-    div()
-        .w_full()
-        .flex()
-        .flex_col()
-        .gap_0()
-        .child(
-            div()
-                .h(px(30.0))
-                .px(px(8.0))
-                .flex()
-                .items_center()
-                .text_size(sp(13.5))
-                .text_color(theme.text_tertiary)
-                .child(tr!("environment.title")),
-        )
-        .child(commit)
-        .child(compare)
-}
-
-fn render_environment_action_row(
-    id: &'static str,
-    focus: &FocusHandle,
-    icon_path: &'static str,
-    label: String,
-    enabled: bool,
-    active: bool,
-    trailing: Option<AnyElement>,
-    theme: &Theme,
-    action: impl Fn(&mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
-    let foreground = if enabled {
-        theme.text
-    } else if active {
-        theme.text_secondary
-    } else {
-        theme.text_ghost
-    };
-    let icon_foreground = if enabled || active {
-        theme.text_secondary
-    } else {
-        theme.text_ghost
-    };
-    let indicator = if active {
-        motion::spin_slow(icon("arrow.clockwise", 14.0, theme.text_secondary))
-    } else {
-        icon(icon_path, 14.0, icon_foreground).into_any_element()
-    };
-    let action: Rc<dyn Fn(&mut Window, &mut App)> = Rc::new(action);
-    let key_action = action.clone();
-    div()
-        .id(id)
-        .track_focus(focus)
-        .when(enabled, |row| row.tab_index(0))
-        .min_h(px(32.0))
-        .w_full()
-        .px(px(8.0))
-        .rounded(px(8.0))
-        .flex()
-        .items_center()
-        .gap(px(10.0))
-        .cursor_default()
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
-        .when(enabled, |row| {
-            row.hover(|style| style.bg(theme.overlay_strong))
-        })
-        .child(indicator)
-        .child(
-            div()
-                .min_w_0()
-                .flex_1()
-                .truncate()
-                .text_size(sp(13.5))
-                .text_color(foreground)
-                .child(label),
-        )
-        .children(trailing)
-        .when(enabled, |row| {
-            row.on_click(move |_, window, cx| action(window, cx))
-                .on_key_down(move |event: &KeyDownEvent, window, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        key_action(window, cx);
-                        cx.stop_propagation();
-                    }
-                })
-        })
-}
-
-fn render_background_summary_section(
-    label: String,
-    entries: Vec<BackgroundSummaryEntry>,
-    session_id: Uuid,
-    handle: ContextMenuHandle,
-    weak: WeakEntity<Michelle>,
-    theme: &Theme,
-) -> Div {
-    let mut rows = div().w_full().flex().flex_col().gap(px(2.0));
-    for entry in entries {
-        rows = rows.child(render_background_summary_row(
-            entry,
-            session_id,
-            handle.clone(),
-            weak.clone(),
-            theme,
-        ));
-    }
-    div()
-        .w_full()
-        .flex()
-        .flex_col()
-        .gap(px(5.0))
-        .child(
-            div()
-                .px(px(8.0))
-                .text_size(sp(13.0))
-                .text_color(theme.text_tertiary)
-                .child(label),
-        )
-        .child(rows)
-}
-
-fn render_background_summary_row(
-    entry: BackgroundSummaryEntry,
-    session_id: Uuid,
-    handle: ContextMenuHandle,
-    weak: WeakEntity<Michelle>,
-    theme: &Theme,
-) -> Stateful<Div> {
-    let item = entry.item;
-    let group_name = SharedString::from(format!(
-        "background-summary-group-{}-{}",
-        item.key.provider_id, item.key.kind as u8
-    ));
-    let status = background_summary_process_status_icon(item.key.kind, item.status).map(|_| {
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .when(item.status.is_stoppable() && item.can_stop, |status| {
-                status.group_hover(group_name.clone(), |style| style.invisible())
-            })
-            .child(rendered_work_status_icon(
-                item.status,
-                12.0,
-                work_status_color(item.status, *theme),
-            ))
-    });
-    let stop = (item.status.is_stoppable() && item.can_stop).then(|| {
-        let click_key = item.key.clone();
-        let click_weak = weak.clone();
-        let key_key = item.key.clone();
-        let key_weak = weak.clone();
-        div()
-            .id(SharedString::from(format!(
-                "background-summary-stop-{}-{}",
-                item.key.provider_id, item.key.kind as u8
-            )))
-            .track_focus(&entry.stop_focus)
-            .tab_index(0)
-            .size(px(24.0))
-            .rounded(px(6.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .opacity(0.0)
-            .group_hover(group_name.clone(), |style| style.opacity(1.0))
-            .hover(|style| style.bg(theme.overlay_strong))
-            .focus_visible(|style| {
-                style
-                    .opacity(1.0)
-                    .bg(theme.raised)
-                    .border_1()
-                    .border_color(theme.accent)
-            })
-            .tooltip(Tooltip::text(tr!("background.stop")))
-            .child(icon("stop.fill", 12.0, theme.text_tertiary))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                let _ = click_weak.update(cx, |this, cx| {
-                    this.stop_background_work(session_id, click_key.clone(), cx);
-                });
-            })
-            .on_key_down(move |event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    let _ = key_weak.update(cx, |this, cx| {
-                        this.stop_background_work(session_id, key_key.clone(), cx);
-                    });
-                    cx.stop_propagation();
-                }
-            })
-    });
-    let trailing = (status.is_some() || stop.is_some()).then(|| {
-        div()
-            .relative()
-            .size(px(24.0))
-            .flex_none()
-            .children(status)
-            .children(stop)
-    });
-    let is_process = item.key.kind != BackgroundWorkKind::Subagent;
-    let open_key = item.key.clone();
-    let key_key = open_key.clone();
-    let click_handle = handle.clone();
-    let click_weak = weak.clone();
-    let key_handle = handle;
-    let key_weak = weak;
-    div()
-        .id(SharedString::from(format!(
-            "background-summary-row-{}-{}",
-            item.key.provider_id, item.key.kind as u8
-        )))
-        .group(group_name)
-        .track_focus(&entry.row_focus)
-        .tab_index(0)
-        .h(px(32.0))
-        .w_full()
-        .px(px(8.0))
-        .rounded(px(8.0))
-        .flex()
-        .items_center()
-        .gap(px(9.0))
-        .cursor_default()
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
-        .hover(|style| style.bg(theme.overlay_strong))
-        .child(icon(
-            work_kind_icon(item.key.kind),
-            14.0,
-            theme.text_secondary,
-        ))
-        .child(
-            div()
-                .min_w_0()
-                .flex_1()
-                .truncate()
-                .text_size(px(if is_process { 12.5 } else { 13.5 }))
-                .text_color(if is_process {
-                    theme.text_secondary
-                } else {
-                    theme.text
-                })
-                .child(single_line_label(&item.title)),
-        )
-        .children(trailing)
-        .on_click(move |_, window, cx| {
-            click_handle.close(window, cx);
-            window.refresh();
-            let _ = click_weak.update(cx, |this, cx| {
-                this.open_background_work_surface(session_id, open_key.clone(), cx);
-            });
-        })
-        .on_key_down(move |event: &KeyDownEvent, window, cx| {
-            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                key_handle.close(window, cx);
-                window.refresh();
-                let _ = key_weak.update(cx, |this, cx| {
-                    this.open_background_work_surface(session_id, key_key.clone(), cx);
-                });
-                cx.stop_propagation();
-            }
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1979,76 +1073,6 @@ mod tests {
         );
         item.background = background;
         item
-    }
-
-    #[test]
-    fn info_popover_uses_distinct_process_status_icons() {
-        assert_eq!(
-            background_summary_process_status_icon(
-                BackgroundWorkKind::Process,
-                BackgroundWorkStatus::Completed,
-            ),
-            Some("checkmark")
-        );
-        assert_eq!(
-            background_summary_process_status_icon(
-                BackgroundWorkKind::Monitor,
-                BackgroundWorkStatus::Failed,
-            ),
-            Some("xmark")
-        );
-        assert_eq!(
-            background_summary_process_status_icon(
-                BackgroundWorkKind::Process,
-                BackgroundWorkStatus::Running,
-            ),
-            Some("arrow.clockwise")
-        );
-        assert_eq!(
-            background_summary_process_status_icon(
-                BackgroundWorkKind::Subagent,
-                BackgroundWorkStatus::Completed,
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn info_popover_background_titles_stay_on_one_line() {
-        let source = include_str!("background_work.rs");
-        let row = source
-            .split_once("\nfn render_background_summary_row(")
-            .expect("background summary row renderer")
-            .1
-            .split_once("\n#[cfg(test)]")
-            .expect("background summary row renderer end")
-            .0;
-
-        assert!(row.contains(".truncate()"));
-        assert!(row.contains(".child(single_line_label(&item.title))"));
-        assert!(!row.contains(".line_clamp(1)"));
-        assert_eq!(
-            single_line_label("/bin/zsh -lc 'set -euo pipefail\n  for n in one two'"),
-            "/bin/zsh -lc 'set -euo pipefail for n in one two'"
-        );
-    }
-
-    #[test]
-    fn info_popover_uses_michelle_task_and_native_agent_ids() {
-        let task_id = Uuid::parse_str("ed28ee51-43cf-4a83-a52f-04c509ca2c09").unwrap();
-        let mut session = AgentSession::new(Uuid::nil(), ProviderKind::Codex);
-        session.id = task_id;
-        session.provider_cursor = Some(ProviderResumeCursor::Codex {
-            thread_id: "019cfd7a-6942-78b1-9d47-30576c562321".into(),
-        });
-
-        assert_eq!(
-            TaskIdentifiers::from(&session),
-            TaskIdentifiers {
-                task_id,
-                agent_cli_thread_id: Some("019cfd7a-6942-78b1-9d47-30576c562321".into()),
-            }
-        );
     }
 
     #[test]

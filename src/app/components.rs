@@ -145,43 +145,22 @@ fn format_message_time_at(created_at: u64, now: DateTime<Local>, locale: &str) -
 }
 
 impl Michelle {
-    pub(super) fn control_was_copied(&self, control_id: &str) -> bool {
-        self.copied_control_feedback.contains_key(control_id)
-    }
-
-    pub(super) fn show_control_copied(
-        &mut self,
-        control_id: impl Into<String>,
-        cx: &mut Context<Self>,
-    ) {
-        let control_id = control_id.into();
-        self.copied_control_generation = self.copied_control_generation.wrapping_add(1);
-        let generation = self.copied_control_generation;
-        self.copied_control_feedback
-            .insert(control_id.clone(), generation);
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(2)).await;
-            let _ = this.update(cx, |this, cx| {
-                if this.copied_control_feedback.get(&control_id) == Some(&generation) {
-                    this.copied_control_feedback.remove(&control_id);
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
     fn show_message_copied(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
-        self.copied_message_generation = self.copied_message_generation.wrapping_add(1);
-        let generation = self.copied_message_generation;
-        self.copied_message_feedback.insert(message_id, generation);
+        self.transcript_ui.copied_message_generation =
+            self.transcript_ui.copied_message_generation.wrapping_add(1);
+        let generation = self.transcript_ui.copied_message_generation;
+        self.transcript_ui
+            .copied_message_feedback
+            .insert(message_id, generation);
         cx.notify();
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(2)).await;
             let _ = this.update(cx, |this, cx| {
-                if this.copied_message_feedback.get(&message_id) == Some(&generation) {
-                    this.copied_message_feedback.remove(&message_id);
+                if this.transcript_ui.copied_message_feedback.get(&message_id) == Some(&generation)
+                {
+                    this.transcript_ui
+                        .copied_message_feedback
+                        .remove(&message_id);
                     cx.notify();
                 }
             });
@@ -268,7 +247,7 @@ pub(super) fn render_message_footer(
         if let Some(action) = assistant_message_action {
             let fork_michelle = michelle.clone();
             let fork_icon = if action.preparing {
-                motion::spin(icon("arrow.clockwise", 14.0, footer_color))
+                motion::spinner(14.0, footer_color)
             } else {
                 icon("arrow.triangle.branch", 14.0, footer_color).into_any_element()
             };
@@ -515,7 +494,7 @@ fn render_sent_message_attachments(
 }
 
 fn render_markdown_message_body<'a>(
-    content: &str,
+    content: &SharedString,
     markdown: Option<&'a MarkdownView>,
     theme: &Theme,
     ctx: &MarkdownCtx<'a>,
@@ -525,7 +504,7 @@ fn render_markdown_message_body<'a>(
         // Empty or not-yet-parsed content still needs a selectable fallback.
         .unwrap_or_else(|| {
             md::render::plain_text(
-                content.to_owned(),
+                content.clone(),
                 md::render::SANS_FAMILY,
                 FontWeight::NORMAL,
                 theme.text,
@@ -555,14 +534,17 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         composer,
     } = params;
 
-    let content = message.visible_content().to_owned();
+    let content = markdown.map_or_else(
+        || SharedString::from(message.visible_content()),
+        MarkdownView::shared_source,
+    );
     // "Copy Message" must match what the row presents. The terminal part of a
     // settled response stands in for the whole visible answer, so its menu
     // shares the footer's copy content — parts hidden behind "Worked for X"
     // stay out — rather than copying the final part alone.
     let menu_copy_content = assistant_footer_copy_content
         .clone()
-        .unwrap_or_else(|| SharedString::from(content.clone()));
+        .unwrap_or_else(|| content.clone());
     let message_id = message.id;
     let role = message.role;
     let element = match role {
@@ -794,7 +776,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     theme,
                     message,
                     message.created_at,
-                    SharedString::from(content.clone()),
+                    content.clone(),
                     copied,
                     group_name,
                     false,

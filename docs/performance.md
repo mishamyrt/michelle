@@ -27,7 +27,7 @@ price:
 
 The root `Michelle` view re-renders on every frame regardless of what is dirty, so
 it must stay thin: the sidebar, transcript, and right panel are `MichellePane`
-islands ([src/app.rs](../src/app.rs)) embedded with GPUI's
+islands ([src/app/shell.rs](../src/app/shell.rs)) embedded with GPUI's
 `Entity::cached`. Each pane observes the root — any root notify still
 re-renders every island, so caching can never show stale state — while a
 notify targeted at one pane (the pulse clock leases `window.current_view()`)
@@ -69,13 +69,13 @@ Two hard-won rules:
   while text streamed at 10% was this one flag.
 
 **Pulse ticks, ≤ 60 Hz.** All repeating animation rides the shared
-self-parking clock in [src/ui/motion.rs](../src/ui/motion.rs): loaders read
+self-parking clock in [src/ui/primitives/motion.rs](../src/ui/primitives/motion.rs): loaders read
 a phase from a shared epoch, leases expire 300 ms after the loader last
 painted, and the clock parks when no leases remain. Never use
 `with_animation(...).repeat()` — it re-arms `request_animation_frame` every
 display frame. A view's whole subtree rebuilds per tick, so cadence is priced
-per *view*, not per animation: spinners use the full 60 Hz rate, while
-`spin_slow` uses every second tick (≈ 30 Hz). Non-spinning pulses and
+per *view*, not per animation: fixed-spoke spinners use ≈ 30 Hz, while
+`spinner_slow` uses every fourth tick (≈ 15 Hz). Other pulses and
 `pulse_lease` retain ≈ 30 Hz; `pulse_lease_slow` and `Pulse::every(2)` use
 ≈ 15 Hz for loaders mounted on expensive surfaces — the working dots set the
 transcript pane's tick floor for the entire turn. Strides re-establish on
@@ -90,7 +90,7 @@ veil at ≈ 30 Hz, the reasoning veil at ≈ 15 Hz, both leasing
 **Overlay scrollbars are the classic violator of both cadences.** A streaming
 surface moves its content every commit, so the bar sits in its reveal hold for
 the whole turn — and the hold is constant-opacity, needing zero repaints.
-[src/ui/scrollbar.rs](../src/ui/scrollbar.rs) therefore schedules a single
+[src/ui/primitives/scrollbar/render.rs](../src/ui/primitives/scrollbar/render.rs) therefore schedules a single
 one-shot wake for hold expiry and rides the pulse clock only through the
 350 ms fade. Driving frames through the hold pinned the pane at pulse rate the
 moment any scrollbar became visible.
@@ -100,13 +100,13 @@ moment any scrollbar became visible.
 - The transcript is virtualized with `list()`; per-commit invalidation is the
   last `STREAM_REMEASURE_TAIL_ROWS` rows only, and row folds, navigation
   turns, response footers, and sidebar rows are all fingerprint-cached
-  ([src/app/transcript.rs](../src/app/transcript.rs),
-  [src/app/sidebar.rs](../src/app/sidebar.rs)). A fingerprint must hash at
+  ([src/app/transcript_view/model.rs](../src/app/transcript_view/model.rs),
+  [src/app/sidebar/model.rs](../src/app/sidebar/model.rs)). A fingerprint must hash at
   display granularity: the sidebar row cache keys session recency, and hashing
   raw seconds would bust it on every commit.
 - The live reasoning peek renders a **byte window** of the tail
   (`live_reasoning_window_start`,
-  [src/app/transcript_view.rs](../src/app/transcript_view.rs)): markdown cost
+  [src/app/transcript_view/model.rs](../src/app/transcript_view/model.rs)): markdown cost
   is O(rendered source) per tick regardless of block shape — a wall-of-text
   think is one giant paragraph and a bulleted think one giant list, so a
   block-count cap bounds neither. The slide hysteresis is wide
@@ -120,6 +120,16 @@ moment any scrollbar became visible.
 - `MarkdownView::set_text` derives the mended display tail only when content
   or the streaming flag changed — the derivation re-parses the final block and
   runs for every visible row every frame.
+- Message rows borrow the session's `Message` and retain one shared raw-source
+  snapshot per text revision for copy actions. Selection registration shares
+  GPUI's heap text buffer through `Arc<str>` rather than copying it every paint,
+  including paragraphs containing math. Selected spans keep that snapshot
+  after the row leaves the screen or its content changes.
+- The main composer stages pasted text of at least 4,000 Unicode characters
+  as `pasted-text.txt`, keeping large pasted documents out of the input and
+  transcript layout. Encoding and daemon storage run on the background executor;
+  submission waits until storage completes, and the file retains the exact
+  clipboard bytes. Ordinary text fields and inline message editors stay inline.
 
 ## Markdown math
 
@@ -181,6 +191,5 @@ row (gpui `list()` semantics). If that ever needs to shrink: fork-level cached
 list rows need a measure-once extension to `ViewElement` caching (cached views
 lay out from style, not content, which breaks the list's measurement as-is);
 alternatively fold activities into the virtualized list as block-granularity
-rows. Smaller levers, in memory and unproven: stable
-`StyledText` element ids for gpui's per-element layout memo, and the per-row
-`Message` clones in the row builder.
+rows. A smaller lever, in memory and unproven: stable `StyledText` element ids
+for gpui's per-element layout memo.

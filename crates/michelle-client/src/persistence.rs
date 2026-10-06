@@ -1214,7 +1214,7 @@ pub fn hydrate_session(
         )
         .map_err(to_io_error)?
     {
-        ResponsePayload::Session { session } => Ok(session),
+        ResponsePayload::Session { session, .. } => Ok(session),
         _ => Err(io::Error::other(
             "Michelle daemon returned an invalid session-hydration response",
         )),

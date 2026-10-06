@@ -7,6 +7,9 @@ use gpui::{KeyBinding, actions};
 
 use super::*;
 
+pub(super) mod model;
+use model::{CommitAction, CommitOperationState, CommitPending, commit_pending_status_label};
+
 actions!(
     michelle_commit_dialog,
     [ConfirmCommitDialog, DismissCommitDialog]
@@ -27,127 +30,27 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CommitAction {
-    Commit,
-    CommitAndPush,
-    Push,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CommitPending {
-    Generating(CommitAction),
-    Git(CommitAction),
-}
-
-pub(super) struct CommitOperationState {
-    id: Uuid,
-    workspace: PathBuf,
-    pending: CommitPending,
-}
-
-impl CommitOperationState {
-    fn status_label(&self) -> String {
-        commit_pending_status_label(self.pending)
-    }
-}
-
-fn commit_pending_status_label(pending: CommitPending) -> String {
-    match pending {
-        CommitPending::Generating(_) => tr!("commit.generating_message"),
-        CommitPending::Git(CommitAction::Commit) => tr!("commit.committing"),
-        CommitPending::Git(CommitAction::CommitAndPush) => {
-            tr!("commit.committing_and_pushing")
-        }
-        CommitPending::Git(CommitAction::Push) => tr!("commit.pushing"),
-    }
-}
-
 pub(super) struct CommitDialogState {
     id: Uuid,
-    workspace: PathBuf,
-    invocation: Option<crate::git_commit::AgentInvocation>,
     message: Entity<TextInput>,
     include_unstaged: bool,
-    snapshot: crate::git_commit::Snapshot,
-    snapshot_loading: bool,
-    error: Option<String>,
     include_focus: FocusHandle,
     commit_focus: FocusHandle,
     commit_push_focus: FocusHandle,
     push_focus: FocusHandle,
 }
 
-impl CommitDialogState {
-    fn can_commit(&self) -> bool {
-        !self.snapshot_loading
-            && (self.snapshot.has_staged || (self.include_unstaged && self.snapshot.has_unstaged))
-    }
-
-    fn can_push(&self) -> bool {
-        !self.snapshot_loading && self.snapshot.can_push
-    }
-
-    fn displayed_counts(&self) -> (u64, u64) {
-        if self.include_unstaged {
-            (self.snapshot.additions, self.snapshot.deletions)
-        } else {
-            (
-                self.snapshot.staged_additions,
-                self.snapshot.staged_deletions,
-            )
-        }
-    }
-}
-
 impl Michelle {
     pub(super) fn commit_operation_status_label(&self) -> Option<String> {
-        self.commit_operation
+        self.commit
+            .operation
             .as_ref()
             .map(CommitOperationState::status_label)
     }
 
     pub(super) fn open_commit_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.commit_operation.is_some() {
+        let Some(id) = self.prepare_commit_draft(cx) else {
             return;
-        }
-        let Some((workspace, provider, model, reasoning_effort)) =
-            self.selected_session().and_then(|session| {
-                Some((
-                    self.workspace_path_for_session(session)?.to_path_buf(),
-                    session.provider,
-                    self.model_for_session(session).map(str::to_owned),
-                    session.reasoning_effort.clone(),
-                ))
-            })
-        else {
-            self.show_toast(tr!("commit.no_task"));
-            cx.notify();
-            return;
-        };
-
-        let invocation = self
-            .provider_probe(provider)
-            .and_then(|probe| probe.path.clone())
-            .map(|binary| crate::git_commit::AgentInvocation {
-                provider,
-                binary,
-                model,
-                reasoning_effort,
-            });
-        let cached_branch = self
-            .visible_branch_snapshot
-            .as_ref()
-            .filter(|(path, _)| path == &workspace)
-            .map(|(_, snapshot)| snapshot);
-        let snapshot = crate::git_commit::Snapshot {
-            branch: cached_branch
-                .and_then(|snapshot| snapshot.display_branch())
-                .unwrap_or("HEAD")
-                .to_owned(),
-            additions: cached_branch.map_or(0, |snapshot| snapshot.additions),
-            deletions: cached_branch.map_or(0, |snapshot| snapshot.deletions),
-            ..Default::default()
         };
         let message = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -155,16 +58,10 @@ impl Michelle {
                 .placeholder(tr!("commit.message_placeholder"))
         });
         let message_focus = message.read(cx).focus();
-        let id = Uuid::new_v4();
         self.commit_dialog = Some(CommitDialogState {
             id,
-            workspace: workspace.clone(),
-            invocation,
             message,
             include_unstaged: true,
-            snapshot,
-            snapshot_loading: true,
-            error: None,
             include_focus: cx.focus_handle(),
             commit_focus: cx.focus_handle(),
             commit_push_focus: cx.focus_handle(),
@@ -178,61 +75,28 @@ impl Michelle {
         });
         cx.notify();
 
-        let workspace_client = michelle_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |michelle, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    match workspace_client.request(
-                        michelle_client::WorkspaceOperation::InspectCommit {
-                            cwd: workspace.clone(),
-                        },
-                    ) {
-                        Ok(michelle_client::WorkspaceResult::CommitSnapshot { snapshot }) => {
-                            Ok(snapshot)
-                        }
-                        Ok(_) => Err("the daemon returned an invalid Git response".to_owned()),
-                        Err(error) => Err(error.to_string()),
-                    }
-                })
-                .await;
-            let _ = michelle.update(cx, |michelle, cx| {
-                let Some(dialog) = michelle
-                    .commit_dialog
-                    .as_mut()
-                    .filter(|dialog| dialog.id == id)
-                else {
-                    return;
-                };
-                dialog.snapshot_loading = false;
-                match result {
-                    Ok(snapshot) => dialog.snapshot = snapshot,
-                    Err(error) => dialog.error = Some(error),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        self.load_commit_snapshot(id, cx);
     }
 
     fn close_commit_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.commit_dialog.take().is_none() {
             return;
         }
+        self.commit.dismiss_draft();
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
         cx.notify();
     }
 
     fn toggle_include_unstaged(&mut self, cx: &mut Context<Self>) {
-        if self.commit_operation.is_some() {
+        if self.commit.operation.is_some() {
             return;
         }
         let Some(dialog) = self.commit_dialog.as_mut() else {
             return;
         };
         dialog.include_unstaged = !dialog.include_unstaged;
-        dialog.error = None;
+        self.commit.clear_error();
         cx.notify();
     }
 
@@ -242,309 +106,39 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.commit_operation.is_some() {
-            return;
-        }
         let Some(dialog) = self.commit_dialog.as_ref() else {
             return;
         };
-        let enabled = match action {
-            CommitAction::Commit | CommitAction::CommitAndPush => dialog.can_commit(),
-            CommitAction::Push => dialog.can_push(),
-        };
-        if !enabled {
-            return;
-        }
-
-        let id = dialog.id;
-        let workspace = dialog.workspace.clone();
-        let include_unstaged = dialog.include_unstaged;
-        let invocation = dialog.invocation.clone();
         let message = dialog.message.read(cx).content().trim().to_owned();
-        let window_handle = window.window_handle();
-
-        if action != CommitAction::Push && message.is_empty() {
-            let Some(invocation) = invocation else {
-                if let Some(dialog) = self.commit_dialog.as_mut() {
-                    dialog.error = Some(tr!("commit.agent_unavailable"));
-                }
-                cx.notify();
-                return;
-            };
-            if let Some(dialog) = self.commit_dialog.as_mut() {
-                dialog.error = None;
-                dialog
-                    .message
-                    .update(cx, |message, _| message.set_read_only(true));
-            }
-            self.commit_operation = Some(CommitOperationState {
-                id,
-                workspace: workspace.clone(),
-                pending: CommitPending::Generating(action),
-            });
-            self.spawn_commit_message_generation(
-                id,
-                action,
-                workspace,
-                include_unstaged,
-                invocation,
-                window_handle,
-                cx,
-            );
-            cx.notify();
-            return;
-        }
-
-        if let Some(dialog) = self.commit_dialog.as_mut() {
-            dialog.error = None;
-            dialog
-                .message
-                .update(cx, |message, _| message.set_read_only(true));
-        }
-        self.commit_operation = Some(CommitOperationState {
-            id,
-            workspace: workspace.clone(),
-            pending: CommitPending::Git(action),
-        });
-        self.spawn_git_action(
-            id,
+        let include_unstaged = dialog.include_unstaged;
+        self.perform_commit_action(
             action,
-            workspace,
             message,
             include_unstaged,
-            window_handle,
+            window.window_handle(),
             cx,
         );
-        cx.notify();
-    }
-
-    fn spawn_commit_message_generation(
-        &mut self,
-        id: Uuid,
-        action: CommitAction,
-        workspace: PathBuf,
-        include_unstaged: bool,
-        invocation: crate::git_commit::AgentInvocation,
-        window_handle: gpui::AnyWindowHandle,
-        cx: &mut Context<Self>,
-    ) {
-        let workspace_client = michelle_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |michelle, cx| {
-            let generation_workspace = workspace.clone();
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    match workspace_client.request(
-                        michelle_client::WorkspaceOperation::GenerateCommitMessage {
-                            cwd: generation_workspace,
-                            include_unstaged,
-                            invocation,
-                        },
-                    ) {
-                        Ok(michelle_client::WorkspaceResult::CommitMessage { message }) => {
-                            Ok(message)
-                        }
-                        Ok(_) => {
-                            Err("the daemon returned an invalid commit message response".into())
-                        }
-                        Err(error) => Err(error.to_string()),
-                    }
-                })
-                .await;
-            let _ = michelle.update(cx, |michelle, cx| {
-                let current = michelle.commit_operation.as_ref().is_some_and(|operation| {
-                    operation.id == id
-                        && operation.workspace == workspace
-                        && operation.pending == CommitPending::Generating(action)
-                });
-                if !current {
-                    return;
-                }
-                match result {
-                    Ok(message) => {
-                        if let Some(operation) = michelle.commit_operation.as_mut() {
-                            operation.pending = CommitPending::Git(action);
-                        }
-                        if let Some(dialog) = michelle
-                            .commit_dialog
-                            .as_mut()
-                            .filter(|dialog| dialog.id == id)
-                        {
-                            dialog
-                                .message
-                                .update(cx, |input, cx| input.set_content(message.clone(), cx));
-                        }
-                        michelle.spawn_git_action(
-                            id,
-                            action,
-                            workspace,
-                            message,
-                            include_unstaged,
-                            window_handle,
-                            cx,
-                        );
-                    }
-                    Err(error) => {
-                        michelle.commit_operation = None;
-                        if let Some(dialog) = michelle
-                            .commit_dialog
-                            .as_mut()
-                            .filter(|dialog| dialog.id == id)
-                        {
-                            dialog.error = Some(error);
-                            dialog
-                                .message
-                                .update(cx, |message, _| message.set_read_only(false));
-                        } else {
-                            michelle.show_toast(error);
-                        }
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn spawn_git_action(
-        &mut self,
-        id: Uuid,
-        action: CommitAction,
-        workspace: PathBuf,
-        message: String,
-        include_unstaged: bool,
-        window_handle: gpui::AnyWindowHandle,
-        cx: &mut Context<Self>,
-    ) {
-        let workspace_client = michelle_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |michelle, cx| {
-            let operation_workspace = workspace.clone();
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    let operation = match action {
-                        CommitAction::Commit => michelle_client::WorkspaceOperation::Commit {
-                            cwd: operation_workspace.clone(),
-                            message,
-                            include_unstaged,
-                            push: false,
-                        },
-                        CommitAction::CommitAndPush => {
-                            michelle_client::WorkspaceOperation::Commit {
-                                cwd: operation_workspace.clone(),
-                                message,
-                                include_unstaged,
-                                push: true,
-                            }
-                        }
-                        CommitAction::Push => michelle_client::WorkspaceOperation::Push {
-                            cwd: operation_workspace.clone(),
-                        },
-                    };
-                    let result = match workspace_client.request(operation) {
-                        Ok(michelle_client::WorkspaceResult::Ack) => Ok(()),
-                        Ok(_) => Err(anyhow::anyhow!(
-                            "the daemon returned an invalid Git response"
-                        )),
-                        Err(error) => Err(error),
-                    };
-                    let snapshot = result.as_ref().err().and_then(|_| {
-                        match workspace_client.request(
-                            michelle_client::WorkspaceOperation::InspectCommit {
-                                cwd: operation_workspace.clone(),
-                            },
-                        ) {
-                            Ok(michelle_client::WorkspaceResult::CommitSnapshot { snapshot }) => {
-                                Some(snapshot)
-                            }
-                            _ => None,
-                        }
-                    });
-                    (result.map_err(|error| error.to_string()), snapshot)
-                })
-                .await;
-            let focus = michelle.update(cx, |michelle, cx| {
-                let current = michelle.commit_operation.as_ref().is_some_and(|operation| {
-                    operation.id == id
-                        && operation.workspace == workspace
-                        && operation.pending == CommitPending::Git(action)
-                });
-                if !current {
-                    return None;
-                }
-                let (result, refreshed_snapshot) = result;
-                michelle.commit_operation = None;
-                if michelle
-                    .selected_workspace_path()
-                    .is_some_and(|path| path == workspace)
-                {
-                    michelle.invalidate_workspace_queries(cx);
-                } else {
-                    michelle.branch_snapshots.invalidate(&workspace);
-                }
-                let focus = match result {
-                    Ok(()) => {
-                        let dialog_was_open = michelle
-                            .commit_dialog
-                            .as_ref()
-                            .is_some_and(|dialog| dialog.id == id);
-                        if dialog_was_open {
-                            michelle.commit_dialog = None;
-                        }
-                        michelle.show_success_toast(match action {
-                            CommitAction::Commit => tr!("commit.committed"),
-                            CommitAction::CommitAndPush => tr!("commit.committed_and_pushed"),
-                            CommitAction::Push => tr!("commit.pushed"),
-                        });
-                        dialog_was_open.then(|| michelle.composer_focus(cx))
-                    }
-                    Err(error) => {
-                        if let Some(dialog) = michelle
-                            .commit_dialog
-                            .as_mut()
-                            .filter(|dialog| dialog.id == id)
-                        {
-                            dialog.error = Some(error);
-                            if let Some(snapshot) = refreshed_snapshot {
-                                dialog.snapshot = snapshot;
-                                dialog.snapshot_loading = false;
-                            }
-                            dialog
-                                .message
-                                .update(cx, |message, _| message.set_read_only(false));
-                        } else {
-                            michelle.show_toast(error);
-                        }
-                        None
-                    }
-                };
-                cx.notify();
-                focus
-            });
-            if let Ok(Some(focus)) = focus {
-                let _ = window_handle.update(cx, |_, window, cx| window.focus(&focus, cx));
-            }
-        })
-        .detach();
     }
 
     pub(super) fn render_commit_dialog(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.commit_dialog.as_ref()?;
+        let draft = self.commit.draft.as_ref()?;
         let theme = Theme::current(cx);
-        let branch = dialog.snapshot.branch.clone();
+        let branch = draft.snapshot.branch.clone();
         let message = dialog.message.clone();
         let include_unstaged = dialog.include_unstaged;
         let pending = self
-            .commit_operation
+            .commit
+            .operation
             .as_ref()
             .filter(|operation| operation.id == dialog.id)
             .map(|operation| operation.pending);
         let include_enabled = pending.is_none();
-        let (additions, deletions) = dialog.displayed_counts();
-        let can_commit = pending.is_none() && dialog.can_commit();
-        let can_push = pending.is_none() && dialog.can_push();
+        let (additions, deletions) = draft.displayed_counts(include_unstaged);
+        let can_commit = pending.is_none() && draft.can_commit(include_unstaged);
+        let can_push = pending.is_none() && draft.can_push();
         let pending_status = pending.map(commit_pending_status_label);
-        let error = dialog.error.clone();
+        let error = draft.error.clone();
         let weak = cx.entity().downgrade();
 
         let include = {
@@ -816,7 +410,7 @@ fn render_commit_action_row(
         theme.text_ghost
     };
     let indicator = if active {
-        motion::spin(icon("arrow.clockwise", 15.0, theme.text_secondary))
+        motion::spinner(15.0, theme.text_secondary)
     } else {
         icon(icon_path, 15.0, foreground).into_any_element()
     };

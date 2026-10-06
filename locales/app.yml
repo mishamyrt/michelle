@@ -484,7 +484,7 @@ sidebar.move_to_group:
 sidebar.move_to_project:
   en: Move to Project
 sidebar.show_more:
-  en: Show more
+  en: Show More
 sidebar.working:
   en: Working for %{elapsed}
 sidebar.just_now:
@@ -859,9 +859,9 @@ activity.tool_calls:
   en: tool calls
 
 mode.supervised:
-  en: Supervised
+  en: Ask permissions
 mode.auto_accept_edits:
-  en: Auto-accept edits
+  en: Accept edits
 mode.auto:
   en: Auto
 mode.full_access:
@@ -1374,6 +1374,8 @@ errors.prepare_task_project_not_found:
   en: "Could not prepare the task: project not found"
 errors.store_pasted_image:
   en: "Could not attach the pasted image: %{error}"
+errors.store_pasted_text:
+  en: "Could not attach the pasted text: %{error}"
 errors.create_worktree:
   en: "Could not create the worktree: %{error}"
 errors.prepared_runtime_unavailable:

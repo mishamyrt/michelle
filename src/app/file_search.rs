@@ -214,7 +214,7 @@ fn revealed_scroll_offset(
 
 impl Michelle {
     pub(super) fn refresh_file_search_localized_text(&mut self, cx: &mut Context<Self>) {
-        let Some(search) = &self.file_search else {
+        let Some(search) = &self.right_panel_ui.file_search else {
             return;
         };
         search
@@ -226,32 +226,45 @@ impl Michelle {
     }
 
     fn file_search_open(&self) -> bool {
-        self.file_search.as_ref().is_some_and(|search| search.open)
+        self.right_panel_ui
+            .file_search
+            .as_ref()
+            .is_some_and(|search| search.open)
     }
 
     fn file_search_target_focused(&self, window: &Window, cx: &App) -> bool {
-        if self.file_search.as_ref().is_some_and(|search| {
-            search.open
-                && (search.query.read(cx).focus().is_focused(window)
-                    || search.replace.read(cx).focus().is_focused(window))
-        }) {
+        if self
+            .right_panel_ui
+            .file_search
+            .as_ref()
+            .is_some_and(|search| {
+                search.open
+                    && (search.query.read(cx).focus().is_focused(window)
+                        || search.replace.read(cx).focus().is_focused(window))
+            })
+        {
             return true;
         }
         self.visible_right_panel_file_path()
-            .and_then(|path| self.right_panel_file_editors.get(&path))
+            .and_then(|path| self.right_panel_model.file_editors.get(&path))
             .is_some_and(|editor| editor.state.read(cx).focus().is_focused(window))
     }
 
     /// The editor entity the open search operates on.
     fn file_search_editor(&self) -> Option<Entity<TextInput>> {
-        let search = self.file_search.as_ref().filter(|search| search.open)?;
-        self.right_panel_file_editors
+        let search = self
+            .right_panel_ui
+            .file_search
+            .as_ref()
+            .filter(|search| search.open)?;
+        self.right_panel_model
+            .file_editors
             .get(&search.path)
             .map(|editor| editor.state.clone())
     }
 
     fn ensure_file_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.file_search.is_some() {
+        if self.right_panel_ui.file_search.is_some() {
             return;
         }
         let query = cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.find")));
@@ -272,7 +285,7 @@ impl Michelle {
             }
         })
         .detach();
-        self.file_search = Some(FileSearch {
+        self.right_panel_ui.file_search = Some(FileSearch {
             open: false,
             path: String::new(),
             query,
@@ -294,7 +307,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.right_panel_visible {
+        if !self.shell_ui.right_panel_visible {
             return;
         }
         let Some(path) = self.visible_right_panel_file_path() else {
@@ -305,14 +318,19 @@ impl Michelle {
         // Seed the query from the editor's selection, the way editors
         // conventionally do, but only a single-line one: a multi-line
         // selection means "search within", which this bar does not model.
-        let seed = self.right_panel_file_editors.get(&path).and_then(|editor| {
-            let editor = editor.state.read(cx);
-            let selection = editor.selected_range();
-            let text = editor.content().get(selection)?;
-            (!text.is_empty() && !text.contains('\n')).then(|| text.to_owned())
-        });
+        let seed = self
+            .right_panel_model
+            .file_editors
+            .get(&path)
+            .and_then(|editor| {
+                let editor = editor.state.read(cx);
+                let selection = editor.selected_range();
+                let text = editor.content().get(selection)?;
+                (!text.is_empty() && !text.contains('\n')).then(|| text.to_owned())
+            });
 
         let search = self
+            .right_panel_ui
             .file_search
             .as_mut()
             .expect("ensure_file_search just created it");
@@ -343,20 +361,25 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(search) = self.file_search.as_mut().filter(|search| search.open) else {
+        let Some(search) = self
+            .right_panel_ui
+            .file_search
+            .as_mut()
+            .filter(|search| search.open)
+        else {
             return;
         };
         search.open = false;
         search.matches = Vec::new();
         search.current = None;
-        for editor in self.right_panel_file_editors.values() {
+        for editor in self.right_panel_model.file_editors.values() {
             editor.state.update(cx, |editor, cx| {
                 editor.set_search_matches(Vec::new(), None, cx)
             });
         }
         if restore_editor_focus
             && let Some(path) = self.visible_right_panel_file_path()
-            && let Some(editor) = self.right_panel_file_editors.get(&path)
+            && let Some(editor) = self.right_panel_model.file_editors.get(&path)
         {
             let focus = editor.state.read(cx).focus();
             window.focus(&focus, cx);
@@ -368,13 +391,13 @@ impl Michelle {
     /// it pointed into were swapped out wholesale. Restored editors also get
     /// their washes cleared, in case they were stored mid-search.
     pub(super) fn reset_file_search_for_session(&mut self, cx: &mut Context<Self>) {
-        if let Some(search) = self.file_search.as_mut() {
+        if let Some(search) = self.right_panel_ui.file_search.as_mut() {
             search.open = false;
             search.path = String::new();
             search.matches = Vec::new();
             search.current = None;
         }
-        for editor in self.right_panel_file_editors.values() {
+        for editor in self.right_panel_model.file_editors.values() {
             editor.state.update(cx, |editor, cx| {
                 editor.set_search_matches(Vec::new(), None, cx)
             });
@@ -386,6 +409,7 @@ impl Michelle {
     /// one recompute on the frame after the visible file changes.
     pub(super) fn sync_file_search_target(&mut self, relative_path: &str, cx: &mut Context<Self>) {
         if self
+            .right_panel_ui
             .file_search
             .as_ref()
             .is_some_and(|search| search.open && search.path != relative_path)
@@ -402,6 +426,7 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) {
         if self
+            .right_panel_ui
             .file_search
             .as_ref()
             .is_some_and(|search| search.open && search.path == relative_path)
@@ -411,7 +436,12 @@ impl Michelle {
     }
 
     fn refresh_file_search(&mut self, refresh: SearchRefresh, cx: &mut Context<Self>) {
-        let Some(search) = self.file_search.as_ref().filter(|search| search.open) else {
+        let Some(search) = self
+            .right_panel_ui
+            .file_search
+            .as_ref()
+            .filter(|search| search.open)
+        else {
             return;
         };
         let previous_path = search.path.clone();
@@ -429,7 +459,7 @@ impl Michelle {
 
         // The editor the search is leaving keeps no washes.
         if path != previous_path
-            && let Some(editor) = self.right_panel_file_editors.get(&previous_path)
+            && let Some(editor) = self.right_panel_model.file_editors.get(&previous_path)
         {
             editor.state.update(cx, |editor, cx| {
                 editor.set_search_matches(Vec::new(), None, cx)
@@ -437,7 +467,8 @@ impl Michelle {
         }
 
         let editor = self
-            .right_panel_file_editors
+            .right_panel_model
+            .file_editors
             .get(&path)
             .map(|editor| editor.state.clone());
         let (matches, limited, invalid) = match (
@@ -471,6 +502,7 @@ impl Michelle {
         };
 
         let search = self
+            .right_panel_ui
             .file_search
             .as_mut()
             .expect("still present: nothing above removes it");
@@ -487,7 +519,12 @@ impl Michelle {
     /// Pushes the match list into the searched editor, optionally moving its
     /// selection to the current match and scrolling it into view.
     fn apply_file_search_to_editor(&mut self, select: bool, reveal: bool, cx: &mut Context<Self>) {
-        let Some(search) = self.file_search.as_ref().filter(|search| search.open) else {
+        let Some(search) = self
+            .right_panel_ui
+            .file_search
+            .as_ref()
+            .filter(|search| search.open)
+        else {
             return;
         };
         let matches = search.matches.clone();
@@ -521,7 +558,7 @@ impl Michelle {
         let Some((position, line_height)) = editor.read(cx).position_for_offset(offset) else {
             return;
         };
-        let scroll = &self.right_panel_editor_scroll_handle;
+        let scroll = &self.right_panel_ui.editor_scroll_handle;
         let viewport = scroll.bounds();
         let current = scroll.offset();
         if let Some(next) = revealed_scroll_offset(
@@ -540,7 +577,12 @@ impl Michelle {
         let Some(editor) = self.file_search_editor() else {
             return;
         };
-        let Some(search) = self.file_search.as_mut().filter(|search| search.open) else {
+        let Some(search) = self
+            .right_panel_ui
+            .file_search
+            .as_mut()
+            .filter(|search| search.open)
+        else {
             return;
         };
         if search.matches.is_empty() {
@@ -563,10 +605,11 @@ impl Michelle {
     }
 
     fn file_search_writable(&self) -> bool {
-        self.file_search
+        self.right_panel_ui
+            .file_search
             .as_ref()
             .filter(|search| search.open)
-            .and_then(|search| self.right_panel_file_editors.get(&search.path))
+            .and_then(|search| self.right_panel_model.file_editors.get(&search.path))
             .is_some_and(|editor| editor.writable)
     }
 
@@ -577,7 +620,7 @@ impl Michelle {
         let Some(editor) = self.file_search_editor() else {
             return;
         };
-        let Some(search) = self.file_search.as_ref() else {
+        let Some(search) = self.right_panel_ui.file_search.as_ref() else {
             return;
         };
         let Some(range) = search
@@ -611,7 +654,11 @@ impl Michelle {
         // walk on to the next match after the caret the replacement left.
         self.refresh_file_search(SearchRefresh::Content, cx);
         let caret = editor.read(cx).cursor();
-        if let Some(search) = self.file_search.as_mut().filter(|search| search.open)
+        if let Some(search) = self
+            .right_panel_ui
+            .file_search
+            .as_mut()
+            .filter(|search| search.open)
             && !search.matches.is_empty()
         {
             search.current = match_at_or_after(&search.matches, caret);
@@ -626,7 +673,7 @@ impl Michelle {
         let Some(editor) = self.file_search_editor() else {
             return;
         };
-        let Some(search) = self.file_search.as_ref() else {
+        let Some(search) = self.right_panel_ui.file_search.as_ref() else {
             return;
         };
         let CompiledSearch::Ready(regex) = compile_search(
@@ -660,7 +707,12 @@ impl Michelle {
     }
 
     fn toggle_file_search_flag(&mut self, flag: SearchFlagKind, cx: &mut Context<Self>) {
-        let Some(search) = self.file_search.as_mut().filter(|search| search.open) else {
+        let Some(search) = self
+            .right_panel_ui
+            .file_search
+            .as_mut()
+            .filter(|search| search.open)
+        else {
             cx.propagate();
             return;
         };
@@ -803,7 +855,11 @@ impl Michelle {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let search = self.file_search.as_ref().filter(|search| search.open)?;
+        let search = self
+            .right_panel_ui
+            .file_search
+            .as_ref()
+            .filter(|search| search.open)?;
         let theme = Theme::current(cx);
         // Both rows share one input width, sized to the pane the way Zed
         // computes its search input width, so the find and replace fields
@@ -996,8 +1052,11 @@ impl Michelle {
                             element
                                 .hover(|element| element.bg(theme.overlay))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(search) =
-                                        this.file_search.as_mut().filter(|search| search.open)
+                                    if let Some(search) = this
+                                        .right_panel_ui
+                                        .file_search
+                                        .as_mut()
+                                        .filter(|search| search.open)
                                     {
                                         search.replace_visible = !search.replace_visible;
                                         cx.notify();

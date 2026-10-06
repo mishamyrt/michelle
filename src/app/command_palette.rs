@@ -11,6 +11,8 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 
 use super::*;
+use crate::ui::squircle::{SquircleStyled, squircle};
+use crate::ui::{StyledTypography, TextStyle};
 
 actions!(
     michelle_command_palette,
@@ -36,9 +38,9 @@ const PAGE_STEP: isize = 7;
 const MESSAGE_SEARCH_DEBOUNCE: Duration = Duration::from_millis(90);
 const SEARCH_ROW_HEIGHT: f32 = 60.0;
 const SECTION_HEADER_HEIGHT: f32 = 30.0;
-const PROVIDER_SECTION_TOP_MARGIN: f32 = 8.0;
-const RESULT_ROW_HEIGHT: f32 = 44.0;
-const CONTENT_RESULT_ROW_HEIGHT: f32 = 60.0;
+const UNLABELED_SECTION_TOP_MARGIN: f32 = 8.0;
+const RESULT_ROW_HEIGHT: f32 = 37.0;
+const CONTENT_RESULT_ROW_HEIGHT: f32 = 64.0;
 const EMPTY_RESULTS_HEIGHT: f32 = 180.0;
 const RESULTS_BOTTOM_PADDING: f32 = 8.0;
 const MAX_CARD_HEIGHT: f32 = 480.0;
@@ -77,6 +79,10 @@ enum PaletteSection {
 }
 
 impl PaletteSection {
+    fn has_header(self) -> bool {
+        !matches!(self, Self::Suggested | Self::Providers)
+    }
+
     fn label(self) -> String {
         crate::i18n::translate(match self {
             Self::Suggested => "command_palette.suggested",
@@ -238,12 +244,23 @@ fn palette_content_match_text(
     query: &str,
     window: &Window,
     theme: Theme,
+    highlighted: bool,
 ) -> StyledText {
     let (source_label, source_color) = match matched.source {
         MessageRole::User => (tr!("command_palette.you"), theme.gauge),
         MessageRole::Assistant | MessageRole::System => {
             (tr!("command_palette.agent"), theme.success)
         }
+    };
+    let secondary_color = if highlighted {
+        gpui::white()
+    } else {
+        theme.text_secondary
+    };
+    let tertiary_color = if highlighted {
+        gpui::white().opacity(0.8)
+    } else {
+        theme.text_tertiary
     };
     let label = format!("{source_label}: ");
     let mut text = String::with_capacity(label.len() + matched.snippet.len());
@@ -257,7 +274,11 @@ fn palette_content_match_text(
     let mut runs = vec![TextRun {
         len: label.len(),
         font: emphasized_font.clone(),
-        color: source_color,
+        color: if highlighted {
+            secondary_color
+        } else {
+            source_color
+        },
         background_color: None,
         underline: None,
         strikethrough: None,
@@ -286,15 +307,15 @@ fn palette_content_match_text(
         }
     };
     if let Some(range) = match_range {
-        push(range.start, normal_font.clone(), theme.text_tertiary);
-        push(range.len(), emphasized_font, theme.text_secondary);
+        push(range.start, normal_font.clone(), tertiary_color);
+        push(range.len(), emphasized_font, secondary_color);
         push(
             matched.snippet.len().saturating_sub(range.end),
             normal_font,
-            theme.text_tertiary,
+            tertiary_color,
         );
     } else {
-        push(matched.snippet.len(), normal_font, theme.text_tertiary);
+        push(matched.snippet.len(), normal_font, tertiary_color);
     }
     StyledText::new(text).with_runs(runs)
 }
@@ -332,10 +353,10 @@ fn command_palette_results_height(results: &[CommandPaletteItem], show_empty_sta
             .iter()
             .map(|item| {
                 let section_leading_height = if previous_section != Some(item.section) {
-                    if item.section == PaletteSection::Providers {
-                        PROVIDER_SECTION_TOP_MARGIN
-                    } else {
+                    if item.section.has_header() {
                         SECTION_HEADER_HEIGHT
+                    } else {
+                        UNLABELED_SECTION_TOP_MARGIN
                     }
                 } else {
                     0.0
@@ -348,6 +369,44 @@ fn command_palette_results_height(results: &[CommandPaletteItem], show_empty_sta
             .sum()
     };
     content_height + RESULTS_BOTTOM_PADDING
+}
+
+fn command_palette_results_container(
+    height: f32,
+    first_section: Option<PaletteSection>,
+    scroll: &ScrollHandle,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id("command-palette-results")
+        .h(px(height))
+        .flex_none()
+        .overflow_y_scroll()
+        .track_scroll(scroll)
+        .px(px(8.0))
+        .pb(px(RESULTS_BOTTOM_PADDING.min(height)))
+        // GPUI includes padding, but excludes the first child's margin, in scroll limits.
+        .when(
+            first_section.is_some_and(|section| !section.has_header()),
+            |list| list.pt(px(UNLABELED_SECTION_TOP_MARGIN)),
+        )
+}
+
+fn reveal_command_palette_item(scroll: &ScrollHandle, index: usize) {
+    let Some(item) = scroll.bounds_for_item(index) else {
+        scroll.scroll_to_item(index);
+        return;
+    };
+    let bounds = scroll.bounds();
+    let height = (bounds.size.height - px(RESULTS_BOTTOM_PADDING)).max(px(0.0));
+    let bottom = bounds.top() + height;
+    let mut offset = scroll.offset();
+    if item.size.height > height || item.top() + offset.y < bounds.top() {
+        offset.y = bounds.top() - item.top();
+    } else if item.bottom() + offset.y > bottom {
+        offset.y = bottom - item.bottom();
+    }
+    offset.y = offset.y.clamp(-scroll.max_offset().y, px(0.0));
+    scroll.set_offset(offset);
 }
 
 pub(super) struct CommandPaletteUi {
@@ -432,6 +491,7 @@ impl Michelle {
 
     fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let open_menus = self
+            .shell_ui
             .menus
             .borrow()
             .values()
@@ -442,8 +502,8 @@ impl Michelle {
         // durable surface instead of remembering that soon-detached handle.
         self.command_palette.previous_focus = if open_menus.is_empty() {
             window.focused(cx)
-        } else if self.settings_page.is_some() {
-            Some(self.settings_focus.clone())
+        } else if self.settings_ui.page.is_some() {
+            Some(self.settings_ui.focus.clone())
         } else {
             Some(self.composer_focus(cx))
         };
@@ -795,7 +855,7 @@ impl Michelle {
         commands.extend([
             CommandPaletteItem::command(
                 PaletteSection::Commands,
-                tr!(if self.sidebar_visible {
+                tr!(if self.shell_ui.sidebar_visible {
                     "command_palette.hide_sidebar"
                 } else {
                     "command_palette.show_sidebar"
@@ -808,7 +868,7 @@ impl Michelle {
             ),
             CommandPaletteItem::command(
                 PaletteSection::Commands,
-                tr!(if self.right_panel_visible {
+                tr!(if self.shell_ui.right_panel_visible {
                     "command_palette.hide_right_panel"
                 } else {
                     "command_palette.show_right_panel"
@@ -1281,7 +1341,7 @@ impl Michelle {
         let mut previous = None;
         for item in self.command_palette.results.iter().take(selected + 1) {
             if previous != Some(item.section) {
-                if item.section != PaletteSection::Providers {
+                if item.section.has_header() {
                     headers += 1;
                 }
                 previous = Some(item.section);
@@ -1296,9 +1356,10 @@ impl Michelle {
             return;
         };
         self.command_palette.selected = next;
-        self.command_palette
-            .scroll
-            .scroll_to_item(self.command_palette_scroll_index(next));
+        reveal_command_palette_item(
+            &self.command_palette.scroll,
+            self.command_palette_scroll_index(next),
+        );
         cx.notify();
     }
 
@@ -1412,7 +1473,7 @@ impl Michelle {
             .map(|session| session.id)
         {
             self.close_command_palette(window, cx);
-            self.settings_page = None;
+            self.settings_ui.page = None;
             self.select_session(session_id, cx);
             let focus = self.composer_focus(cx);
             window.focus(&focus, cx);
@@ -1458,7 +1519,7 @@ impl Michelle {
         self.state.push_session(session);
 
         self.close_command_palette(window, cx);
-        self.settings_page = None;
+        self.settings_ui.page = None;
         self.select_session(session_id, cx);
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
@@ -1486,7 +1547,7 @@ impl Michelle {
             .map(|session| session.id)
         {
             self.close_command_palette(window, cx);
-            self.settings_page = None;
+            self.settings_ui.page = None;
             self.select_session(session_id, cx);
             let focus = self.composer_focus(cx);
             window.focus(&focus, cx);
@@ -1608,7 +1669,7 @@ impl Michelle {
                 self.open_settings_page(page, cx);
             }
             PaletteAction::SelectTask(session_id) => {
-                self.settings_page = None;
+                self.settings_ui.page = None;
                 self.select_session(session_id, cx);
                 let focus = self.composer_focus(cx);
                 window.focus(&focus, cx);
@@ -1619,7 +1680,7 @@ impl Michelle {
                 // These popovers are rendered by the composer. If the command
                 // came from Settings, reveal one normal app frame first so its
                 // persistent menu handle and anchor bounds are current.
-                self.settings_page = None;
+                self.settings_ui.page = None;
                 let focus = self.composer_focus(cx);
                 window.focus(&focus, cx);
                 let weak = cx.entity().downgrade();
@@ -1695,14 +1756,17 @@ impl Michelle {
                 .min((card_max_height - SEARCH_ROW_HEIGHT).max(0.0));
         let card_height = SEARCH_ROW_HEIGHT + results_height;
 
-        let mut results = div()
-            .id("command-palette-results")
-            .h(px(results_height))
-            .flex_none()
-            .overflow_y_scroll()
-            .track_scroll(&self.command_palette.scroll)
-            .px(px(8.0))
-            .pb(px(8.0));
+        let first_section = self
+            .command_palette
+            .results
+            .first()
+            .filter(|_| !show_placeholder_state)
+            .map(|item| item.section);
+        let mut results = command_palette_results_container(
+            results_height,
+            first_section,
+            &self.command_palette.scroll,
+        );
 
         if show_placeholder_state {
             let error = resume_view
@@ -1737,7 +1801,6 @@ impl Michelle {
                     false,
                 )
             };
-            let empty_icon = icon(icon_path, 18.0, theme.text_ghost);
             results = results.child(
                 div()
                     .h(px(EMPTY_RESULTS_HEIGHT))
@@ -1746,14 +1809,14 @@ impl Michelle {
                     .items_center()
                     .justify_center()
                     .child(if spinning {
-                        motion::spin(empty_icon)
+                        motion::spinner(18.0, theme.text_ghost)
                     } else {
-                        empty_icon.into_any_element()
+                        icon(icon_path, 18.0, theme.text_ghost).into_any_element()
                     })
                     .child(
                         div()
                             .mt(px(12.0))
-                            .text_size(sp(13.0))
+                            .text_size(px(13.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text_secondary)
                             .child(title),
@@ -1763,7 +1826,7 @@ impl Michelle {
                             div()
                                 .max_w(px(540.0))
                                 .mt(px(5.0))
-                                .text_size(sp(12.5))
+                                .text_size(px(12.5))
                                 .text_color(theme.text_tertiary)
                                 .child(hint),
                         )
@@ -1783,7 +1846,7 @@ impl Michelle {
                                 ))
                                 .child(
                                     div()
-                                        .text_size(sp(12.5))
+                                        .text_size(px(12.5))
                                         .text_color(theme.text_secondary)
                                         .child(provider.display_name().to_owned()),
                                 ),
@@ -1793,19 +1856,25 @@ impl Michelle {
                         let provider = self.command_palette.resume_provider;
                         empty.child(
                             div()
+                                .relative()
                                 .id("command-palette-resume-provider")
                                 .mt(px(12.0))
                                 .h(px(28.0))
                                 .px(px(9.0))
-                                .rounded(px(8.0))
-                                .border_1()
-                                .border_color(theme.border)
                                 .flex()
                                 .items_center()
                                 .gap(px(7.0))
                                 .cursor_default()
-                                .hover(|button| button.bg(theme.overlay))
+                                .hover(|button| button.opacity(0.88))
                                 .active(|button| button.opacity(0.82))
+                                .child(
+                                    squircle()
+                                        .rounded(px(10.0))
+                                        .border(px(1.0))
+                                        .border_color(theme.border)
+                                        .border_inside()
+                                        .absolute_expand(),
+                                )
                                 .child(provider_mark(
                                     provider,
                                     13.0,
@@ -1813,7 +1882,7 @@ impl Michelle {
                                 ))
                                 .child(
                                     div()
-                                        .text_size(sp(12.5))
+                                        .text_size(px(12.5))
                                         .text_color(theme.text_secondary)
                                         .child(provider.display_name().to_owned()),
                                 )
@@ -1830,7 +1899,7 @@ impl Michelle {
             for (index, item) in self.command_palette.results.iter().enumerate() {
                 let starts_section = previous_section != Some(item.section);
                 if starts_section {
-                    if item.section != PaletteSection::Providers {
+                    if item.section.has_header() {
                         results = results.child(
                             div()
                                 .h(px(SECTION_HEADER_HEIGHT))
@@ -1838,7 +1907,7 @@ impl Michelle {
                                 .pt(px(10.0))
                                 .flex()
                                 .items_center()
-                                .text_size(sp(12.5))
+                                .text_size(px(12.5))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.text_tertiary)
                                 .child(item.section.label()),
@@ -1848,16 +1917,19 @@ impl Michelle {
                 }
 
                 let highlighted = index == selected;
-                let icon_color = match item.icon {
-                    PaletteIcon::Asset(_) => theme.text_secondary,
+                let mark_color = match item.icon {
+                    PaletteIcon::Asset(_) => theme.accent,
                     PaletteIcon::Provider(provider) => provider_color(&theme, provider),
                 };
-                // A provider row renders through `provider_mark`; an asset row
-                // stays a plain tinted icon.
+                let icon_color = if highlighted {
+                    gpui::white()
+                } else {
+                    mark_color
+                };
                 let row_mark = match item.icon {
-                    PaletteIcon::Asset(path) => icon(path, 16.0, icon_color).into_any_element(),
+                    PaletteIcon::Asset(path) => icon(path, 18.0, icon_color).into_any_element(),
                     PaletteIcon::Provider(provider) => {
-                        provider_mark(provider, 16.0, icon_color).into_any_element()
+                        provider_mark(provider, 18.0, icon_color).into_any_element()
                     }
                 };
                 let importing = match &item.action {
@@ -1878,25 +1950,25 @@ impl Michelle {
                 results = results.child(
                     div()
                         .id(SharedString::from(format!("command-palette-row-{index}")))
+                        .relative()
                         .when(
-                            starts_section && item.section == PaletteSection::Providers,
-                            |row| row.mt(px(PROVIDER_SECTION_TOP_MARGIN)),
+                            index > 0 && starts_section && !item.section.has_header(),
+                            |row| row.mt(px(UNLABELED_SECTION_TOP_MARGIN)),
                         )
                         .h(px(command_palette_row_height(item)))
                         .px(px(11.0))
-                        .rounded(px(9.0))
-                        .border_1()
-                        .border_color(if highlighted {
-                            theme.border_strong
-                        } else {
-                            gpui::transparent_black()
-                        })
                         .flex()
                         .items_center()
-                        .gap(px(10.0))
+                        .gap(px(12.0))
                         .cursor_default()
-                        .when(highlighted, |row| row.bg(theme.overlay_strong))
-                        .hover(|row| row.bg(theme.overlay))
+                        .when(highlighted, |row| {
+                            row.child(
+                                squircle()
+                                    .rounded(px(10.0))
+                                    .bg(theme.accent)
+                                    .absolute_expand(),
+                            )
+                        })
                         .active(|row| row.opacity(0.82))
                         .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                             if *hovering {
@@ -1909,13 +1981,24 @@ impl Michelle {
                         }))
                         .child(
                             div()
-                                .size(px(20.0))
+                                .relative()
+                                .size(px(28.0))
                                 .flex_none()
                                 .flex()
                                 .items_center()
                                 .justify_center()
+                                .child(
+                                    squircle()
+                                        .rounded(px(10.0))
+                                        .bg(if highlighted {
+                                            gpui::white().opacity(0.18)
+                                        } else {
+                                            mark_color.opacity(0.16)
+                                        })
+                                        .absolute_expand(),
+                                )
                                 .child(if importing {
-                                    motion::spin(icon("arrow.clockwise", 16.0, icon_color))
+                                    motion::spinner(16.0, icon_color)
                                 } else {
                                     row_mark
                                 }),
@@ -1938,16 +2021,12 @@ impl Michelle {
                                             div()
                                                 .min_w_0()
                                                 .truncate()
-                                                .text_size(sp(14.0))
-                                                .font_weight(if highlighted {
-                                                    FontWeight::MEDIUM
-                                                } else {
-                                                    FontWeight::NORMAL
-                                                })
+                                                .text_size(TextStyle::Body.size())
+                                                .font_weight(FontWeight::NORMAL)
                                                 .text_color(if highlighted {
-                                                    theme.text
+                                                    gpui::white()
                                                 } else {
-                                                    theme.text_secondary
+                                                    theme.text
                                                 })
                                                 .child(item.label.clone()),
                                         )
@@ -1956,8 +2035,12 @@ impl Michelle {
                                                 div()
                                                     .min_w_0()
                                                     .truncate()
-                                                    .text_size(sp(12.5))
-                                                    .text_color(theme.text_tertiary)
+                                                    .text_style(TextStyle::Body)
+                                                    .text_color(if highlighted {
+                                                        gpui::white().opacity(0.8)
+                                                    } else {
+                                                        theme.text_tertiary
+                                                    })
                                                     .child(detail),
                                             )
                                         }),
@@ -1969,12 +2052,13 @@ impl Michelle {
                                             .w_full()
                                             .overflow_hidden()
                                             .whitespace_nowrap()
-                                            .text_size(sp(12.5))
+                                            .text_style(TextStyle::Body)
                                             .child(palette_content_match_text(
                                                 &matched,
                                                 &search_query,
                                                 window,
                                                 theme,
+                                                highlighted,
                                             )),
                                     )
                                 }),
@@ -1982,17 +2066,15 @@ impl Michelle {
                         .when_some(shortcut, |row, shortcut| {
                             row.child(
                                 div()
-                                    .h(px(22.0))
-                                    .min_w(px(28.0))
-                                    .px(px(7.0))
-                                    .rounded(px(7.0))
                                     .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(theme.overlay_strong)
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_tertiary)
+                                    .ml(px(12.0))
+                                    .mr(px(9.0))
+                                    .text_style(TextStyle::Body)
+                                    .text_color(if highlighted {
+                                        gpui::white().opacity(0.85)
+                                    } else {
+                                        theme.text_tertiary
+                                    })
                                     .child(shortcut),
                             )
                         }),
@@ -2030,26 +2112,47 @@ impl Michelle {
                     this.dismiss_command_palette(window, cx)
                 }))
                 .w_full()
-                .max_w(px(680.0))
+                .max_w(px(780.0))
                 .h(px(card_height))
                 .overflow_hidden()
-                .rounded(px(15.0))
-                .bg(theme.raised)
-                .shadow_xl()
+                .rounded(px(16.0))
+                .shadow(vec![
+                    gpui::BoxShadow::new(
+                        px(0.0),
+                        px(36.0),
+                        gpui::black().opacity(if theme.is_dark { 0.5 } else { 0.24 }),
+                    )
+                    .blur_radius(px(100.0)),
+                    gpui::BoxShadow::new(
+                        px(0.0),
+                        px(4.0),
+                        gpui::black().opacity(if theme.is_dark { 0.2 } else { 0.08 }),
+                    )
+                    .blur_radius(px(12.0)),
+                ])
                 .relative()
                 .flex()
                 .flex_col()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
+                    squircle()
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .border(px(0.5))
+                        .border_color(theme.border_strong)
+                        .border_inside()
+                        .absolute_expand(),
+                )
+                .child(
                     div()
                         .h(px(SEARCH_ROW_HEIGHT))
-                        .px(px(19.0))
+                        .mx(px(20.0))
                         .flex_none()
                         .flex()
                         .items_center()
                         .border_b_1()
                         .border_color(theme.border)
-                        .text_size(sp(15.5))
+                        .text_size(px(15.5))
                         .text_color(theme.text)
                         .child(
                             div()
@@ -2060,17 +2163,11 @@ impl Michelle {
                 )
                 .child(results);
 
-        let scrim = if theme.is_dark {
-            gpui::hsla(0.0, 0.0, 0.0, 0.26)
-        } else {
-            gpui::hsla(0.0, 0.0, 0.0, 0.14)
-        };
         let layer = div()
             .id("command-palette-layer")
             .absolute()
             .inset_0()
             .occlude()
-            .bg(scrim)
             .px(px(24.0))
             .pt(px(top))
             .flex()
@@ -2149,6 +2246,8 @@ mod tests {
     #[test]
     fn scroll_indexes_include_section_headers() {
         let sections = [
+            PaletteSection::Suggested,
+            PaletteSection::Providers,
             PaletteSection::Tasks,
             PaletteSection::Tasks,
             PaletteSection::Commands,
@@ -2159,16 +2258,20 @@ mod tests {
             let mut previous = None;
             for section in sections.iter().take(selected + 1) {
                 if previous != Some(*section) {
-                    headers += 1;
+                    if section.has_header() {
+                        headers += 1;
+                    }
                     previous = Some(*section);
                 }
             }
             selected + headers
         };
-        assert_eq!(scroll_index(0), 1);
-        assert_eq!(scroll_index(1), 2);
-        assert_eq!(scroll_index(2), 4);
-        assert_eq!(scroll_index(3), 6);
+        assert_eq!(scroll_index(0), 0);
+        assert_eq!(scroll_index(1), 1);
+        assert_eq!(scroll_index(2), 3);
+        assert_eq!(scroll_index(3), 4);
+        assert_eq!(scroll_index(4), 6);
+        assert_eq!(scroll_index(5), 8);
     }
 
     #[test]
@@ -2230,8 +2333,109 @@ mod tests {
         ];
         assert_eq!(
             command_palette_results_height(&providers, false),
-            PROVIDER_SECTION_TOP_MARGIN + RESULT_ROW_HEIGHT * 2.0 + RESULTS_BOTTOM_PADDING
+            UNLABELED_SECTION_TOP_MARGIN + RESULT_ROW_HEIGHT * 2.0 + RESULTS_BOTTOM_PADDING
         );
+        let suggested = vec![item(PaletteSection::Suggested, 0)];
+        assert_eq!(
+            command_palette_results_height(&suggested, false),
+            UNLABELED_SECTION_TOP_MARGIN + RESULT_ROW_HEIGHT + RESULTS_BOTTOM_PADDING
+        );
+    }
+
+    #[gpui::test]
+    fn keyboard_and_wheel_scroll_keep_the_last_result_and_bottom_gutter(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        struct ResultsHarness {
+            scroll: ScrollHandle,
+            section: PaletteSection,
+        }
+
+        impl gpui::Render for ResultsHarness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let viewport_height = RESULT_ROW_HEIGHT * 3.0;
+                div()
+                    .relative()
+                    .w(px(780.0))
+                    .h(px(viewport_height))
+                    .flex()
+                    .flex_col()
+                    .child(
+                        squircle()
+                            .rounded(px(16.0))
+                            .bg(gpui::black())
+                            .absolute_expand()
+                            .debug_selector(|| "command-palette-test-background".to_owned()),
+                    )
+                    .child(
+                        command_palette_results_container(
+                            viewport_height,
+                            Some(self.section),
+                            &self.scroll,
+                        )
+                        .children((0..12).map(|_| div().h(px(RESULT_ROW_HEIGHT)))),
+                    )
+            }
+        }
+
+        let viewport_height = RESULT_ROW_HEIGHT * 3.0;
+        let card_height = viewport_height;
+        let item_count = 12;
+        for section in [PaletteSection::Suggested, PaletteSection::Providers] {
+            let scroll = ScrollHandle::new();
+            let (view, cx) = cx.add_window_view(|_, _| ResultsHarness {
+                scroll: scroll.clone(),
+                section,
+            });
+            for selected in [5, item_count - 1] {
+                cx.update(|_, cx| {
+                    reveal_command_palette_item(&scroll, selected);
+                    view.update(cx, |_, cx| cx.notify());
+                });
+                let item = scroll.bounds_for_item(selected).unwrap();
+                assert_eq!(
+                    scroll.bounds().bottom() - (item.bottom() + scroll.offset().y),
+                    px(RESULTS_BOTTOM_PADDING),
+                );
+            }
+            let first = scroll.bounds_for_item(0).unwrap();
+            let last = scroll.bounds_for_item(item_count - 1).unwrap();
+            let visible_bottom = last.bottom() + scroll.offset().y;
+            assert_eq!(
+                first.top() - scroll.bounds().top(),
+                px(UNLABELED_SECTION_TOP_MARGIN)
+            );
+            assert_eq!(scroll.bounds().bottom(), px(card_height));
+            assert_eq!(px(card_height) - visible_bottom, px(RESULTS_BOTTOM_PADDING));
+            assert_eq!(
+                cx.debug_bounds("command-palette-test-background")
+                    .unwrap()
+                    .size
+                    .height,
+                px(card_height),
+                "the squircle must cover the panel's bottom gutter",
+            );
+            cx.update(|_, cx| {
+                scroll.set_offset(gpui::Point::default());
+                view.update(cx, |_, cx| cx.notify());
+            });
+            cx.simulate_event(gpui::ScrollWheelEvent {
+                position: gpui::point(px(20.0), px(20.0)),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-23.0))),
+                ..Default::default()
+            });
+            assert_eq!(scroll.offset().y, px(-23.0));
+            cx.simulate_event(gpui::ScrollWheelEvent {
+                position: gpui::point(px(20.0), px(20.0)),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-10_000.0))),
+                ..Default::default()
+            });
+            assert_eq!(scroll.offset().y, -scroll.max_offset().y);
+            assert_eq!(
+                scroll.bounds().bottom() - (last.bottom() + scroll.offset().y),
+                px(RESULTS_BOTTOM_PADDING),
+            );
+        }
     }
 
     #[test]

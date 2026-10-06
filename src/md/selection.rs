@@ -17,6 +17,7 @@
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// Stable identity for one painted text element. `row` scopes it to a
 /// transcript row so ids survive virtualized remounts; `index` orders elements
@@ -44,7 +45,7 @@ pub struct Span {
     pub range: Range<usize>,
     /// The element's full flat text. Snapshotted when the drag resolves, so
     /// copy still works after the element scrolls out of the registry.
-    pub text: Rc<str>,
+    pub text: Arc<str>,
     /// True when this element starts a new block, so joined copy inserts a
     /// paragraph break rather than a single newline.
     pub block_break: bool,
@@ -76,7 +77,7 @@ impl Selection {
     }
 
     /// Begin with an immediate span: double- or triple-click in one element.
-    pub fn begin_with_span(&mut self, key: TextKey, text: Rc<str>, range: Range<usize>) {
+    pub fn begin_with_span(&mut self, key: TextKey, text: Arc<str>, range: Range<usize>) {
         self.anchor = Some(key.clone());
         self.anchor_offset = range.start;
         self.dragging = true;
@@ -163,7 +164,7 @@ impl Selection {
 #[derive(Clone, Debug)]
 pub struct RegisteredText<G = ()> {
     pub key: TextKey,
-    pub text: Rc<str>,
+    pub text: Arc<str>,
     /// True when this element begins a markdown block, for copy spacing.
     pub block_break: bool,
     pub geometry: G,
@@ -333,7 +334,7 @@ mod tests {
         for (index, (row, text)) in entries.iter().enumerate() {
             registry.push(RegisteredText {
                 key: TextKey::new(*row, index),
-                text: Rc::from(*text),
+                text: Arc::from(*text),
                 block_break: index > 0,
                 geometry: (),
             });
@@ -457,7 +458,7 @@ mod tests {
     fn double_and_triple_click_spans() {
         let mut selection = Selection::default();
         let key = TextKey::new("r1", 0);
-        let text: Rc<str> = Rc::from("hello world");
+        let text: Arc<str> = Arc::from("hello world");
         selection.begin_with_span(key.clone(), text.clone(), 6..11);
         assert_eq!(selection.wash_range(&key), Some(6..11));
         assert_eq!(selection.end_drag(&key).as_deref(), Some("world"));
@@ -491,7 +492,7 @@ mod tests {
         let mut registry = SelectionRegistry::default();
         registry.push(RegisteredText {
             key: TextKey::new("row-a", 0),
-            text: Rc::from("a"),
+            text: Arc::from("a"),
             block_break: false,
             geometry: (),
         });

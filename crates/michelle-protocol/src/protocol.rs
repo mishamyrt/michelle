@@ -178,9 +178,10 @@ pub enum Command {
     /// merge-only so a stale client snapshot cannot delete tasks another
     /// client just created.
     RemoveSession,
-    /// Move an idle projectless chat into an ordinary project's checkout.
+    /// Move an idle chat into another project's checkout, or a new private
+    /// workspace in the general Chats group when no project is supplied.
     MoveSessionToProject {
-        project_id: Uuid,
+        project_id: Option<Uuid>,
     },
     HydrateSession {
         session_id: Uuid,
@@ -417,6 +418,8 @@ pub enum ResponsePayload {
     },
     Session {
         session: Option<AgentSession>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<Project>,
     },
     SessionMessageMatches {
         matches: Vec<SessionMessageMatch>,
@@ -529,6 +532,44 @@ mod tests {
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
         assert_eq!(PROTOCOL_VERSION, 7);
+    }
+
+    #[test]
+    fn session_move_accepts_existing_projects_and_general_chats_on_the_wire() {
+        let project_id = Uuid::from_u128(7);
+        let ordinary =
+            serde_json::json!({ "type": "moveSessionToProject", "projectId": project_id });
+        assert!(
+            matches!(serde_json::from_value::<Command>(ordinary.clone()).unwrap(),
+            Command::MoveSessionToProject { project_id: Some(id) } if id == project_id)
+        );
+        assert_eq!(
+            serde_json::to_value(Command::MoveSessionToProject {
+                project_id: Some(project_id)
+            })
+            .unwrap(),
+            ordinary
+        );
+        assert!(matches!(
+            serde_json::from_value::<Command>(
+                serde_json::json!({ "type": "moveSessionToProject", "projectId": null })
+            )
+            .unwrap(),
+            Command::MoveSessionToProject { project_id: None }
+        ));
+        let old_response = serde_json::json!({ "type": "session", "session": null });
+        assert!(matches!(
+            serde_json::from_value::<ResponsePayload>(old_response.clone()).unwrap(),
+            ResponsePayload::Session { project: None, .. }
+        ));
+        assert_eq!(
+            serde_json::to_value(ResponsePayload::Session {
+                session: None,
+                project: None
+            })
+            .unwrap(),
+            old_response
+        );
     }
 
     #[test]

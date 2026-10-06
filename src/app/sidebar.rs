@@ -1,9 +1,35 @@
-use std::sync::LazyLock;
-
-use gpui::{ClickEvent, FontFeatures, KeyBinding, KeyboardButton, actions};
+use gpui::{ClickEvent, KeyBinding, KeyboardButton, actions, transparent_black};
 use michelle_client::persistence::SidebarProjectGroup;
 
+use crate::ui::{
+    IconSize, StyledTypography, TextStyle,
+    sidebar::{
+        SIDEBAR_ITEM_HEIGHT, SIDEBAR_SECTION_HEADER_HEIGHT, SidebarDisclosure, SidebarItemProps,
+        sidebar_item, sidebar_section_header,
+    },
+};
+
 use super::*;
+use model::*;
+pub(super) mod model;
+
+pub(super) struct SidebarUi {
+    pub(in crate::app) onboarding_add_project_focus: FocusHandle,
+    pub(in crate::app) onboarding_projectless_focus: FocusHandle,
+
+    pub(in crate::app) session_rename: Option<Uuid>,
+    pub(in crate::app) project_group_rename: Option<Uuid>,
+    pub(in crate::app) session_rename_input: Entity<TextInput>,
+    pub(in crate::app) collapsed_groups: HashSet<SidebarGroup>,
+    pub(in crate::app) project_reveal_counts: HashMap<SidebarGroup, usize>,
+    pub(in crate::app) group_header_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
+    pub(in crate::app) show_more_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
+    pub(in crate::app) list_state: ListState,
+    pub(in crate::app) scrollbar: Rc<ScrollbarState>,
+    pub(in crate::app) row_cache: RefCell<Vec<SidebarRow>>,
+    pub(in crate::app) drag_preview: Rc<RefCell<Option<sidebar::SidebarDragPreview>>>,
+    pub(in crate::app) reorder_animation: RefCell<Option<sidebar::SidebarReorderAnimation>>,
+}
 
 actions!(michelle_sidebar, [CancelSessionRename, FocusSidebar]);
 
@@ -65,17 +91,6 @@ fn focus_ring(color: Hsla) -> gpui::BoxShadow {
         .inset()
 }
 
-fn session_group_header(theme: &Theme) -> Div {
-    div()
-        .h(px(SIDEBAR_GROUP_HEADER_HEIGHT))
-        .px(px(8.0))
-        .flex()
-        .items_center()
-        .text_size(sp(13.5))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme.text_tertiary)
-}
-
 fn sidebar_collection_rename_target(id: Option<Uuid>, event: &ClickEvent) -> Option<Uuid> {
     match event {
         ClickEvent::Keyboard(event) if event.button == KeyboardButton::Enter => id,
@@ -83,231 +98,22 @@ fn sidebar_collection_rename_target(id: Option<Uuid>, event: &ClickEvent) -> Opt
     }
 }
 
-fn append_sidebar_group_rows(
-    rows: &mut Vec<SidebarRow>,
-    group: SidebarGroup,
-    sessions: &[Uuid],
-    collapsed: bool,
-    show_more: bool,
-) {
-    if sessions.is_empty() && !show_more {
-        return;
-    }
-
-    rows.push(SidebarRow::Header(group));
-    if !collapsed {
-        rows.extend(sessions.iter().copied().map(SidebarRow::Session));
-        if show_more {
-            rows.push(SidebarRow::ShowMore(group));
-        }
-    }
-    rows.push(SidebarRow::GroupSpacer);
-}
-
-/// Height of a session card plus the separation reserved beneath it in the
+/// Height of a session item plus the separation reserved beneath it in the
 /// virtualized sidebar list. Keep the gap inside the list row so measured and
 /// estimated heights stay identical for off-screen sessions.
-const SIDEBAR_SESSION_CARD_HEIGHT: f32 = 51.0;
 const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
-const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
-const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
-const SIDEBAR_SEARCH_BOTTOM_GAP: f32 = 10.0;
-const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 32.0;
-const SIDEBAR_COLLECTION_HEADER_HEIGHT: f32 = 32.0;
+const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_ITEM_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
+const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = SIDEBAR_ITEM_HEIGHT;
+const SIDEBAR_COLLECTION_HEADER_HEIGHT: f32 = SIDEBAR_SECTION_HEADER_HEIGHT;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 1.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
-const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 6.0;
-const SIDEBAR_GROUP_CHILD_PADDING: f32 = 34.0;
-const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
-const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
+const SIDEBAR_TOP_PADDING: f32 = 6.0;
+const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 16.0;
+const SIDEBAR_GROUP_CHILD_PADDING: f32 = 23.0;
+const SIDEBAR_PROJECT_INITIAL_LIMIT: usize = 5;
+const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 10;
 
-static TABULAR_NUMBERS: LazyLock<FontFeatures> =
-    LazyLock::new(|| FontFeatures(Arc::new(vec![("tnum".into(), 1)])));
-
-/// The session row's trailing time: how long the live turn has been working,
-/// or how long ago the agent last replied. A session that has never replied
-/// shows nothing.
-pub(super) fn session_time_label(session: &AgentSession, now: u64) -> Option<String> {
-    if session.status == SessionStatus::Background {
-        return Some(tr!("sidebar.status_background"));
-    }
-    if session.is_busy()
-        && let Some(turn) = session
-            .turns
-            .last()
-            .filter(|turn| turn.status == TurnStatus::Running)
-    {
-        return Some(tr!(
-            "sidebar.working",
-            elapsed = format_working_elapsed(now.saturating_sub(turn.started_at))
-        ));
-    }
-    session
-        .last_reply_at
-        .map(|last_reply_at| format_time_ago(now.saturating_sub(last_reply_at)))
-}
-
-/// Recency for sidebar ordering. A submitted turn promotes the
-/// task immediately, while metadata edits such as a rename do not; a task with
-/// no turns stays anchored to when it was created.
-fn sidebar_session_timestamp(session: &AgentSession) -> u64 {
-    session.last_reply_at.unwrap_or(session.created_at)
-}
-
-fn sort_sidebar_sessions(
-    sessions: &mut Vec<&AgentSession>,
-    ordering: SidebarOrdering,
-    manual_order: &[Uuid],
-) {
-    match ordering {
-        SidebarOrdering::Newest => {
-            sessions.sort_by_key(|session| std::cmp::Reverse(sidebar_session_timestamp(session)))
-        }
-        SidebarOrdering::Oldest => {
-            sessions.sort_by_key(|session| sidebar_session_timestamp(session))
-        }
-        SidebarOrdering::Manual => {
-            let ranks = manual_order
-                .iter()
-                .enumerate()
-                .map(|(i, id)| (*id, i))
-                .collect::<HashMap<_, _>>();
-            sessions.sort_by_key(|session| {
-                (
-                    ranks.get(&session.id).copied(),
-                    std::cmp::Reverse(session.created_at),
-                    session.id,
-                )
-            });
-        }
-    }
-}
-
-fn move_sidebar_item(
-    order: &mut Vec<Uuid>,
-    source: Uuid,
-    target: Uuid,
-    after_target: bool,
-) -> bool {
-    if source == target {
-        return false;
-    }
-    let Some(from) = order.iter().position(|id| *id == source) else {
-        return false;
-    };
-    let Some(target_index) = order.iter().position(|id| *id == target) else {
-        return false;
-    };
-    let to = target_index - usize::from(from < target_index) + usize::from(after_target);
-    if from == to {
-        return false;
-    }
-    order.remove(from);
-    order.insert(to, source);
-    true
-}
-
-fn project_sidebar_groups(
-    sessions: &[&AgentSession],
-    projectless_project_ids: &HashSet<Uuid>,
-) -> Vec<(SidebarGroup, Vec<Uuid>)> {
-    let mut groups: Vec<(SidebarGroup, Vec<Uuid>)> = Vec::new();
-    let mut indexes = HashMap::new();
-    let mut projectless_sessions = Vec::new();
-    for session in sessions {
-        if projectless_project_ids.contains(&session.project_id) {
-            projectless_sessions.push(session.id);
-            continue;
-        }
-        let index = *indexes.entry(session.project_id).or_insert_with(|| {
-            let index = groups.len();
-            groups.push((SidebarGroup::Project(session.project_id), Vec::new()));
-            index
-        });
-        groups[index].1.push(session.id);
-    }
-    if !projectless_sessions.is_empty() {
-        groups.push((SidebarGroup::Projectless, projectless_sessions));
-    }
-    groups
-}
-
-fn sidebar_project_timestamps(state: &PersistedState) -> HashMap<Uuid, u64> {
-    let mut timestamps: HashMap<Uuid, u64> = HashMap::new();
-    for session in state
-        .sessions
-        .iter()
-        .filter(|session| session.has_started())
-    {
-        let timestamp = sidebar_session_timestamp(session);
-        timestamps
-            .entry(session.project_id)
-            .and_modify(|current| {
-                *current = if state.sidebar_ordering == SidebarOrdering::Oldest {
-                    (*current).min(timestamp)
-                } else {
-                    (*current).max(timestamp)
-                };
-            })
-            .or_insert(timestamp);
-    }
-    for project in &state.projects {
-        timestamps.entry(project.id).or_insert(project.created_at);
-    }
-    timestamps
-}
-
-fn sidebar_project_sort_key(
-    ordering: SidebarOrdering,
-    timestamp: u64,
-    project: Uuid,
-) -> (u64, Uuid) {
-    (
-        if ordering == SidebarOrdering::Newest {
-            u64::MAX - timestamp
-        } else {
-            timestamp
-        },
-        project,
-    )
-}
-
-fn visible_project_sessions(
-    sessions: &[Uuid],
-    session_timestamps: &HashMap<Uuid, u64>,
-    recent_cutoff: u64,
-    revealed_older_sessions: usize,
-) -> (Vec<Uuid>, bool) {
-    let mut visible = Vec::with_capacity(sessions.len());
-    let mut older_seen = 0usize;
-    for session_id in sessions {
-        let recent = session_timestamps
-            .get(session_id)
-            .is_some_and(|timestamp| *timestamp >= recent_cutoff);
-        if recent || older_seen < revealed_older_sessions {
-            visible.push(*session_id);
-        }
-        if !recent {
-            older_seen = older_seen.saturating_add(1);
-        }
-    }
-    (visible, older_seen > revealed_older_sessions)
-}
-
-fn sidebar_project_is_projectless(project: &Project, projectless_root: Option<&Path>) -> bool {
-    projectless_root.is_some_and(|root| project.path.starts_with(root))
-}
-
-fn persisted_sidebar_branch_label(workspace: &SessionWorkspace) -> Option<&str> {
-    match workspace {
-        SessionWorkspace::Local => None,
-        SessionWorkspace::NewWorktree { base_branch } => base_branch.as_deref(),
-        SessionWorkspace::Worktree { branch, .. } => Some(branch.as_str()),
-    }
-    .filter(|branch| !branch.is_empty())
-}
-
-/// Compact "how long ago" for the sidebar: "just now", then one coarse unit —
+/// Compact "how long ago" for task pickers: "just now", then one coarse unit —
 /// "5m", "3h", "420d". Days are the largest unit so a glance still reads as a
 /// count rather than a date.
 pub(super) fn format_time_ago(seconds: u64) -> String {
@@ -322,11 +128,11 @@ pub(super) fn format_time_ago(seconds: u64) -> String {
 /// One row of the virtualized sidebar session history.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum SidebarRow {
-    /// Opens the window-wide command palette and scrolls with history.
-    Search,
+    /// Leading space that scrolls away with the history.
+    TopSpacer,
     /// User collection, or the built-in trailing Projects collection.
     Collection(Option<Uuid>),
-    /// Group header; the first row also carries the sidebar actions.
+    /// Collapsible project or projectless group header.
     Header(SidebarGroup),
     /// A started session.
     Session(Uuid),
@@ -334,120 +140,6 @@ pub(super) enum SidebarRow {
     ShowMore(SidebarGroup),
     /// Spacing between sidebar groups.
     GroupSpacer,
-}
-
-fn sidebar_working_headers(
-    state: &PersistedState,
-    projectless_root: Option<&Path>,
-) -> HashSet<SidebarRow> {
-    let projectless_projects = state
-        .projects
-        .iter()
-        .filter(|project| sidebar_project_is_projectless(project, projectless_root))
-        .map(|project| project.id)
-        .collect::<HashSet<_>>();
-    let mut collections = HashMap::new();
-    for collection in &state.sidebar_project_groups {
-        for project in &collection.projects {
-            collections.entry(*project).or_insert(collection.id);
-        }
-    }
-    let mut headers = HashSet::new();
-    for session in state.sessions.iter().filter(|session| {
-        session.has_started()
-            && matches!(
-                session.status,
-                SessionStatus::Connecting | SessionStatus::Working
-            )
-    }) {
-        let projectless = projectless_projects.contains(&session.project_id);
-        if !projectless {
-            headers.insert(SidebarRow::Collection(
-                collections.get(&session.project_id).copied(),
-            ));
-        }
-        let group = if projectless {
-            SidebarGroup::Projectless
-        } else {
-            SidebarGroup::Project(session.project_id)
-        };
-        headers.insert(SidebarRow::Header(group));
-    }
-    headers
-}
-
-fn append_sidebar_project_collections(
-    rows: &mut Vec<SidebarRow>,
-    sections: Vec<Vec<SidebarRow>>,
-    groups: &[SidebarProjectGroup],
-    projects_collapsed: bool,
-) {
-    let mut membership = HashMap::new();
-    for (index, group) in groups.iter().enumerate() {
-        for project in &group.projects {
-            membership.entry(*project).or_insert(index);
-        }
-    }
-    let mut buckets = vec![Vec::new(); groups.len() + 1];
-    let mut chats = Vec::new();
-    for section in sections {
-        if section.first() == Some(&SidebarRow::Header(SidebarGroup::Projectless)) {
-            chats = section;
-            continue;
-        }
-        let index = match section.first() {
-            Some(SidebarRow::Header(SidebarGroup::Project(id))) => {
-                membership.get(id).copied().unwrap_or(groups.len())
-            }
-            _ => groups.len(),
-        };
-        buckets[index].extend(
-            section
-                .into_iter()
-                .filter(|row| *row != SidebarRow::GroupSpacer),
-        );
-    }
-    for (index, mut bucket) in buckets.into_iter().enumerate() {
-        let group = groups.get(index);
-        rows.push(SidebarRow::Collection(group.map(|group| group.id)));
-        if !group.map_or(projects_collapsed, |group| group.collapsed) {
-            rows.append(&mut bucket);
-        }
-        rows.push(SidebarRow::GroupSpacer);
-    }
-    rows.append(&mut chats);
-}
-
-/// Only peers may be reordered: projects, or sessions within one section.
-fn sidebar_reorder_siblings(rows: &[SidebarRow], row: SidebarRow) -> Vec<SidebarRow> {
-    match row {
-        SidebarRow::Collection(Some(_)) => rows
-            .iter()
-            .copied()
-            .filter(|row| matches!(row, SidebarRow::Collection(Some(_))))
-            .collect(),
-        SidebarRow::Header(SidebarGroup::Project(_)) => rows
-            .iter()
-            .copied()
-            .filter(|row| matches!(row, SidebarRow::Header(SidebarGroup::Project(_))))
-            .collect(),
-        SidebarRow::Session(_) => {
-            let Some(index) = rows.iter().position(|candidate| *candidate == row) else {
-                return Vec::new();
-            };
-            let start = rows[..index]
-                .iter()
-                .rposition(|row| matches!(row, SidebarRow::Header(_)))
-                .map_or(0, |i| i + 1);
-            rows[start..]
-                .iter()
-                .copied()
-                .take_while(|row| !matches!(row, SidebarRow::Header(_) | SidebarRow::Collection(_)))
-                .filter(|row| matches!(row, SidebarRow::Session(_)))
-                .collect()
-        }
-        _ => Vec::new(),
-    }
 }
 
 #[derive(Clone)]
@@ -459,6 +151,12 @@ struct SidebarDrag {
     preview: Rc<RefCell<Option<SidebarDragPreview>>>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct SidebarSessionDrop {
+    group: SidebarGroup,
+    relative_to: Option<(Uuid, bool)>,
+}
+
 /// A drag changes only this snapshot; the persisted order changes on drop.
 pub(super) struct SidebarDragPreview {
     row: SidebarRow,
@@ -468,6 +166,7 @@ pub(super) struct SidebarDragPreview {
     ordering: SidebarOrdering,
     timestamps: HashMap<Uuid, u64>,
     destination: Option<(Option<Uuid>, Option<Uuid>)>,
+    session_destination: Option<SidebarSessionDrop>,
     bounds: Bounds<Pixels>,
     cursor_offset: gpui::Point<Pixels>,
     collapsed: bool,
@@ -514,7 +213,7 @@ impl SidebarReorderAnimation {
             .iter()
             .copied()
             .zip(sidebar_row_offsets(old))
-            .filter(|(row, _)| *row != SidebarRow::GroupSpacer)
+            .filter(|(row, _)| !matches!(row, SidebarRow::TopSpacer | SidebarRow::GroupSpacer))
             .map(|(row, y)| {
                 let offset = previous
                     .and_then(|animation| animation.offsets.get(&row))
@@ -545,6 +244,92 @@ impl SidebarReorderAnimation {
 }
 
 impl SidebarDragPreview {
+    fn move_session(&mut self, y: Pixels) -> bool {
+        let SidebarRow::Session(source) = self.row else {
+            return false;
+        };
+        let hovered = self
+            .offsets
+            .partition_point(|offset| *offset <= y)
+            .saturating_sub(1);
+        let hovered_row = (y >= Pixels::ZERO)
+            .then(|| self.rows.get(hovered))
+            .flatten();
+        if hovered_row == Some(&self.row) || hovered_row == Some(&SidebarRow::TopSpacer) {
+            return false;
+        }
+        let group = match hovered_row {
+            Some(SidebarRow::Header(group) | SidebarRow::ShowMore(group)) => *group,
+            Some(SidebarRow::Session(_)) => self.rows[..hovered]
+                .iter()
+                .rev()
+                .take_while(|row| {
+                    !matches!(row, SidebarRow::Collection(_) | SidebarRow::GroupSpacer)
+                })
+                .find_map(|row| match row {
+                    SidebarRow::Header(group) => Some(*group),
+                    _ => None,
+                })
+                .unwrap_or(SidebarGroup::Projectless),
+            _ => SidebarGroup::Projectless,
+        };
+        let relative_to = if let Some(SidebarRow::Session(target)) = hovered_row {
+            Some((
+                *target,
+                y >= self.offsets[hovered] + sidebar_row_height(*hovered_row.unwrap()) / 2.0,
+            ))
+        } else {
+            let sessions = self
+                .rows
+                .iter()
+                .skip_while(|row| **row != SidebarRow::Header(group))
+                .skip(1)
+                .take_while(|row| {
+                    !matches!(
+                        row,
+                        SidebarRow::Header(_) | SidebarRow::Collection(_) | SidebarRow::GroupSpacer
+                    )
+                })
+                .filter_map(|row| match row {
+                    SidebarRow::Session(id) if *id != source => Some(*id),
+                    _ => None,
+                });
+            if matches!(hovered_row, Some(SidebarRow::Header(_))) {
+                sessions.into_iter().next().map(|id| (id, false))
+            } else {
+                sessions.last().map(|id| (id, true))
+            }
+        };
+        let destination = SidebarSessionDrop { group, relative_to };
+        if self.session_destination == Some(destination) {
+            return false;
+        }
+        let mut rows = self.rows.as_ref().clone();
+        rows.retain(|row| *row != self.row);
+        let insertion = relative_to
+            .and_then(|(target, after)| {
+                rows.iter()
+                    .position(|row| *row == SidebarRow::Session(target))
+                    .map(|index| index + usize::from(after))
+            })
+            .or_else(|| {
+                rows.iter()
+                    .position(|row| *row == SidebarRow::Header(group))
+                    .map(|index| index + 1)
+            })
+            .unwrap_or_else(|| {
+                rows.push(SidebarRow::Header(group));
+                rows.push(SidebarRow::GroupSpacer);
+                rows.len() - 1
+            });
+        rows.insert(insertion, self.row);
+        let changed = rows != *self.rows || self.session_destination != Some(destination);
+        self.offsets = sidebar_row_offsets(&rows);
+        self.rows = Rc::new(rows);
+        self.session_destination = Some(destination);
+        changed
+    }
+
     fn move_row(&mut self, y: Pixels) -> bool {
         if matches!(self.row, SidebarRow::Header(SidebarGroup::Project(_))) {
             return self.move_project(y);
@@ -756,31 +541,24 @@ impl Render for SidebarDrag {
                     this.render_sidebar_collection(id, window, false, cx)
                 })
                 .unwrap_or_else(|_| div().into_any_element()),
-            _ => session_group_header(&theme)
-                .pl(px(8.0))
-                .rounded(px(6.0))
-                .font_weight(FontWeight::NORMAL)
-                .gap(px(12.0))
-                .child(icon(
-                    if preview.collapsed {
-                        "folder"
+            _ => sidebar_item(
+                "sidebar-project-drag-preview",
+                "folder",
+                self.label.clone(),
+                SidebarItemProps {
+                    disclosure: if preview.collapsed {
+                        SidebarDisclosure::Collapsed
                     } else {
-                        "folder"
+                        SidebarDisclosure::Expanded
                     },
-                    14.0,
-                    theme.text_secondary,
-                ))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .child(self.label.clone()),
-                )
-                .when(preview.working, |header| {
-                    header.child(motion::spin_slow(icon("arrow.clockwise", 14.0, theme.text)))
-                })
-                .into_any_element(),
+                    ..Default::default()
+                },
+                &theme.ui_colors(),
+            )
+            .when(preview.working, |header| {
+                header.child(motion::spinner_slow(14.0, theme.text))
+            })
+            .into_any_element(),
         };
         div()
             .w(preview.bounds.size.width)
@@ -798,7 +576,12 @@ fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<us
 
 fn sidebar_navigation_target(rows: &[SidebarRow], current: SidebarRow, key: &str) -> Option<usize> {
     let index = rows.iter().position(|row| *row == current)?;
-    let focusable = |index: &usize| rows[*index] != SidebarRow::GroupSpacer;
+    let focusable = |index: &usize| {
+        !matches!(
+            rows[*index],
+            SidebarRow::TopSpacer | SidebarRow::GroupSpacer
+        )
+    };
     match key {
         "up" => (0..index).rev().find(focusable),
         "down" => (index + 1..rows.len()).find(focusable),
@@ -810,11 +593,10 @@ fn sidebar_navigation_target(rows: &[SidebarRow], current: SidebarRow, key: &str
 
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
     px(match row {
-        SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
+        SidebarRow::TopSpacer => SIDEBAR_TOP_PADDING,
+        SidebarRow::Header(SidebarGroup::Projectless) => SIDEBAR_SECTION_HEADER_HEIGHT,
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
-        SidebarRow::Collection(_) => {
-            SIDEBAR_COLLECTION_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
-        }
+        SidebarRow::Collection(_) => SIDEBAR_COLLECTION_HEADER_HEIGHT,
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
         SidebarRow::ShowMore(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
         SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
@@ -866,18 +648,50 @@ fn reveal_sidebar_list_row(list: &ListState, rows: &[SidebarRow], index: usize) 
 }
 
 impl Michelle {
+    fn commit_sidebar_drag(&mut self, drag: &SidebarDrag, cx: &mut Context<Self>) {
+        let preview = drag.preview.borrow();
+        self.apply_sidebar_drop(drag.row, preview.as_ref(), cx);
+    }
+
+    pub(super) fn commit_session_rename(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.sidebar_ui.project_group_rename.take() {
+            let name = self
+                .sidebar_ui
+                .session_rename_input
+                .read(cx)
+                .content()
+                .to_owned();
+            self.rename_sidebar_collection(id, &name, cx);
+            return;
+        }
+        let Some(session_id) = self.sidebar_ui.session_rename.take() else {
+            return;
+        };
+        let title = self
+            .sidebar_ui
+            .session_rename_input
+            .read(cx)
+            .content()
+            .to_owned();
+        self.rename_sidebar_session(session_id, &title, cx);
+    }
+}
+
+impl Michelle {
     pub(super) fn focus_sidebar_action(
         &mut self,
         _: &FocusSidebar,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = None;
+        self.settings_ui.page = None;
         self.commit_session_rename(cx);
         self.set_sidebar_visible(true, cx);
-        let rows = self.sidebar_rows_cached(unix_time());
+        let rows = self.sidebar_rows_cached();
         let index = self
-            .pending_session_activation
+            .sessions
+            .activation
+            .pending
             .map(|pending| pending.session_id)
             .or(self.state.selected_session)
             .and_then(|id| sidebar_session_row_index(&rows, id))
@@ -892,24 +706,25 @@ impl Michelle {
     }
 
     fn focus_sidebar_row(&self, row: SidebarRow, window: &mut Window, cx: &mut Context<Self>) {
-        let rows = self.sidebar_rows_cached(unix_time());
+        let rows = self.sidebar_rows_cached();
         let Some(index) = rows.iter().position(|candidate| *candidate == row) else {
             return;
         };
         let focus = match row {
-            SidebarRow::Search => self.sidebar_search_focus.clone(),
             SidebarRow::Collection(id) => self
                 .menu_handle(format!("project-collection-{id:?}"), cx)
                 .trigger_focus_handle()
                 .clone(),
             SidebarRow::Header(group) => self
-                .sidebar_group_header_focuses
+                .sidebar_ui
+                .group_header_focuses
                 .borrow_mut()
                 .entry(group)
                 .or_insert_with(|| cx.focus_handle())
                 .clone(),
             SidebarRow::ShowMore(group) => self
-                .sidebar_show_more_focuses
+                .sidebar_ui
+                .show_more_focuses
                 .borrow_mut()
                 .entry(group)
                 .or_insert_with(|| cx.focus_handle())
@@ -918,16 +733,16 @@ impl Michelle {
                 .menu_handle(format!("session-{id}"), cx)
                 .trigger_focus_handle()
                 .clone(),
-            SidebarRow::GroupSpacer => return,
+            SidebarRow::TopSpacer | SidebarRow::GroupSpacer => return,
         };
         self.sync_sidebar_rows(&rows);
-        if self.sidebar_list_state.viewport_bounds().size.height <= Pixels::ZERO {
-            self.sidebar_list_state.scroll_to(ListOffset {
+        if self.sidebar_ui.list_state.viewport_bounds().size.height <= Pixels::ZERO {
+            self.sidebar_ui.list_state.scroll_to(ListOffset {
                 item_ix: index,
                 offset_in_item: Pixels::ZERO,
             });
         } else {
-            reveal_sidebar_list_row(&self.sidebar_list_state, &rows, index);
+            reveal_sidebar_list_row(&self.sidebar_ui.list_state, &rows, index);
         }
         // Virtualized rows must be painted before their focus joins the dispatch tree.
         window.on_next_frame(move |window, cx| window.focus(&focus, cx));
@@ -942,8 +757,8 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) -> bool {
         let key = event.keystroke.key.as_str();
-        if self.session_rename.is_none()
-            && self.sidebar_project_group_rename.is_none()
+        if self.sidebar_ui.session_rename.is_none()
+            && self.sidebar_ui.project_group_rename.is_none()
             && (self.state.sidebar_ordering == SidebarOrdering::Manual
                 || matches!(row, SidebarRow::Collection(Some(_))))
             && event.keystroke.modifiers.alt
@@ -952,7 +767,7 @@ impl Michelle {
             && !event.keystroke.modifiers.platform
             && matches!(key, "up" | "down")
         {
-            let rows = self.sidebar_rows_cached(unix_time());
+            let rows = self.sidebar_rows_cached();
             let siblings = sidebar_reorder_siblings(&rows, row);
             let target = siblings
                 .iter()
@@ -973,203 +788,19 @@ impl Michelle {
             cx.stop_propagation();
             return true;
         }
-        if self.session_rename.is_some()
-            || self.sidebar_project_group_rename.is_some()
+        if self.sidebar_ui.session_rename.is_some()
+            || self.sidebar_ui.project_group_rename.is_some()
             || event.keystroke.modifiers.modified()
             || !matches!(key, "up" | "down" | "home" | "end")
         {
             return false;
         }
-        let rows = self.sidebar_rows_cached(unix_time());
+        let rows = self.sidebar_rows_cached();
         if let Some(index) = sidebar_navigation_target(&rows, row, key) {
             self.focus_sidebar_row(rows[index], window, cx);
         }
         cx.stop_propagation();
         true
-    }
-
-    pub(super) fn window_drag_region(
-        &self,
-        region: Stateful<Div>,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        // Windows drags from the hit test, not from a mouse-move handler:
-        // `DefWindowProc` moves the window once the region reports itself as
-        // caption, and performs the user's configured double-click action.
-        #[cfg(target_os = "windows")]
-        let region = region.window_control_area(gpui::WindowControlArea::Drag);
-
-        region
-            .on_click(|event, window, _| {
-                if event.click_count() == 2 {
-                    crate::platform::titlebar_double_click(window);
-                }
-            })
-            .on_mouse_down_out(cx.listener(|this, _, _, _| {
-                this.header_drag_armed = false;
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, _| {
-                    this.header_drag_armed = true;
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, _, _, _| {
-                    this.header_drag_armed = false;
-                }),
-            )
-            .on_mouse_move(cx.listener(|this, _, window, _| {
-                if this.header_drag_armed {
-                    this.header_drag_armed = false;
-                    crate::platform::start_window_move(window);
-                }
-            }))
-    }
-    // ── Sidebar ────────────────────────────────────────────────────────────
-
-    fn render_fps_counter(&self, cx: &mut Context<Self>) -> Div {
-        let theme = Theme::current(cx);
-        let fps = self.fps_value;
-        let dot = if fps == 0 {
-            theme.text_ghost
-        } else if fps >= 55 {
-            theme.success
-        } else if fps >= 30 {
-            theme.warning
-        } else {
-            theme.danger
-        };
-        div()
-            .flex_none()
-            .h(px(26.0))
-            .px(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(5.0))
-            .text_size(sp(12.5))
-            .line_height(sp(0.0))
-            .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(dot))
-            .child(
-                div()
-                    .text_color(theme.text_tertiary)
-                    .font_family(crate::md::render::MONO_FAMILY)
-                    .child(SharedString::from(format!("{fps} FPS"))),
-            )
-    }
-
-    fn render_sidebar_toggle(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let theme = Theme::current(cx);
-        div()
-            .id("toggle-sidebar")
-            .w(px(26.0))
-            .h(px(26.0))
-            .flex_none()
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
-            .child(icon("sidebar.left", 14.0, theme.text_tertiary))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(cx.listener(|this, _, _, cx| {
-                cx.stop_propagation();
-                this.set_sidebar_visible(!this.sidebar_visible, cx);
-            }))
-    }
-
-    pub(super) fn render_history_button(
-        &self,
-        id: &'static str,
-        icon_path: &'static str,
-        enabled: bool,
-        navigate_back: bool,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let theme = Theme::current(cx);
-        div()
-            .id(id)
-            .w(px(26.0))
-            .h(px(26.0))
-            .flex_none()
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .when(!enabled, |element| element.opacity(0.35))
-            .when(enabled, |element| {
-                element
-                    .hover(|element| element.bg(theme.overlay))
-                    .active(|element| element.bg(theme.overlay_strong))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        if navigate_back {
-                            this.navigate_back_action(&NavigateBack, window, cx);
-                        } else {
-                            this.navigate_forward_action(&NavigateForward, window, cx);
-                        }
-                    }))
-            })
-            .child(icon(icon_path, 14.0, theme.text_tertiary))
-    }
-
-    fn render_sidebar_titlebar(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
-        div()
-            .id("sidebar-titlebar")
-            .h(px(48.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .children(self.render_client_window_controls(
-                super::window_chrome::WindowControlSide::Left,
-                window,
-                cx,
-            ))
-            .child(
-                self.window_drag_region(
-                    div()
-                        .id("sidebar-traffic-light-drag-region")
-                        .w(px(TRAFFIC_LIGHT_CLEARANCE))
-                        .h_full()
-                        .flex_none(),
-                    cx,
-                ),
-            )
-            .child(self.render_sidebar_toggle(cx))
-            .child(
-                div()
-                    .ml(px(6.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(2.0))
-                    .child(self.render_history_button(
-                        "navigate-back",
-                        "arrow.left",
-                        !self.session_navigation.back.is_empty(),
-                        true,
-                        cx,
-                    ))
-                    .child(self.render_history_button(
-                        "navigate-forward",
-                        "arrow.right",
-                        !self.session_navigation.forward.is_empty(),
-                        false,
-                        cx,
-                    )),
-            )
-            .child(self.window_drag_region(
-                div().id("sidebar-titlebar-drag-region").h_full().flex_1(),
-                cx,
-            ))
     }
 
     fn sidebar_menu_items(&self, weak: WeakEntity<Self>) -> Vec<MenuItem> {
@@ -1221,218 +852,6 @@ impl Michelle {
         items
     }
 
-    fn render_sidebar_action_row(
-        &self,
-        id: &'static str,
-        icon_path: &'static str,
-        label: String,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let theme = Theme::current(cx);
-        div()
-            .id(id)
-            .tab_index(0)
-            .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
-            .flex_none()
-            .px(px(4.0))
-            .rounded(px(7.0))
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .cursor_default()
-            .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
-            .hover(|element| element.bg(theme.sidebar_item_background))
-            .active(|element| element.bg(theme.overlay_strong))
-            .child(
-                div()
-                    .size(px(20.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(icon(icon_path, 14.0, theme.text_secondary)),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(sp(13.0))
-                    .text_color(theme.text)
-                    .child(label),
-            )
-    }
-
-    fn render_sidebar_new_session(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        self.render_sidebar_action_row(
-            "sidebar-new-session",
-            "square.and.pencil",
-            tr!("menu.new_task"),
-            cx,
-        )
-        .on_click(cx.listener(|this, _, window, cx| {
-            this.new_session_action(&NewSession, window, cx);
-        }))
-        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                this.new_session_action(&NewSession, window, cx);
-                cx.stop_propagation();
-            }
-        }))
-    }
-
-    fn render_sidebar_search(&self, cx: &mut Context<Self>) -> Div {
-        let search = self
-            .render_sidebar_action_row(
-                "sidebar-search",
-                "magnifyingglass",
-                tr!("sidebar.search"),
-                cx,
-            )
-            .track_focus(&self.sidebar_search_focus)
-            .tab_stop(true)
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.toggle_command_palette_action(&ToggleCommandPalette, window, cx);
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.sidebar_navigation_key_down(SidebarRow::Search, event, window, cx) {
-                    return;
-                }
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.toggle_command_palette_action(&ToggleCommandPalette, window, cx);
-                    cx.stop_propagation();
-                }
-            }));
-        div()
-            .w_full()
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP))
-            .flex_none()
-            .child(search)
-    }
-
-    fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Div {
-        let theme = Theme::current(cx);
-        div()
-            .flex_none()
-            .h(px(40.0))
-            .px(px(10.0))
-            .flex()
-            .items_center()
-            .child(
-                div()
-                    .id("open-settings")
-                    .tab_index(0)
-                    .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
-                    .w(px(26.0))
-                    .h(px(26.0))
-                    .flex_none()
-                    .rounded(px(6.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_default()
-                    .hover(|element| element.bg(theme.overlay))
-                    .active(|element| element.bg(theme.overlay_strong))
-                    .tooltip(Tooltip::text(tr_cow!("common.settings")))
-                    .child(icon("gearshape", 14.0, theme.text_tertiary))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_settings_action(&OpenSettings, window, cx);
-                    })),
-            )
-    }
-
-    /// Resolve every ordinary local project's branch in one background pass.
-    /// The render path only computes an allocation-free source fingerprint;
-    /// collection building and daemon requests happen once when that moves.
-    fn ensure_sidebar_branch_labels(&self, cx: &mut Context<Self>) {
-        let mut fingerprint = 0xb4a7_c4e5_51de_ba11;
-        for session in &self.state.sessions {
-            if session.has_started() && matches!(&session.workspace, SessionWorkspace::Local) {
-                fingerprint = mix_uuid(fingerprint, session.id);
-                fingerprint = mix_uuid(fingerprint, session.project_id);
-            }
-        }
-        for project in &self.state.projects {
-            fingerprint = mix_uuid(fingerprint, project.id);
-        }
-        if self.sidebar_branch_scan_fingerprint.get() == Some(fingerprint) {
-            return;
-        }
-        self.sidebar_branch_scan_fingerprint.set(Some(fingerprint));
-        let generation = self.sidebar_branch_scan_generation.get().wrapping_add(1);
-        self.sidebar_branch_scan_generation.set(generation);
-
-        let local_project_ids = self
-            .state
-            .sessions
-            .iter()
-            .filter(|session| {
-                session.has_started() && matches!(&session.workspace, SessionWorkspace::Local)
-            })
-            .map(|session| session.project_id)
-            .collect::<HashSet<_>>();
-        let projectless_root = crate::projectless::workspace_root();
-        let paths = self
-            .state
-            .projects
-            .iter()
-            .filter(|project| local_project_ids.contains(&project.id))
-            .filter(|project| !sidebar_project_is_projectless(project, projectless_root.as_deref()))
-            .map(|project| project.path.clone())
-            .collect::<HashSet<_>>();
-        if paths.is_empty() {
-            self.sidebar_branch_labels.borrow_mut().clear();
-            return;
-        }
-
-        let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |michelle, cx| {
-            let labels = cx
-                .background_executor()
-                .spawn(async move {
-                    let mut labels = HashMap::new();
-                    for path in paths {
-                        let branch = match workspace.request(
-                            michelle_client::WorkspaceOperation::InspectBranches {
-                                cwd: path.clone(),
-                            },
-                        ) {
-                            Ok(michelle_client::WorkspaceResult::Branches {
-                                snapshot: Some(snapshot),
-                            }) => snapshot.display_branch().map(str::to_owned),
-                            _ => None,
-                        };
-                        if let Some(branch) = branch {
-                            labels.insert(path, branch);
-                        }
-                    }
-                    labels
-                })
-                .await;
-            let _ = michelle.update(cx, |michelle, cx| {
-                if michelle.sidebar_branch_scan_generation.get() != generation {
-                    return;
-                }
-                *michelle.sidebar_branch_labels.borrow_mut() = labels
-                    .into_iter()
-                    .map(|(path, branch)| (path, SharedString::from(branch)))
-                    .collect();
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    pub(super) fn cache_sidebar_branch_label(&self, path: &Path, branch: Option<&str>) {
-        let mut labels = self.sidebar_branch_labels.borrow_mut();
-        if let Some(branch) = branch.filter(|branch| !branch.is_empty()) {
-            labels.insert(path.to_path_buf(), SharedString::from(branch.to_owned()));
-        } else {
-            labels.remove(path);
-        }
-    }
-
     pub(super) fn render_sidebar(
         &self,
         width: f32,
@@ -1440,14 +859,10 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        self.ensure_sidebar_branch_labels(cx);
-        let is_resizing = self
-            .panel_resize_drag
-            .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
-
-        let rows = self.sidebar_rows_cached(unix_time());
+        let rows = self.sidebar_rows_cached();
         let rows = if cx.has_active_drag() {
-            self.sidebar_drag_preview
+            self.sidebar_ui
+                .drag_preview
                 .borrow()
                 .as_ref()
                 .map(|preview| preview.rows.clone())
@@ -1457,16 +872,16 @@ impl Michelle {
         };
         let now = Instant::now();
         if cx.reduce_motion() {
-            self.sidebar_reorder_animation.borrow_mut().take();
-        } else if self.sidebar_reorder_animation.borrow().is_some()
-            && self.sidebar_row_cache.borrow().as_slice() != rows.as_slice()
+            self.sidebar_ui.reorder_animation.borrow_mut().take();
+        } else if self.sidebar_ui.reorder_animation.borrow().is_some()
+            && self.sidebar_ui.row_cache.borrow().as_slice() != rows.as_slice()
         {
             // A cancelled drag returns to the persisted order from the current
             // visible positions, including an unfinished slide.
             self.animate_sidebar_reorder(&rows, None, now);
         }
         {
-            let mut animation = self.sidebar_reorder_animation.borrow_mut();
+            let mut animation = self.sidebar_ui.reorder_animation.borrow_mut();
             if let Some(slide) = animation.as_mut() {
                 slide.remaining = slide.remaining_at(now);
                 if slide.remaining > 0.0 {
@@ -1479,9 +894,11 @@ impl Michelle {
         self.sync_sidebar_rows(&rows);
         // Restored selection exists before ListState knows the viewport size.
         // Retry after the first layout so nearest-edge alignment has a height.
-        if self.sidebar_list_state.viewport_bounds().size.height <= Pixels::ZERO
+        if self.sidebar_ui.list_state.viewport_bounds().size.height <= Pixels::ZERO
             && let Some(session_id) = self
-                .pending_session_activation
+                .sessions
+                .activation
+                .pending
                 .map(|pending| pending.session_id)
                 .or(self.state.selected_session)
         {
@@ -1489,7 +906,9 @@ impl Michelle {
             window.on_next_frame(move |_, cx| {
                 let _ = entity.update(cx, |this, cx| {
                     let selected_session = this
-                        .pending_session_activation
+                        .sessions
+                        .activation
+                        .pending
                         .map(|pending| pending.session_id)
                         .or(this.state.selected_session);
                     if selected_session == Some(session_id) {
@@ -1499,10 +918,13 @@ impl Michelle {
                 });
             });
         }
-        let history_scrolled =
-            self.sidebar_list_state.scroll_px_offset_for_scrollbar().y < px(-0.5);
+        let history_scrolled = self
+            .sidebar_ui
+            .list_state
+            .scroll_px_offset_for_scrollbar()
+            .y
+            < px(-SIDEBAR_TOP_PADDING - 0.5);
         let entity = cx.entity().downgrade();
-
         let history = div()
             .id("sidebar-scroll")
             .flex_1()
@@ -1518,13 +940,17 @@ impl Michelle {
                     if !event.bounds.contains(&event.event.position) {
                         return;
                     }
-                    let top = this.sidebar_list_state.logical_scroll_top();
+                    let top = this.sidebar_ui.list_state.logical_scroll_top();
                     let scroll_y =
                         preview.offsets[top.item_ix.min(preview.rows.len())] + top.offset_in_item;
-                    let y = event.event.position.y - event.bounds.top() + scroll_y
-                        - preview.cursor_offset.y
-                        + preview.bounds.size.height / 2.0;
-                    if preview.move_row(y) {
+                    let pointer_y = event.event.position.y - event.bounds.top() + scroll_y;
+                    let y = pointer_y - preview.cursor_offset.y + preview.bounds.size.height / 2.0;
+                    let changed = if drag.move_to_project {
+                        preview.move_session(pointer_y)
+                    } else {
+                        preview.move_row(y)
+                    };
+                    if changed {
                         if !cx.reduce_motion() {
                             this.animate_sidebar_reorder(
                                 &preview.rows,
@@ -1538,7 +964,7 @@ impl Michelle {
                             .partition_point(|offset| *offset <= scroll_y)
                             .saturating_sub(1)
                             .min(preview.rows.len());
-                        this.sidebar_list_state.scroll_to(ListOffset {
+                        this.sidebar_ui.list_state.scroll_to(ListOffset {
                             item_ix,
                             offset_in_item: scroll_y - preview.offsets[item_ix],
                         });
@@ -1556,22 +982,25 @@ impl Michelle {
             }))
             .child(
                 div().px(px(10.0)).size_full().child(
-                    list(self.sidebar_list_state.clone(), move |index, window, cx| {
-                        entity
-                            .upgrade()
-                            .map(|entity| {
-                                entity.update(cx, |this, cx| {
-                                    this.sidebar_row(index, &rows, window, cx)
+                    list(
+                        self.sidebar_ui.list_state.clone(),
+                        move |index, window, cx| {
+                            entity
+                                .upgrade()
+                                .map(|entity| {
+                                    entity.update(cx, |this, cx| {
+                                        this.sidebar_row(index, &rows, window, cx)
+                                    })
                                 })
-                            })
-                            .unwrap_or_else(|| div().into_any_element())
-                    })
+                                .unwrap_or_else(|| div().into_any_element())
+                        },
+                    )
                     .size_full(),
                 ),
             )
             .child(scrollbar::vertical(
-                &self.sidebar_list_state,
-                &self.sidebar_scrollbar,
+                &self.sidebar_ui.list_state,
+                &self.sidebar_ui.scrollbar,
             ))
             .when(history_scrolled, |scroll| {
                 scroll.child(
@@ -1580,7 +1009,7 @@ impl Michelle {
                         .top_0()
                         .left_0()
                         .w_full()
-                        .h(px(1.0))
+                        .h(px(0.5))
                         .bg(theme.border),
                 )
             });
@@ -1589,6 +1018,15 @@ impl Michelle {
         let weak = cx.entity().downgrade();
         let sidebar = div()
             .id("sidebar")
+            .on_drop(cx.listener(|this, drag: &SidebarDrag, _, cx| {
+                if drag.move_to_project {
+                    if let Some(preview) = drag.preview.borrow_mut().as_mut() {
+                        let outside = *preview.offsets.last().unwrap() + px(1.0);
+                        preview.move_session(outside);
+                    }
+                    this.commit_sidebar_drag(drag, cx);
+                }
+            }))
             .track_focus(menu.trigger_focus_handle())
             .tab_index(0)
             .tab_group()
@@ -1614,20 +1052,9 @@ impl Michelle {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(if is_resizing {
-                theme.sidebar_drag_background
-            } else {
-                theme.sidebar_surface()
-            })
-            .child(self.render_sidebar_titlebar(window, cx))
-            .child(
-                div()
-                    .flex_none()
-                    .px(px(10.0))
-                    .child(self.render_sidebar_new_session(cx)),
-            )
-            .child(history)
-            .child(self.render_sidebar_footer(cx));
+            .bg(transparent_black())
+            .child(self.render_toolbar_sidebar(window, cx))
+            .child(history);
         context_menu(sidebar, "sidebar-background-menu", &menu, move |cx| {
             weak.upgrade()
                 .map(|entity| entity.read(cx).sidebar_menu_items(weak.clone()))
@@ -1638,222 +1065,11 @@ impl Michelle {
     /// Keep a newly selected task visible without disturbing the sidebar when
     /// its row is already fully inside the viewport.
     pub(super) fn reveal_sidebar_session(&self, session_id: Uuid) {
-        let rows = self.sidebar_rows_cached(unix_time());
+        let rows = self.sidebar_rows_cached();
         self.sync_sidebar_rows(&rows);
         if let Some(index) = sidebar_session_row_index(&rows, session_id) {
-            reveal_sidebar_list_row(&self.sidebar_list_state, &rows, index);
+            reveal_sidebar_list_row(&self.sidebar_ui.list_state, &rows, index);
         }
-    }
-
-    /// The sidebar row snapshot, rebuilt only when its inputs move.
-    ///
-    /// The sidebar re-renders at pulse cadence whenever one of its session
-    /// rows shows a working spinner, and rebuilding the snapshot sorts every
-    /// started session and runs calendar math per session — far too much per
-    /// tick for values that move at most once per stream commit. The
-    /// fingerprint is an allocation-free scan of exactly what
-    /// [`Self::sidebar_rows`] reads: started sessions with their project and
-    /// recency and activity, the presentation preferences, the collapsed-group set, and
-    /// the moving project-recency boundary.
-    fn sidebar_rows_cached(&self, now: u64) -> Rc<Vec<SidebarRow>> {
-        let mut fingerprint = 0x51de_ba5e_5eed_c0de;
-        fingerprint = mix(
-            fingerprint,
-            match self.state.sidebar_ordering {
-                SidebarOrdering::Newest => 1,
-                SidebarOrdering::Oldest => 2,
-                SidebarOrdering::Manual => 3,
-            },
-        );
-        for session in &self.state.sessions {
-            if !session.has_started() {
-                continue;
-            }
-            fingerprint = mix_uuid(fingerprint, session.id);
-            fingerprint = mix_uuid(fingerprint, session.project_id);
-            fingerprint = mix(
-                fingerprint,
-                u64::from(matches!(
-                    session.status,
-                    SessionStatus::Connecting | SessionStatus::Working
-                )),
-            );
-            if self.state.sidebar_ordering == SidebarOrdering::Manual {
-                fingerprint = mix(fingerprint, session.created_at);
-            }
-            if self.state.sidebar_ordering != SidebarOrdering::Manual {
-                fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
-            }
-            if self.state.sidebar_ordering != SidebarOrdering::Manual {
-                fingerprint = mix(
-                    fingerprint,
-                    u64::from(
-                        sidebar_session_timestamp(session)
-                            >= now.saturating_sub(SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS),
-                    ),
-                );
-            }
-        }
-        for project in &self.state.projects {
-            fingerprint = mix_uuid(fingerprint, project.id);
-            fingerprint = mix(fingerprint, project.created_at);
-        }
-        fingerprint = mix(
-            fingerprint,
-            u64::from(self.state.sidebar_projects_collapsed),
-        );
-        for group in &self.state.sidebar_project_groups {
-            fingerprint = mix_uuid(fingerprint, group.id);
-            fingerprint = mix(fingerprint, u64::from(group.collapsed));
-            for project in &group.projects {
-                fingerprint = mix_uuid(fingerprint, *project);
-            }
-        }
-        // A map has no stable iteration order; combine order-independently.
-        let revealed = self
-            .sidebar_project_reveal_counts
-            .iter()
-            .fold(0u64, |combined, (group, count)| {
-                combined.wrapping_add(group.mix_fingerprint(*count as u64))
-            });
-        fingerprint = mix(
-            mix(fingerprint, self.sidebar_project_reveal_counts.len() as u64),
-            revealed,
-        );
-        // A set has no stable iteration order; combine order-independently.
-        let collapsed = self
-            .sidebar_collapsed_groups
-            .iter()
-            .fold(0u64, |combined, group| {
-                combined.wrapping_add(group.mix_fingerprint(0))
-            });
-        fingerprint = mix(
-            mix(fingerprint, self.sidebar_collapsed_groups.len() as u64),
-            collapsed,
-        );
-        if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
-            *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(self.sidebar_rows(now));
-            *self.sidebar_working_headers.borrow_mut() = sidebar_working_headers(
-                &self.state,
-                crate::projectless::workspace_root().as_deref(),
-            );
-            self.sidebar_rows_fingerprint.set(Some(fingerprint));
-        }
-        self.sidebar_rows_snapshot.borrow().clone()
-    }
-
-    /// Snapshot the session history as a flat list of lightweight rows under
-    /// projects and the current ordering preference.
-    fn sidebar_rows(&self, now: u64) -> Vec<SidebarRow> {
-        let mut sorted_sessions = self
-            .state
-            .sessions
-            .iter()
-            .filter(|session| session.has_started())
-            .collect::<Vec<_>>();
-        sort_sidebar_sessions(
-            &mut sorted_sessions,
-            self.state.sidebar_ordering,
-            &self.state.sidebar_session_order,
-        );
-
-        let mut rows = vec![SidebarRow::Search];
-        let recent_cutoff = now.saturating_sub(SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS);
-        let session_timestamps = sorted_sessions
-            .iter()
-            .map(|session| (session.id, sidebar_session_timestamp(session)))
-            .collect::<HashMap<_, _>>();
-        let projectless_root = crate::projectless::workspace_root();
-        let projectless_project_ids = self
-            .state
-            .projects
-            .iter()
-            .filter(|project| sidebar_project_is_projectless(project, projectless_root.as_deref()))
-            .map(|project| project.id)
-            .collect::<HashSet<_>>();
-        *self.sidebar_projectless_projects.borrow_mut() = projectless_project_ids.clone();
-        let mut groups = project_sidebar_groups(&sorted_sessions, &projectless_project_ids);
-        let mut known = groups
-            .iter()
-            .filter_map(|(group, _)| match group {
-                SidebarGroup::Project(id) => Some(*id),
-                _ => None,
-            })
-            .collect::<HashSet<_>>();
-        for project in &self.state.projects {
-            if !projectless_project_ids.contains(&project.id) && known.insert(project.id) {
-                groups.push((SidebarGroup::Project(project.id), Vec::new()));
-            }
-        }
-        let project_timestamps = sidebar_project_timestamps(&self.state);
-        if self.state.sidebar_ordering != SidebarOrdering::Manual {
-            groups.sort_by_key(|(group, _)| {
-                let project = match group {
-                    SidebarGroup::Project(id) => *id,
-                    _ => Uuid::nil(),
-                };
-                let timestamp = project_timestamps
-                    .get(&project)
-                    .copied()
-                    .unwrap_or_default();
-                (
-                    matches!(group, SidebarGroup::Projectless),
-                    sidebar_project_sort_key(self.state.sidebar_ordering, timestamp, project),
-                )
-            });
-        }
-        if self.state.sidebar_ordering == SidebarOrdering::Manual {
-            let ranks = self
-                .state
-                .sidebar_project_order
-                .iter()
-                .enumerate()
-                .map(|(i, id)| (*id, i))
-                .collect::<HashMap<_, _>>();
-            groups.sort_by_key(|(group, _)| match group {
-                SidebarGroup::Project(id) => (0, ranks.get(id).copied().unwrap_or(usize::MAX)),
-                _ => (1, usize::MAX),
-            });
-        }
-        let mut sections = Vec::with_capacity(groups.len());
-        for (group, sessions) in groups {
-            let mut section = Vec::new();
-            let revealed_older_sessions = self
-                .sidebar_project_reveal_counts
-                .get(&group)
-                .copied()
-                .unwrap_or_default();
-            let (visible_sessions, show_more) =
-                if self.state.sidebar_ordering == SidebarOrdering::Manual {
-                    (sessions, false)
-                } else {
-                    visible_project_sessions(
-                        &sessions,
-                        &session_timestamps,
-                        recent_cutoff,
-                        revealed_older_sessions,
-                    )
-                };
-            if visible_sessions.is_empty() && !show_more {
-                section.extend([SidebarRow::Header(group), SidebarRow::GroupSpacer]);
-            } else {
-                append_sidebar_group_rows(
-                    &mut section,
-                    group,
-                    &visible_sessions,
-                    self.sidebar_collapsed_groups.contains(&group),
-                    show_more,
-                );
-            }
-            sections.push(section);
-        }
-        append_sidebar_project_collections(
-            &mut rows,
-            sections,
-            &self.state.sidebar_project_groups,
-            self.state.sidebar_projects_collapsed,
-        );
-        rows
     }
 
     fn animate_sidebar_reorder(
@@ -1862,9 +1078,9 @@ impl Michelle {
         dragged: Option<SidebarRow>,
         now: Instant,
     ) {
-        let mut animation = self.sidebar_reorder_animation.borrow_mut();
+        let mut animation = self.sidebar_ui.reorder_animation.borrow_mut();
         *animation = SidebarReorderAnimation::between(
-            &self.sidebar_row_cache.borrow(),
+            &self.sidebar_ui.row_cache.borrow(),
             rows,
             animation.as_ref(),
             dragged,
@@ -1877,7 +1093,7 @@ impl Michelle {
     /// preserving scroll position and measured heights across unrelated churn
     /// (e.g. the active session's `updated_at` bumping on every stream tick).
     fn sync_sidebar_rows(&self, rows: &[SidebarRow]) {
-        let mut cached = self.sidebar_row_cache.borrow_mut();
+        let mut cached = self.sidebar_ui.row_cache.borrow_mut();
         if cached.as_slice() == rows {
             return;
         }
@@ -1889,14 +1105,17 @@ impl Michelle {
         let old_count = cached.len();
         *cached = rows.to_vec();
         if old_count == 0 {
-            self.sidebar_list_state
+            self.sidebar_ui
+                .list_state
                 .reset_with_uniform_height(rows.len(), px(SIDEBAR_SESSION_ROW_HEIGHT));
         } else {
-            self.sidebar_list_state
+            self.sidebar_ui
+                .list_state
                 .splice(prefix..old_count, rows.len() - prefix);
             // Newly inserted rows have no measured height yet; give them the
             // uniform hint so the scrollbar keeps a correct total height.
-            self.sidebar_list_state
+            self.sidebar_ui
+                .list_state
                 .clone()
                 .with_uniform_item_height(px(SIDEBAR_SESSION_ROW_HEIGHT));
         }
@@ -1914,15 +1133,16 @@ impl Michelle {
         };
         let dragged = cx.has_active_drag()
             && self
-                .sidebar_drag_preview
+                .sidebar_ui
+                .drag_preview
                 .borrow()
                 .as_ref()
                 .is_some_and(|preview| preview.row == *row);
         let element = match *row {
-            SidebarRow::Search => self.render_sidebar_search(cx).into_any_element(),
+            SidebarRow::TopSpacer => div().w_full().h(px(SIDEBAR_TOP_PADDING)).into_any_element(),
             SidebarRow::Collection(id) => self.render_sidebar_collection(id, window, true, cx),
             SidebarRow::Header(group) => self
-                .render_sidebar_group_header(group, cx)
+                .render_sidebar_group_header(group, window, cx)
                 .into_any_element(),
             SidebarRow::Session(session_id) => {
                 self.render_sidebar_session_item(session_id, true, cx)
@@ -1936,7 +1156,8 @@ impl Michelle {
                 .into_any_element(),
         };
         let offset = self
-            .sidebar_reorder_animation
+            .sidebar_ui
+            .reorder_animation
             .borrow()
             .as_ref()
             .and_then(|animation| {
@@ -1965,24 +1186,30 @@ impl Michelle {
         }
     }
 
-    fn render_sidebar_group_header(&self, group: SidebarGroup, cx: &mut Context<Self>) -> Div {
+    fn render_sidebar_group_header(
+        &self,
+        group: SidebarGroup,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = Theme::current(cx);
-        let collapsed = self.sidebar_collapsed_groups.contains(&group);
+        let collapsed = self.sidebar_ui.collapsed_groups.contains(&group);
         let working = collapsed
             && self
-                .sidebar_working_headers
+                .sidebar_model
+                .working_headers
                 .borrow()
                 .contains(&SidebarRow::Header(group));
         let group_key = group.element_key();
         let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
         let header_focus = self
-            .sidebar_group_header_focuses
+            .sidebar_ui
+            .group_header_focuses
             .borrow_mut()
             .entry(group)
             .or_insert_with(|| cx.focus_handle())
             .clone();
         let is_project = matches!(group, SidebarGroup::Project(_));
-        let folder_icon = if collapsed { "folder" } else { "folder" };
         let label = match group {
             SidebarGroup::Project(project_id) => self
                 .state
@@ -1993,148 +1220,84 @@ impl Michelle {
                 .unwrap_or_else(|| tr!("project.no_project_name")),
             SidebarGroup::Projectless => tr!("sidebar.chats"),
         };
-        let compose = {
-            let compose_focus = self
-                .sidebar_group_compose_focuses
-                .borrow_mut()
-                .entry(group)
-                .or_insert_with(|| cx.focus_handle())
-                .clone();
-            div()
-                .w(px(20.0))
-                .h(px(22.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_end()
-                .child(
-                    div()
-                        .id(SharedString::from(format!(
-                            "sidebar-group-compose-{group_key}"
-                        )))
-                        .track_focus(&compose_focus)
-                        .tab_index(0)
-                        .tab_stop(true)
-                        .w_0()
-                        .h(px(22.0))
-                        .overflow_hidden()
-                        .rounded(px(4.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .cursor_default()
-                        .opacity(0.0)
-                        .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
-                        .focus_visible(|style| {
-                            style
-                                .w(px(20.0))
-                                .opacity(1.0)
-                                .shadow(vec![focus_ring(theme.accent)])
-                        })
-                        .hover(|style| style.bg(theme.overlay))
-                        .active(|style| style.bg(theme.overlay_strong))
-                        .tooltip(Tooltip::text(tr!("menu.new_task")))
-                        .child(icon("square.and.pencil", 14.0, theme.text_secondary))
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.open_new_task_for_sidebar_group(group, window, cx);
-                        }))
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                this.open_new_task_for_sidebar_group(group, window, cx);
-                                cx.stop_propagation();
-                            }
-                        })),
-                )
-        };
-
-        let header = session_group_header(&theme)
-            .id(SharedString::from(format!(
-                "sidebar-group-toggle-{group_key}"
-            )))
-            .track_focus(&header_focus)
-            .tab_index(0)
-            .tab_group()
-            .tab_stop(true)
-            .group(group_name)
-            .relative()
-            .w_full()
-            .rounded(px(6.0))
-            .pl(px(8.0))
-            .when(is_project, |header| header.font_weight(FontWeight::NORMAL))
-            .when(group == SidebarGroup::Projectless, |header| {
-                header.on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            })
-            .cursor_default()
-            .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
-            .hover(|style| style.bg(theme.sidebar_item_background))
-            .active(|style| style.bg(theme.overlay_strong))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(22.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .when(is_project, |element| {
-                        element.child(icon(folder_icon, 14.0, theme.text_secondary))
-                    })
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex()
-                            .items_center()
-                            .gap(px(2.0))
-                            .child(div().min_w_0().truncate().child(label.clone()))
-                            .text_color(if is_project {
-                                theme.text
-                            } else {
-                                theme.text_tertiary
-                            }),
-                    )
-                    .child(div().flex_1()),
-            )
-            .when(!is_project, |header| {
-                header.child(icon("chevron.down", 14.0, theme.text_secondary).when(
-                    collapsed,
-                    |icon| {
-                        icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
-                            0.75,
-                        )))
+        let header = if is_project {
+            sidebar_item(
+                SharedString::from(format!("sidebar-group-toggle-{group_key}")),
+                "folder",
+                label.clone(),
+                SidebarItemProps {
+                    disclosure: if collapsed {
+                        SidebarDisclosure::Collapsed
+                    } else {
+                        SidebarDisclosure::Expanded
                     },
-                ))
-            })
-            .child(compose)
-            .when(working, |element| {
-                element.child(
-                    div()
-                        .ml(px(6.0))
-                        .w(px(14.0))
-                        .flex_none()
-                        .child(motion::spin_slow(icon("arrow.clockwise", 14.0, theme.text))),
+                    ..Default::default()
+                },
+                &theme.ui_colors(),
+            )
+        } else {
+            sidebar_section_header(label.clone(), &theme.ui_colors())
+                .pl(px(4.0))
+                .id(SharedString::from(format!(
+                    "sidebar-group-toggle-{group_key}"
+                )))
+        }
+        .track_focus(&header_focus)
+        .tab_index(0)
+        .tab_group()
+        .tab_stop(true)
+        .group(group_name.clone())
+        .relative()
+        .rounded(px(7.0))
+        .cursor_default()
+        .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
+        .when(!is_project, |header| {
+            header.child(
+                icon(
+                    if collapsed {
+                        "chevron.right"
+                    } else {
+                        "chevron.down"
+                    },
+                    12.0,
+                    theme.text_secondary,
                 )
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.toggle_sidebar_group(group, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if this.sidebar_navigation_key_down(SidebarRow::Header(group), event, window, cx) {
-                    return;
+                .invisible()
+                .group_hover(group_name, |style| style.visible())
+                .when(
+                    window.last_input_was_keyboard() && header_focus.is_focused(window),
+                    |icon| icon.visible(),
+                ),
+            )
+        })
+        .when(working, |element| {
+            element.child(
+                div()
+                    .ml(px(6.0))
+                    .w(px(14.0))
+                    .flex_none()
+                    .child(motion::spinner_slow(14.0, theme.text)),
+            )
+        })
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.toggle_sidebar_group(group, cx);
+        }))
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+            if this.sidebar_navigation_key_down(SidebarRow::Header(group), event, window, cx) {
+                return;
+            }
+            match event.keystroke.key.as_str() {
+                "left" if !collapsed => {
+                    this.set_sidebar_group_collapsed(group, true, cx);
+                    cx.stop_propagation();
                 }
-                match event.keystroke.key.as_str() {
-                    "left" if !collapsed => {
-                        this.set_sidebar_group_collapsed(group, true, cx);
-                        cx.stop_propagation();
-                    }
-                    "right" if collapsed => {
-                        this.set_sidebar_group_collapsed(group, false, cx);
-                        cx.stop_propagation();
-                    }
-                    _ => {}
+                "right" if collapsed => {
+                    this.set_sidebar_group_collapsed(group, false, cx);
+                    cx.stop_propagation();
                 }
-            }));
+                _ => {}
+            }
+        }));
 
         let header = self.sidebar_reorderable_row(
             header,
@@ -2143,73 +1306,55 @@ impl Michelle {
             false,
             cx,
         );
-        let header = if let SidebarGroup::Project(project) = group {
-            let menu = self.menu_handle(format!("sidebar-project-{project}"), cx);
-            let keyboard_menu = menu.clone();
-            let weak = cx.entity().downgrade();
-            let drop_weak = weak.clone();
-            context_menu(
-                header
-                    .drag_over::<SidebarDrag>(move |style, drag, _, _| {
-                        if drag.move_to_project {
-                            style.bg(theme.overlay_strong)
-                        } else {
-                            style
-                        }
+        let menu = self.menu_handle(format!("sidebar-{group_key}"), cx);
+        let keyboard_menu = menu.clone();
+        let weak = cx.entity().downgrade();
+        let header = context_menu(
+            header.capture_key_down(move |event, window, cx| {
+                if (event.keystroke.key == "f10" && event.keystroke.modifiers.shift)
+                    || (event.keystroke.key == "enter" && event.keystroke.modifiers.control)
+                {
+                    keyboard_menu.open_context_menu(window, cx);
+                    cx.stop_propagation();
+                }
+            }),
+            format!("sidebar-group-menu-{group_key}"),
+            &menu,
+            move |cx| {
+                weak.upgrade()
+                    .map(|michelle| {
+                        michelle
+                            .read(cx)
+                            .sidebar_group_menu_items(group, weak.clone())
                     })
-                    .can_drop(move |value, _, cx| {
-                        value.downcast_ref::<SidebarDrag>().is_some_and(|drag| {
-                            let SidebarRow::Session(session) = drag.row else {
-                                return false;
-                            };
-                            drop_weak.upgrade().is_some_and(|entity| {
-                                let this = entity.read(cx);
-                                this.state
-                                    .sessions
-                                    .iter()
-                                    .find(|item| item.id == session)
-                                    .is_some_and(|session| {
-                                        this.sidebar_session_can_move_to_project(session)
-                                    })
-                            })
-                        })
-                    })
-                    .on_drop(cx.listener(move |this, drag: &SidebarDrag, _, cx| {
-                        if let SidebarRow::Session(session) = drag.row {
-                            this.move_sidebar_session_to_project(session, project, cx);
-                        }
-                        cx.stop_propagation();
-                    }))
-                    .capture_key_down(move |event, window, cx| {
-                        if (event.keystroke.key == "f10" && event.keystroke.modifiers.shift)
-                            || (event.keystroke.key == "enter" && event.keystroke.modifiers.control)
-                        {
-                            keyboard_menu.open_context_menu(window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                format!("sidebar-project-menu-{project}"),
-                &menu,
-                move |cx| {
-                    weak.upgrade()
-                        .map(|michelle| {
-                            michelle
-                                .read(cx)
-                                .sidebar_project_menu_items(project, weak.clone())
-                        })
-                        .unwrap_or_default()
-                },
-            )
-        } else {
-            header.into_any_element()
-        };
+                    .unwrap_or_default()
+            },
+        );
         div()
             .w_full()
-            .pb(px(SIDEBAR_GROUP_HEADER_BOTTOM_GAP))
+            .when(is_project, |row| {
+                row.pb(px(SIDEBAR_GROUP_HEADER_BOTTOM_GAP))
+            })
             .child(header)
     }
 
-    fn sidebar_project_menu_items(&self, project: Uuid, weak: WeakEntity<Self>) -> Vec<MenuItem> {
+    fn sidebar_group_menu_items(
+        &self,
+        group: SidebarGroup,
+        weak: WeakEntity<Self>,
+    ) -> Vec<MenuItem> {
+        let new_task_weak = weak.clone();
+        let mut items = vec![
+            MenuItem::new(tr!("menu.new_task"), move |window, cx| {
+                let _ = new_task_weak.update(cx, |this, cx| {
+                    this.open_new_task_for_sidebar_group(group, window, cx);
+                });
+            })
+            .icon("square.and.pencil"),
+        ];
+        let SidebarGroup::Project(project) = group else {
+            return items;
+        };
         let selected = self.state.sidebar_group_for_project(project);
         let groups = self
             .state
@@ -2218,7 +1363,8 @@ impl Michelle {
             .map(|group| (Some(group.id), group.name.clone()))
             .chain(std::iter::once((None, tr!("sidebar.projects"))))
             .collect::<Vec<_>>();
-        vec![MenuItem::submenu_with_value(
+        items.push(MenuItem::Separator);
+        items.push(MenuItem::submenu_with_value(
             tr!("sidebar.move_to_group"),
             groups
                 .iter()
@@ -2240,7 +1386,8 @@ impl Michelle {
                     })
                     .collect()
             },
-        )]
+        ));
+        items
     }
 
     fn render_sidebar_collection(
@@ -2265,13 +1412,14 @@ impl Michelle {
         });
         let working = collapsed
             && self
-                .sidebar_working_headers
+                .sidebar_model
+                .working_headers
                 .borrow()
                 .contains(&SidebarRow::Collection(id));
         let menu = self.menu_handle(format!("project-collection-{id:?}"), cx);
         let keyboard_menu = menu.clone();
         let group_name = SharedString::from(format!("project-collection-header-{id:?}"));
-        let renaming = interactive && id.is_some() && self.sidebar_project_group_rename == id;
+        let renaming = interactive && id.is_some() && self.sidebar_ui.project_group_rename == id;
         let title = if renaming {
             div()
                 .key_context(SESSION_RENAME_PARENT_CONTEXT)
@@ -2282,9 +1430,10 @@ impl Michelle {
                 .min_w_0()
                 .border_1()
                 .border_color(theme.accent)
+                .line_height(px(SIDEBAR_COLLECTION_HEADER_HEIGHT - 2.0))
                 .rounded(px(4.0))
                 .bg(theme.inset)
-                .child(self.session_rename_input.clone())
+                .child(self.sidebar_ui.session_rename_input.clone())
                 .into_any_element()
         } else {
             div()
@@ -2294,37 +1443,36 @@ impl Michelle {
                 .child(label.clone())
                 .into_any_element()
         };
-        let header = session_group_header(&theme)
+        let header = sidebar_section_header(title, &theme.ui_colors())
             .id(group_name.clone())
             .group(group_name.clone())
-            .h(px(SIDEBAR_COLLECTION_HEADER_HEIGHT))
-            .pl(px(8.0))
+            .pl(px(4.0))
             .pr(px(8.0))
-            .py(px(2.0))
             .relative()
             .w_full()
             .rounded(px(6.0))
             .gap(px(12.0))
             .cursor_default()
-            .child(title)
             .child(
                 icon("chevron.down", 14.0, theme.text_secondary)
                     .flex_none()
+                    .invisible()
+                    .group_hover(group_name, |style| style.visible())
+                    .when(
+                        interactive
+                            && !renaming
+                            && window.last_input_was_keyboard()
+                            && menu.trigger_focus_handle().is_focused(window),
+                        |icon| icon.visible(),
+                    )
                     .when(collapsed, |icon| {
                         icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
                             0.75,
                         )))
-                    })
-                    .invisible()
-                    .group_hover(group_name, |icon| icon.visible())
-                    .when(
-                        window.last_input_was_keyboard()
-                            && menu.trigger_focus_handle().is_focused(window),
-                        |icon| icon.visible(),
-                    ),
+                    }),
             )
             .when(working, |header| {
-                header.child(motion::spin_slow(icon("arrow.clockwise", 14.0, theme.text)))
+                header.child(motion::spinner_slow(14.0, theme.text))
             })
             .when(interactive && !renaming, |header| {
                 header
@@ -2333,7 +1481,6 @@ impl Michelle {
                     .tab_group()
                     .tab_stop(true)
                     .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
-                    .hover(|style| style.bg(theme.sidebar_item_background))
                     // GPUI emits a click on Enter/Space release; handle activation only here.
                     .on_click(cx.listener(move |this, event, window, cx| {
                         if let Some(id) = sidebar_collection_rename_target(id, event) {
@@ -2369,11 +1516,7 @@ impl Michelle {
                     .on_mouse_down_out(cx.listener(|this, _, _, cx| this.commit_session_rename(cx)))
             });
         if !interactive {
-            return div()
-                .w_full()
-                .pb(px(SIDEBAR_GROUP_HEADER_BOTTOM_GAP))
-                .child(header)
-                .into_any_element();
+            return div().w_full().child(header).into_any_element();
         }
         let header = if renaming {
             header
@@ -2388,10 +1531,7 @@ impl Michelle {
         };
         let weak = cx.entity().downgrade();
         context_menu(
-            div()
-                .w_full()
-                .pb(px(SIDEBAR_GROUP_HEADER_BOTTOM_GAP))
-                .child(header),
+            div().w_full().child(header),
             format!("project-collection-menu-{id:?}"),
             &menu,
             move |_| {
@@ -2414,11 +1554,7 @@ impl Michelle {
                         }),
                         MenuItem::new(tr!("common.remove"), move |window, cx| {
                             let _ = remove.update(cx, |this, cx| {
-                                if this.state.remove_sidebar_project_group(id) {
-                                    if this.sidebar_project_group_rename == Some(id) {
-                                        this.sidebar_project_group_rename = None;
-                                    }
-                                    this.save_sidebar_presentation(cx);
+                                if this.remove_sidebar_collection(id, cx) {
                                     this.focus_sidebar_row(
                                         SidebarRow::Collection(None),
                                         window,
@@ -2434,87 +1570,9 @@ impl Michelle {
         )
     }
 
-    fn save_sidebar_presentation(&mut self, cx: &mut Context<Self>) {
-        self.sidebar_rows_fingerprint.set(None);
-        self.save();
-        cx.notify();
-    }
-
-    fn move_sidebar_project_to_collection(
-        &mut self,
-        project: Uuid,
-        target: Option<Uuid>,
-        cx: &mut Context<Self>,
-    ) {
-        if self.state.sidebar_group_for_project(project) == target {
-            return;
-        }
-        let manual = self.state.sidebar_ordering == SidebarOrdering::Manual;
-        let before = if manual {
-            self.remember_sidebar_manual_order();
-            let membership = self
-                .state
-                .sidebar_project_groups
-                .iter()
-                .flat_map(|group| group.projects.iter().map(move |id| (*id, group.id)))
-                .collect::<HashMap<_, _>>();
-            self.state
-                .sidebar_project_order
-                .iter()
-                .copied()
-                .find(|id| *id != project && membership.get(id).copied() == target)
-        } else {
-            None
-        };
-        if self.state.move_project_to_sidebar_group(project, target) {
-            if manual {
-                self.state.sidebar_project_order.retain(|id| *id != project);
-                let index = before
-                    .and_then(|id| {
-                        self.state
-                            .sidebar_project_order
-                            .iter()
-                            .position(|item| *item == id)
-                    })
-                    .unwrap_or(self.state.sidebar_project_order.len());
-                self.state.sidebar_project_order.insert(index, project);
-            }
-            self.save_sidebar_presentation(cx);
-        }
-    }
-
-    fn set_sidebar_collection_collapsed(
-        &mut self,
-        id: Option<Uuid>,
-        collapsed: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let value = if let Some(id) = id {
-            let Some(group) = self
-                .state
-                .sidebar_project_groups
-                .iter_mut()
-                .find(|group| group.id == id)
-            else {
-                return;
-            };
-            &mut group.collapsed
-        } else {
-            &mut self.state.sidebar_projects_collapsed
-        };
-        if *value != collapsed {
-            *value = collapsed;
-            self.save_sidebar_presentation(cx);
-        }
-    }
-
     fn create_sidebar_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_session_rename(cx);
-        if let Some(id) = self
-            .state
-            .create_sidebar_project_group(&tr!("sidebar.new_group_name"))
-        {
-            self.save_sidebar_presentation(cx);
+        if let Some(id) = self.add_sidebar_collection(&tr!("sidebar.new_group_name"), cx) {
             self.begin_sidebar_collection_rename(id, window, cx);
         }
     }
@@ -2535,20 +1593,22 @@ impl Michelle {
         else {
             return;
         };
-        self.sidebar_project_group_rename = Some(id);
-        self.session_rename_input.update(cx, |input, cx| {
-            input.set_content(name, cx);
-            input.select_all_text(cx);
-        });
-        let rows = self.sidebar_rows_cached(unix_time());
+        self.sidebar_ui.project_group_rename = Some(id);
+        self.sidebar_ui
+            .session_rename_input
+            .update(cx, |input, cx| {
+                input.set_content(name, cx);
+                input.select_all_text(cx);
+            });
+        let rows = self.sidebar_rows_cached();
         self.sync_sidebar_rows(&rows);
         if let Some(index) = rows
             .iter()
             .position(|row| *row == SidebarRow::Collection(Some(id)))
         {
-            reveal_sidebar_list_row(&self.sidebar_list_state, &rows, index);
+            reveal_sidebar_list_row(&self.sidebar_ui.list_state, &rows, index);
         }
-        let focus = self.session_rename_input.read(cx).focus();
+        let focus = self.sidebar_ui.session_rename_input.read(cx).focus();
         window.on_next_frame(move |window, cx| window.focus(&focus, cx));
         cx.notify();
     }
@@ -2559,7 +1619,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = None;
+        self.settings_ui.page = None;
         match group {
             SidebarGroup::Project(project_id) => self.select_project(project_id, cx),
             SidebarGroup::Projectless => self.create_projectless_session(cx),
@@ -2572,7 +1632,8 @@ impl Michelle {
         let theme = Theme::current(cx);
         let group_key = group.element_key();
         let focus = self
-            .sidebar_show_more_focuses
+            .sidebar_ui
+            .show_more_focuses
             .borrow_mut()
             .entry(group)
             .or_insert_with(|| cx.focus_handle())
@@ -2583,39 +1644,55 @@ impl Michelle {
             .tab_index(0)
             .tab_stop(true)
             .flex_none()
+            .w_full()
+            .h(px(SIDEBAR_SHOW_MORE_ROW_HEIGHT))
+            .flex()
+            .items_center()
+            .gap(px(4.0))
             .cursor_default()
-            .text_size(sp(12.5))
-            .text_color(theme.text_tertiary)
+            .text_style(TextStyle::Body)
+            .text_color(theme.text_secondary)
             .focus_visible(|style| style.text_color(theme.text))
-            .hover(|style| style.text_color(theme.text))
+            .child(
+                div()
+                    .w(px(if group == SidebarGroup::Projectless {
+                        IconSize::Regular.max_width()
+                    } else {
+                        IconSize::Small.max_width()
+                    }))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icon("chevron.down", 10.0, theme.text_secondary)),
+            )
             .child(tr!("sidebar.show_more"))
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, event, window, cx| {
+                let index = if matches!(event, ClickEvent::Keyboard(_)) {
+                    let rows = this.sidebar_rows_cached();
+                    rows.iter()
+                        .position(|row| *row == SidebarRow::ShowMore(group))
+                } else {
+                    None
+                };
                 this.show_more_project_sessions(group, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if this.sidebar_navigation_key_down(SidebarRow::ShowMore(group), event, window, cx)
-                {
-                    return;
-                }
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    let rows = this.sidebar_rows_cached(unix_time());
-                    let index = rows
-                        .iter()
-                        .position(|row| *row == SidebarRow::ShowMore(group));
-                    this.show_more_project_sessions(group, cx);
-                    let rows = this.sidebar_rows_cached(unix_time());
-                    if let Some(row) = index.and_then(|index| rows.get(index)) {
+                if let Some(index) = index {
+                    let rows = this.sidebar_rows_cached();
+                    if let Some(row) = rows.get(index) {
                         this.focus_sidebar_row(*row, window, cx);
                     }
-                    cx.stop_propagation();
                 }
+                cx.stop_propagation();
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                this.sidebar_navigation_key_down(SidebarRow::ShowMore(group), event, window, cx);
             }));
 
         div()
             .w_full()
             .h(px(SIDEBAR_SHOW_MORE_ROW_HEIGHT))
             .pl(px(if group == SidebarGroup::Projectless {
-                8.0
+                14.0
             } else {
                 SIDEBAR_GROUP_CHILD_PADDING
             }))
@@ -2625,415 +1702,19 @@ impl Michelle {
     }
 
     fn show_more_project_sessions(&mut self, group: SidebarGroup, cx: &mut Context<Self>) {
-        let revealed = self.sidebar_project_reveal_counts.entry(group).or_default();
+        let revealed = self
+            .sidebar_ui
+            .project_reveal_counts
+            .entry(group)
+            .or_default();
         *revealed = revealed.saturating_add(SIDEBAR_PROJECT_REVEAL_BATCH);
-        self.sidebar_rows_fingerprint.set(None);
+        self.sidebar_model.rows_fingerprint.set(None);
         cx.notify();
     }
 
     fn toggle_sidebar_group(&mut self, group: SidebarGroup, cx: &mut Context<Self>) {
-        let collapsed = !self.sidebar_collapsed_groups.contains(&group);
+        let collapsed = !self.sidebar_ui.collapsed_groups.contains(&group);
         self.set_sidebar_group_collapsed(group, collapsed, cx);
-    }
-
-    pub(super) fn collapse_all_sidebar_groups(&mut self, cx: &mut Context<Self>) {
-        let groups = self
-            .sidebar_rows_cached(unix_time())
-            .iter()
-            .filter_map(|row| match row {
-                SidebarRow::Header(group) => Some(*group),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let collections_changed = !self.state.sidebar_projects_collapsed
-            || self
-                .state
-                .sidebar_project_groups
-                .iter()
-                .any(|group| !group.collapsed);
-        self.state.sidebar_projects_collapsed = true;
-        for group in &mut self.state.sidebar_project_groups {
-            group.collapsed = true;
-        }
-        let mut changed = false;
-        for group in groups {
-            changed |= self.sidebar_collapsed_groups.insert(group);
-            changed |= self.sidebar_project_reveal_counts.remove(&group).is_some();
-        }
-        if changed || collections_changed {
-            self.sidebar_rows_fingerprint.set(None);
-            if self.update_sidebar_collapsed_projects() || collections_changed {
-                self.save();
-            }
-            cx.notify();
-        }
-    }
-
-    fn set_sidebar_group_collapsed(
-        &mut self,
-        group: SidebarGroup,
-        collapsed: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let collapse_changed = if collapsed {
-            self.sidebar_collapsed_groups.insert(group)
-        } else {
-            self.sidebar_collapsed_groups.remove(&group)
-        };
-        let reveal_reset = collapsed && self.sidebar_project_reveal_counts.remove(&group).is_some();
-        if collapse_changed || reveal_reset {
-            self.sidebar_rows_fingerprint.set(None);
-            if self.update_sidebar_collapsed_projects() {
-                self.save();
-            }
-            cx.notify();
-        }
-    }
-
-    fn update_sidebar_collapsed_projects(&mut self) -> bool {
-        let collapsed_projects = self
-            .sidebar_collapsed_groups
-            .iter()
-            .filter_map(|group| match group {
-                SidebarGroup::Project(id) => Some(*id),
-                _ => None,
-            })
-            .collect();
-        if self.state.sidebar_collapsed_projects != collapsed_projects {
-            self.state.sidebar_collapsed_projects = collapsed_projects;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn set_sidebar_ordering(&mut self, ordering: SidebarOrdering, cx: &mut Context<Self>) {
-        if self.state.sidebar_ordering == ordering {
-            return;
-        }
-        if ordering == SidebarOrdering::Manual {
-            self.remember_sidebar_manual_order();
-        }
-        self.state.sidebar_ordering = ordering;
-        self.sidebar_rows_fingerprint.set(None);
-        self.sidebar_list_state.scroll_to(ListOffset {
-            item_ix: 0,
-            offset_in_item: Pixels::ZERO,
-        });
-        self.save();
-        cx.notify();
-    }
-
-    fn remember_sidebar_manual_order(&mut self) {
-        let mut sessions = self
-            .state
-            .sessions
-            .iter()
-            .filter(|session| session.has_started())
-            .collect::<Vec<_>>();
-        let ordering = if self.state.sidebar_session_order.is_empty() {
-            self.state.sidebar_ordering
-        } else {
-            SidebarOrdering::Manual
-        };
-        sort_sidebar_sessions(&mut sessions, ordering, &self.state.sidebar_session_order);
-        self.state.sidebar_session_order = sessions.iter().map(|session| session.id).collect();
-        let mut project_order = self.state.sidebar_project_order.clone();
-        let valid_projects = self
-            .state
-            .projects
-            .iter()
-            .map(|project| project.id)
-            .collect::<HashSet<_>>();
-        project_order.retain(|id| valid_projects.contains(id));
-        let mut known = project_order.iter().copied().collect::<HashSet<_>>();
-        for id in sessions
-            .iter()
-            .map(|session| session.project_id)
-            .chain(self.state.projects.iter().map(|project| project.id))
-        {
-            if known.insert(id) {
-                project_order.push(id);
-            }
-        }
-        self.state.sidebar_project_order = project_order;
-    }
-
-    fn reorder_sidebar_row(
-        &mut self,
-        source: SidebarRow,
-        target: SidebarRow,
-        cx: &mut Context<Self>,
-    ) {
-        match (source, target) {
-            (SidebarRow::Collection(Some(source)), SidebarRow::Collection(target)) => {
-                if self.state.reorder_sidebar_project_group(source, target) {
-                    self.save_sidebar_presentation(cx);
-                }
-                return;
-            }
-            (SidebarRow::Header(SidebarGroup::Project(source)), SidebarRow::Collection(target)) => {
-                self.move_sidebar_project_to_collection(source, target, cx);
-                return;
-            }
-            _ => {}
-        }
-        let rows = self.sidebar_rows_cached(unix_time());
-        let Some(source_index) = rows.iter().position(|row| *row == source) else {
-            return;
-        };
-        let Some(target_index) = rows.iter().position(|row| *row == target) else {
-            return;
-        };
-        if !sidebar_reorder_siblings(&rows, source).contains(&target) {
-            return;
-        }
-        if self.state.sidebar_ordering == SidebarOrdering::Manual {
-            self.remember_sidebar_manual_order();
-        }
-        let changed = match (source, target) {
-            (SidebarRow::Session(source), SidebarRow::Session(target))
-                if self.state.sidebar_ordering == SidebarOrdering::Manual =>
-            {
-                move_sidebar_item(
-                    &mut self.state.sidebar_session_order,
-                    source,
-                    target,
-                    source_index < target_index,
-                )
-            }
-            (
-                SidebarRow::Header(SidebarGroup::Project(source)),
-                SidebarRow::Header(SidebarGroup::Project(target)),
-            ) => {
-                let destination = self.state.sidebar_group_for_project(target);
-                let transferred = self
-                    .state
-                    .move_project_to_sidebar_group(source, destination);
-                let reordered = self.state.sidebar_ordering == SidebarOrdering::Manual
-                    && move_sidebar_item(
-                        &mut self.state.sidebar_project_order,
-                        source,
-                        target,
-                        source_index < target_index,
-                    );
-                transferred || reordered
-            }
-            _ => false,
-        };
-        if changed {
-            self.sidebar_rows_fingerprint.set(None);
-            self.save();
-            cx.notify();
-        }
-    }
-
-    fn sidebar_session_can_move_to_project(&self, session: &AgentSession) -> bool {
-        !self.sidebar_session_moves.contains(&session.id)
-            && !self.submission_preparations.contains(&session.id)
-            && !self.goal_runtime_starts.contains(&session.id)
-            && !session.is_busy()
-            && self
-                .sidebar_projectless_projects
-                .borrow()
-                .contains(&session.project_id)
-    }
-
-    fn move_sidebar_session_to_project(
-        &mut self,
-        session_id: Uuid,
-        project_id: Uuid,
-        cx: &mut Context<Self>,
-    ) {
-        if !self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .is_some_and(|session| self.sidebar_session_can_move_to_project(session))
-        {
-            return;
-        }
-        self.sidebar_session_moves.insert(session_id);
-        cx.notify();
-        let daemon = self.daemon.clone();
-        cx.spawn(async move |michelle, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    match daemon.client().request(
-                        session_id,
-                        Uuid::nil(),
-                        michelle_protocol::Command::MoveSessionToProject { project_id },
-                    )? {
-                        michelle_protocol::ResponsePayload::Session {
-                            session: Some(session),
-                        } => Ok(session),
-                        _ => anyhow::bail!("the daemon did not return the moved chat"),
-                    }
-                })
-                .await;
-            let _ = michelle.update(cx, |this, cx| {
-                this.sidebar_session_moves.remove(&session_id);
-                match result {
-                    Ok(session) => {
-                        let Some(index) = this
-                            .state
-                            .sessions
-                            .iter()
-                            .position(|item| item.id == session_id)
-                        else {
-                            return;
-                        };
-                        let old_project = this.state.sessions[index].project_id;
-                        this.runtimes.remove(&session_id);
-                        this.runtime_attach_pending.remove(&session_id);
-                        this.session_hydrations.remove(&session_id);
-                        this.state.sessions[index] = session;
-                        if !this
-                            .state
-                            .sessions
-                            .iter()
-                            .any(|session| session.project_id == old_project)
-                        {
-                            this.state
-                                .projects
-                                .retain(|project| project.id != old_project);
-                        }
-                        this.set_sidebar_group_collapsed(
-                            SidebarGroup::Project(project_id),
-                            false,
-                            cx,
-                        );
-                        let collection = this.state.sidebar_group_for_project(project_id);
-                        this.set_sidebar_collection_collapsed(collection, false, cx);
-                        this.sidebar_project_reveal_counts
-                            .insert(SidebarGroup::Project(project_id), this.state.sessions.len());
-                        this.sidebar_rows_fingerprint.set(None);
-                        if this.state.selected_session == Some(session_id)
-                            || this
-                                .pending_session_activation
-                                .is_some_and(|pending| pending.session_id == session_id)
-                        {
-                            this.select_session(session_id, cx);
-                            this.invalidate_workspace_queries(cx);
-                        }
-                        this.reveal_sidebar_session(session_id);
-                        this.save();
-                    }
-                    Err(error) => this.show_toast(tr!("errors.move_chat", error = error)),
-                }
-                if this.pending_goal_operations.contains_key(&session_id) {
-                    this.start_goal_runtime(session_id, cx);
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn commit_sidebar_drag(&mut self, drag: &SidebarDrag, cx: &mut Context<Self>) {
-        if matches!(drag.row, SidebarRow::Header(SidebarGroup::Project(_))) {
-            self.commit_sidebar_project_drag(drag, cx);
-            return;
-        }
-        let preview = drag.preview.borrow();
-        let Some(preview) = preview.as_ref() else {
-            return;
-        };
-        let changed = match drag.row {
-            SidebarRow::Collection(Some(_)) => {
-                let ranks = preview
-                    .rows
-                    .iter()
-                    .filter_map(|row| match row {
-                        SidebarRow::Collection(Some(id)) => Some(*id),
-                        _ => None,
-                    })
-                    .enumerate()
-                    .map(|(index, id)| (id, index))
-                    .collect::<HashMap<_, _>>();
-                let old = self
-                    .state
-                    .sidebar_project_groups
-                    .iter()
-                    .map(|group| group.id)
-                    .collect::<Vec<_>>();
-                self.state
-                    .sidebar_project_groups
-                    .sort_by_key(|group| ranks.get(&group.id).copied().unwrap_or(usize::MAX));
-                old.into_iter().ne(self
-                    .state
-                    .sidebar_project_groups
-                    .iter()
-                    .map(|group| group.id))
-            }
-            SidebarRow::Session(source)
-                if self.state.sidebar_ordering == SidebarOrdering::Manual =>
-            {
-                let siblings = sidebar_reorder_siblings(&preview.rows, drag.row);
-                if siblings == preview.siblings {
-                    return;
-                }
-                let Some(index) = siblings.iter().position(|row| *row == drag.row) else {
-                    return;
-                };
-                self.remember_sidebar_manual_order();
-                let target = siblings
-                    .get(index + 1)
-                    .map(|row| (*row, false))
-                    .or_else(|| index.checked_sub(1).map(|index| (siblings[index], true)));
-                match target {
-                    Some((SidebarRow::Session(target), after)) => move_sidebar_item(
-                        &mut self.state.sidebar_session_order,
-                        source,
-                        target,
-                        after,
-                    ),
-                    _ => false,
-                }
-            }
-            _ => false,
-        };
-        if changed {
-            self.save_sidebar_presentation(cx);
-        }
-    }
-
-    fn commit_sidebar_project_drag(&mut self, drag: &SidebarDrag, cx: &mut Context<Self>) {
-        let SidebarRow::Header(SidebarGroup::Project(project)) = drag.row else {
-            return;
-        };
-        let destination = drag
-            .preview
-            .borrow()
-            .as_ref()
-            .and_then(|preview| preview.destination);
-        let Some((collection, before)) = destination else {
-            return;
-        };
-        let transferred = self
-            .state
-            .move_project_to_sidebar_group(project, collection);
-        let mut reordered = false;
-        if self.state.sidebar_ordering == SidebarOrdering::Manual {
-            self.remember_sidebar_manual_order();
-            let old_order = self.state.sidebar_project_order.clone();
-            self.state.sidebar_project_order.retain(|id| *id != project);
-            let index = before
-                .and_then(|before| {
-                    self.state
-                        .sidebar_project_order
-                        .iter()
-                        .position(|id| *id == before)
-                })
-                .unwrap_or(self.state.sidebar_project_order.len());
-            self.state.sidebar_project_order.insert(index, project);
-            reordered = self.state.sidebar_project_order != old_order;
-        }
-        if transferred || reordered {
-            self.save_sidebar_presentation(cx);
-        }
     }
 
     fn sidebar_reorderable_row(
@@ -3052,7 +1733,7 @@ impl Michelle {
                 || (self.state.sidebar_ordering == SidebarOrdering::Manual
                     && matches!(row, SidebarRow::Session(_))),
             |element| {
-                let rows = self.sidebar_rows_snapshot.borrow().clone();
+                let rows = self.sidebar_model.rows_snapshot.borrow().clone();
                 let michelle = cx.entity().downgrade();
                 let row_bounds = Rc::new(Cell::new(Bounds::default()));
                 let drag_bounds = row_bounds.clone();
@@ -3070,7 +1751,7 @@ impl Michelle {
                             let _ = michelle.update(cx, |this, cx| {
                                 let collapsed = match row {
                                     SidebarRow::Header(group) => {
-                                        this.sidebar_collapsed_groups.contains(&group)
+                                        this.sidebar_ui.collapsed_groups.contains(&group)
                                     }
                                     SidebarRow::Collection(Some(id)) => this
                                         .state
@@ -3092,13 +1773,18 @@ impl Michelle {
                                         HashMap::new()
                                     },
                                     destination: None,
+                                    session_destination: None,
                                     bounds: drag_bounds.get(),
                                     cursor_offset: offset,
                                     collapsed,
                                     working: collapsed
-                                        && this.sidebar_working_headers.borrow().contains(&row),
+                                        && this
+                                            .sidebar_model
+                                            .working_headers
+                                            .borrow()
+                                            .contains(&row),
                                 });
-                                this.sidebar_drag_preview = drag.preview.clone();
+                                this.sidebar_ui.drag_preview = drag.preview.clone();
                                 this.focus_sidebar_row(row, window, cx);
                             });
                             cx.new(|cx| {
@@ -3136,55 +1822,21 @@ impl Michelle {
             return;
         };
 
-        self.session_rename = Some(session_id);
-        self.session_rename_input.update(cx, |input, cx| {
-            input.set_content(title, cx);
-            input.select_all_text(cx);
-        });
-        let focus = self.session_rename_input.read(cx).focus();
+        self.sidebar_ui.session_rename = Some(session_id);
+        self.sidebar_ui
+            .session_rename_input
+            .update(cx, |input, cx| {
+                input.set_content(title, cx);
+                input.select_all_text(cx);
+            });
+        let focus = self.sidebar_ui.session_rename_input.read(cx).focus();
         window.on_next_frame(move |window, cx| window.focus(&focus, cx));
         cx.notify();
     }
 
-    pub(super) fn commit_session_rename(&mut self, cx: &mut Context<Self>) {
-        if let Some(id) = self.sidebar_project_group_rename.take() {
-            let name = self.session_rename_input.read(cx).content().to_owned();
-            if self.state.rename_sidebar_project_group(id, &name) {
-                self.save_sidebar_presentation(cx);
-            }
-            cx.notify();
-            return;
-        }
-        let Some(session_id) = self.session_rename.take() else {
-            return;
-        };
-        let title = self
-            .session_rename_input
-            .read(cx)
-            .content()
-            .trim()
-            .to_owned();
-        let should_update = !title.is_empty()
-            && self
-                .state
-                .sessions
-                .iter()
-                .find(|session| session.id == session_id)
-                .is_some_and(|session| session.title != title);
-        if should_update
-            && self
-                .state
-                .session_mut(session_id)
-                .is_some_and(|session| session.set_title(&title))
-        {
-            self.save();
-        }
-        cx.notify();
-    }
-
     pub(super) fn finish_session_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let group_id = self.sidebar_project_group_rename;
-        let session_id = self.session_rename;
+        let group_id = self.sidebar_ui.project_group_rename;
+        let session_id = self.sidebar_ui.session_rename;
         self.commit_session_rename(cx);
         if let Some(id) = session_id {
             self.focus_sidebar_row(SidebarRow::Session(id), window, cx);
@@ -3195,10 +1847,10 @@ impl Michelle {
     }
 
     fn cancel_session_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(id) = self.sidebar_project_group_rename.take() {
+        if let Some(id) = self.sidebar_ui.project_group_rename.take() {
             self.focus_sidebar_row(SidebarRow::Collection(Some(id)), window, cx);
         }
-        if let Some(id) = self.session_rename.take() {
+        if let Some(id) = self.sidebar_ui.session_rename.take() {
             self.focus_sidebar_row(SidebarRow::Session(id), window, cx);
         }
     }
@@ -3220,7 +1872,9 @@ impl Michelle {
         };
         let selected = sidebar_session_selected(
             self.state.selected_session,
-            self.pending_session_activation
+            self.sessions
+                .activation
+                .pending
                 .map(|pending| pending.session_id),
             session_id,
         );
@@ -3228,37 +1882,30 @@ impl Michelle {
             session.status,
             SessionStatus::Connecting | SessionStatus::Working
         );
-        let project = self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.id == session.project_id);
         let projectless = self
-            .sidebar_projectless_projects
+            .sidebar_ui
+            .drag_preview
             .borrow()
-            .contains(&session.project_id);
-        let left_padding = if projectless {
-            8.0
-        } else {
-            SIDEBAR_GROUP_CHILD_PADDING
-        };
-        let detail_label = persisted_sidebar_branch_label(&session.workspace)
-            .map(|branch| SharedString::from(branch.to_owned()))
+            .as_ref()
+            .filter(|preview| preview.row == SidebarRow::Session(session_id))
+            .and_then(|preview| preview.session_destination)
             .or_else(|| {
-                if !matches!(&session.workspace, SessionWorkspace::Local) {
-                    return None;
-                }
-                project.and_then(|project| {
-                    self.sidebar_branch_labels
+                self.sidebar_model
+                    .pending_session_drops
+                    .get(&session_id)
+                    .copied()
+            })
+            .map_or_else(
+                || {
+                    self.sidebar_model
+                        .projectless_projects
                         .borrow()
-                        .get(&project.path)
-                        .cloned()
-                })
-            });
-        let has_detail_label = detail_label.is_some();
-        let detail_icon = "arrow.triangle.branch";
-        let rename_input = (interactive && self.session_rename == Some(session_id))
-            .then(|| self.session_rename_input.clone());
+                        .contains(&session.project_id)
+                },
+                |destination| destination.group == SidebarGroup::Projectless,
+            );
+        let rename_input = (interactive && self.sidebar_ui.session_rename == Some(session_id))
+            .then(|| self.sidebar_ui.session_rename_input.clone());
         let renaming = rename_input.is_some();
         let title = if let Some(rename_input) = rename_input {
             div()
@@ -3279,7 +1926,7 @@ impl Michelle {
                 .bg(theme.inset)
                 .flex()
                 .items_center()
-                .text_size(sp(13.5))
+                .text_size(px(13.5))
                 .text_color(theme.text)
                 .child(rename_input)
                 .into_any_element()
@@ -3287,10 +1934,9 @@ impl Michelle {
             div()
                 .flex_1()
                 .min_w_0()
-                .whitespace_normal()
+                .truncate()
                 .line_clamp(1)
-                .text_overflow(gpui::TextOverflow::Truncate("...".into()))
-                .text_size(sp(13.5))
+                .text_size(px(13.5))
                 .text_color(theme.text)
                 .child(SharedString::from(localized_session_title(session)))
                 .into_any_element()
@@ -3299,131 +1945,89 @@ impl Michelle {
         let menu = self.menu_handle(format!("session-{session_id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
         let keyboard_menu = menu.clone();
-        let row = div()
-            .id(SharedString::from(format!("session-{}", session.id)))
+        let content = div()
             .w_full()
             .min_w_0()
             .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .pl(px(left_padding))
-            .pr(px(8.0))
-            .py(px(7.0))
-            .rounded(px(7.0))
-            .cursor_default()
-            .when(interactive, |element| {
-                element
-                    .when(selected, |element| {
-                        element.bg(theme.sidebar_item_background)
-                    })
-                    .hover(|element| element.bg(theme.sidebar_item_background))
-                    .active(|element| element.bg(theme.sidebar_item_background))
+            .items_center()
+            .gap(px(6.0))
+            .overflow_hidden()
+            .line_height(px(18.0))
+            .child(title)
+            .when(working, |element| {
+                element.child(motion::spinner_slow(
+                    14.0,
+                    status_color(&theme, session.status),
+                ))
             })
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .overflow_hidden()
-                    .line_height(sp(18.0))
-                    .child(title)
-                    .when(working, |element| {
-                        element.child(motion::spin_slow(icon(
-                            "arrow.clockwise",
-                            12.0,
-                            status_color(&theme, session.status),
-                        )))
-                    })
-                    .when(session.status == SessionStatus::Background, |element| {
-                        element.child(icon(
-                            "hourglass",
-                            12.0,
-                            status_color(&theme, session.status),
-                        ))
-                    })
-                    .when(session.status == SessionStatus::Waiting, |element| {
-                        element.child(icon(
-                            "exclamationmark.triangle",
-                            12.0,
-                            status_color(&theme, session.status),
-                        ))
-                    })
-                    .when(session.status == SessionStatus::Failed, |element| {
-                        element.child(icon("xmark", 12.0, status_color(&theme, session.status)))
-                    }),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(5.0))
-                    .text_size(sp(12.5))
-                    .line_height(sp(15.0))
-                    .when_some(detail_label, |element, label| {
-                        element
-                            .child(icon(detail_icon, 12.5, theme.text_tertiary))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_color(theme.text_tertiary)
-                                    .child(label),
-                            )
-                    })
-                    .when(!has_detail_label, |element| element.child(div().flex_1()))
-                    .when_some(
-                        session_time_label(session, unix_time()),
-                        |element, label| {
-                            element.child(
-                                div()
-                                    .flex_none()
-                                    .text_size(sp(12.5))
-                                    .font_features(TABULAR_NUMBERS.clone())
-                                    .text_color(if session.is_busy() {
-                                        theme.text_tertiary
-                                    } else {
-                                        theme.text_ghost
-                                    })
-                                    .child(SharedString::from(label)),
-                            )
-                        },
-                    ),
-            )
-            .when(interactive && !renaming, |element| {
-                element
-                    .track_focus(&row_focus)
-                    .tab_index(0)
-                    .tab_stop(true)
-                    .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if this.sidebar_navigation_key_down(
-                            SidebarRow::Session(session_id),
-                            event,
-                            window,
-                            cx,
-                        ) {
-                            return;
-                        }
-                        let key = event.keystroke.key.as_str();
-                        if (key == "enter" && event.keystroke.modifiers.control)
-                            || (key == "f10" && event.keystroke.modifiers.shift)
-                        {
-                            keyboard_menu.open_context_menu(window, cx);
-                            cx.stop_propagation();
-                        } else if key == "enter" {
-                            this.begin_session_rename(session_id, window, cx);
-                            cx.stop_propagation();
-                        } else if key == "space" {
-                            this.select_session(session_id, cx);
-                            this.focus_composer_action(&FocusComposer, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select_session(session_id, cx);
-                    }))
+            .when(session.status == SessionStatus::Background, |element| {
+                element.child(icon(
+                    "hourglass",
+                    12.0,
+                    status_color(&theme, session.status),
+                ))
+            })
+            .when(session.status == SessionStatus::Waiting, |element| {
+                element.child(icon(
+                    "exclamationmark.triangle",
+                    12.0,
+                    status_color(&theme, session.status),
+                ))
+            })
+            .when(session.status == SessionStatus::Failed, |element| {
+                element.child(icon("xmark", 12.0, status_color(&theme, session.status)))
             });
+        let row = sidebar_item(
+            SharedString::from(format!("session-{}", session.id)),
+            "bubble.left",
+            content,
+            SidebarItemProps {
+                selected: interactive && selected,
+                depth: usize::from(!projectless),
+                disclosure: SidebarDisclosure::Reserved,
+                icon_size: if projectless {
+                    IconSize::Regular
+                } else {
+                    IconSize::Small
+                },
+                ..Default::default()
+            },
+            &theme.ui_colors(),
+        )
+        .when(interactive && !renaming, |element| {
+            element
+                .track_focus(&row_focus)
+                .tab_index(0)
+                .tab_stop(true)
+                .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if this.sidebar_navigation_key_down(
+                        SidebarRow::Session(session_id),
+                        event,
+                        window,
+                        cx,
+                    ) {
+                        return;
+                    }
+                    let key = event.keystroke.key.as_str();
+                    if (key == "enter" && event.keystroke.modifiers.control)
+                        || (key == "f10" && event.keystroke.modifiers.shift)
+                    {
+                        keyboard_menu.open_context_menu(window, cx);
+                        cx.stop_propagation();
+                    } else if key == "enter" {
+                        this.begin_session_rename(session_id, window, cx);
+                        cx.stop_propagation();
+                    } else if key == "space" {
+                        this.select_session(session_id, cx);
+                        this.focus_composer_action(&FocusComposer, window, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.select_session(session_id, cx);
+                }))
+        });
         if !interactive {
             return div()
                 .w_full()
@@ -3447,7 +2051,7 @@ impl Michelle {
                 .w_full()
                 .child(row)
                 .on_mouse_down_out(cx.listener(move |this, _, _, cx| {
-                    if this.session_rename == Some(session_id) {
+                    if this.sidebar_ui.session_rename == Some(session_id) {
                         this.commit_session_rename(cx);
                     }
                 }))
@@ -3472,52 +2076,76 @@ impl Michelle {
                                 .update(cx, |michelle, cx| michelle.remove_session(session_id, cx));
                         }),
                     ];
-                    if projectless {
-                        let move_michelle = michelle.clone();
-                        items.insert(
-                            1,
-                            MenuItem::Submenu {
-                                label: tr!("sidebar.move_to_project").into(),
-                                value: None,
-                                items: Rc::new(move |cx| {
-                                    let Some(entity) = move_michelle.upgrade() else {
-                                        return Vec::new();
-                                    };
-                                    let this = entity.read(cx);
-                                    let enabled = this
-                                        .state
-                                        .sessions
-                                        .iter()
-                                        .find(|session| session.id == session_id)
-                                        .is_some_and(|session| {
-                                            this.sidebar_session_can_move_to_project(session)
-                                        });
-                                    this.state
-                                        .projects
-                                        .iter()
-                                        .filter(|project| {
-                                            !this
-                                                .sidebar_projectless_projects
-                                                .borrow()
-                                                .contains(&project.id)
-                                        })
-                                        .map(|project| {
-                                            let weak = move_michelle.clone();
-                                            let id = project.id;
-                                            MenuItem::new(project.name.clone(), move |_, cx| {
-                                                let _ = weak.update(cx, |this, cx| {
-                                                    this.move_sidebar_session_to_project(
-                                                        session_id, id, cx,
-                                                    );
-                                                });
+                    let move_michelle = michelle.clone();
+                    items.insert(
+                        1,
+                        MenuItem::Submenu {
+                            label: tr!("sidebar.move_to_project").into(),
+                            value: None,
+                            items: Rc::new(move |cx| {
+                                let Some(entity) = move_michelle.upgrade() else {
+                                    return Vec::new();
+                                };
+                                let this = entity.read(cx);
+                                let session = this
+                                    .state
+                                    .sessions
+                                    .iter()
+                                    .find(|session| session.id == session_id);
+                                let enabled = session.is_some_and(|session| {
+                                    this.sidebar_session_can_move_to_project(session)
+                                });
+                                let mut destinations = this
+                                    .state
+                                    .projects
+                                    .iter()
+                                    .filter(|project| {
+                                        !this
+                                            .sidebar_model
+                                            .projectless_projects
+                                            .borrow()
+                                            .contains(&project.id)
+                                            && session.is_some_and(|session| {
+                                                session.project_id != project.id
                                             })
-                                            .disabled(!enabled)
+                                    })
+                                    .map(|project| {
+                                        let weak = move_michelle.clone();
+                                        let id = project.id;
+                                        MenuItem::new(project.display_name(), move |_, cx| {
+                                            let _ = weak.update(cx, |this, cx| {
+                                                this.move_sidebar_session_to_project(
+                                                    session_id, id, cx,
+                                                );
+                                            });
                                         })
-                                        .collect()
-                                }),
-                            },
-                        );
-                    }
+                                        .disabled(!enabled)
+                                    })
+                                    .collect::<Vec<_>>();
+                                if session.is_some_and(|session| {
+                                    !this
+                                        .sidebar_model
+                                        .projectless_projects
+                                        .borrow()
+                                        .contains(&session.project_id)
+                                }) {
+                                    let weak = move_michelle.clone();
+                                    destinations.push(MenuItem::Separator);
+                                    destinations.push(
+                                        MenuItem::new(tr!("sidebar.chats"), move |_, cx| {
+                                            let _ = weak.update(cx, |this, cx| {
+                                                this.move_sidebar_session(
+                                                    session_id, None, None, cx,
+                                                );
+                                            });
+                                        })
+                                        .disabled(!enabled),
+                                    );
+                                }
+                                destinations
+                            }),
+                        },
+                    );
                     items
                 },
             )
@@ -3528,154 +2156,6 @@ impl Michelle {
             .pb(px(SIDEBAR_SESSION_ROW_GAP))
             .child(row)
             .into_any_element()
-    }
-
-    // ── Header ─────────────────────────────────────────────────────────────
-
-    pub(super) fn render_header(
-        &self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let theme = Theme::current(cx);
-        let session = self.selected_session();
-        let title = session
-            .map(localized_session_title)
-            .unwrap_or_else(|| tr!("session.new_task"));
-        let agent_preset_label = session
-            .filter(|session| session.provider == ProviderKind::DeepSeek && session.has_started())
-            .and_then(|session| self.agent_preset_label_for_session(session));
-        let left_window_controls = (!self.sidebar_visible)
-            .then(|| {
-                self.render_client_window_controls(
-                    super::window_chrome::WindowControlSide::Left,
-                    window,
-                    cx,
-                )
-            })
-            .flatten();
-        let right_window_controls = (!self.right_panel_visible)
-            .then(|| {
-                self.render_client_window_controls(
-                    super::window_chrome::WindowControlSide::Right,
-                    window,
-                    cx,
-                )
-            })
-            .flatten();
-        div()
-            .id("window-header")
-            .h(px(48.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .children(left_window_controls)
-            // The header starts where the sidebar ends, so until the sidebar
-            // is wide enough to host the traffic lights itself the header has
-            // to clear them. Steady state with the sidebar open adds nothing;
-            // a sidebar sliding in shrinks the inset as it takes the lights
-            // over, which is what keeps the title from passing under them.
-            .pl(if self.sidebar_visible {
-                px(14.0 + (TRAFFIC_LIGHT_CLEARANCE - self.sidebar_rendered_width).max(0.0))
-            } else {
-                px(0.0)
-            })
-            .pr(px(14.0))
-            .when(!self.sidebar_visible, |element| {
-                element
-                    .child(
-                        self.window_drag_region(
-                            div()
-                                .id("header-traffic-light-drag-region")
-                                .w(px(TRAFFIC_LIGHT_CLEARANCE - 8.0))
-                                .h_full()
-                                .flex_none(),
-                            cx,
-                        ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(self.render_sidebar_toggle(cx))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(2.0))
-                                    .child(self.render_history_button(
-                                        "navigate-back",
-                                        "arrow.left",
-                                        !self.session_navigation.back.is_empty(),
-                                        true,
-                                        cx,
-                                    ))
-                                    .child(self.render_history_button(
-                                        "navigate-forward",
-                                        "arrow.right",
-                                        !self.session_navigation.forward.is_empty(),
-                                        false,
-                                        cx,
-                                    )),
-                            ),
-                    )
-            })
-            .child(
-                self.window_drag_region(
-                    div()
-                        .id("header-title-drag-region")
-                        .h_full()
-                        .min_w_0()
-                        .flex_shrink(1.0)
-                        .flex()
-                        .items_center()
-                        .gap(px(7.0))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(sp(13.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(SharedString::from(title)),
-                        )
-                        .children(agent_preset_label.map(|label| {
-                            div()
-                                .h(px(22.0))
-                                .max_w(px(180.0))
-                                .px(px(6.0))
-                                .rounded(px(6.0))
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.0))
-                                .bg(theme.overlay)
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text_secondary)
-                                .child(icon("cpu", 10.5, theme.text_tertiary))
-                                .child(div().min_w_0().truncate().child(SharedString::from(label)))
-                        })),
-                    cx,
-                ),
-            )
-            .child(
-                self.window_drag_region(
-                    div().id("header-center-drag-region").h_full().flex_1(),
-                    cx,
-                ),
-            )
-            .child(self.render_background_work_summary(cx))
-            .when(!self.right_panel_visible, |element| {
-                element
-                    .when(self.fps_counter_visible, |element| {
-                        element.child(self.render_fps_counter(cx))
-                    })
-                    .child(self.render_right_panel_toggle(cx))
-            })
-            .children(right_window_controls)
     }
 
     // ── Empty states ───────────────────────────────────────────────────────
@@ -3695,7 +2175,7 @@ impl Michelle {
                 .child(
                     div()
                         .mt(px(16.0))
-                        .text_size(sp(20.0))
+                        .text_size(px(20.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme.text)
                         .child(tr_cow!("onboarding.open_project_to_begin")),
@@ -3705,8 +2185,8 @@ impl Michelle {
                         .mt(px(8.0))
                         .max_w(px(380.0))
                         .text_center()
-                        .text_size(sp(12.5))
-                        .line_height(sp(19.0))
+                        .text_size(px(12.5))
+                        .line_height(px(19.0))
                         .text_color(theme.text_tertiary)
                         .child(tr_cow!("onboarding.description")),
                 )
@@ -3723,7 +2203,7 @@ impl Michelle {
                         .child(
                             div()
                                 .id("onboarding-add-project")
-                                .track_focus(&self.onboarding_add_project_focus)
+                                .track_focus(&self.sidebar_ui.onboarding_add_project_focus)
                                 .tab_index(0)
                                 .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
                                 .h(px(32.0))
@@ -3734,7 +2214,7 @@ impl Michelle {
                                 .cursor_default()
                                 .bg(theme.inverse)
                                 .text_color(theme.on_inverse)
-                                .text_size(sp(12.5))
+                                .text_size(px(12.5))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .hover(|element| element.opacity(0.9))
                                 .active(|element| element.opacity(0.8))
@@ -3750,7 +2230,7 @@ impl Michelle {
                         .child(
                             div()
                                 .id("onboarding-projectless")
-                                .track_focus(&self.onboarding_projectless_focus)
+                                .track_focus(&self.sidebar_ui.onboarding_projectless_focus)
                                 .tab_index(1)
                                 .focus_visible(|style| style.shadow(vec![focus_ring(theme.accent)]))
                                 .h(px(30.0))
@@ -3761,7 +2241,7 @@ impl Michelle {
                                 .gap(px(6.0))
                                 .cursor_default()
                                 .text_color(theme.text_secondary)
-                                .text_size(sp(12.5))
+                                .text_size(px(12.5))
                                 .hover(|element| element.bg(theme.overlay))
                                 .active(|element| element.bg(theme.overlay_strong))
                                 .child(icon("xmark", 11.0, theme.text_tertiary))
@@ -3811,7 +2291,7 @@ impl Michelle {
                     .mt(px(14.0))
                     .flex()
                     .items_baseline()
-                    .text_size(sp(20.0))
+                    .text_size(px(20.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
                     .when(projectless_selected, |element| {
@@ -3825,25 +2305,6 @@ impl Michelle {
                     }),
             )
     }
-}
-
-fn localized_session_title(session: &AgentSession) -> String {
-    let title = session.display_title();
-    if title == AgentSession::DEFAULT_TITLE {
-        tr!("session.new_task")
-    } else {
-        title.to_owned()
-    }
-}
-
-fn sidebar_session_selected(
-    selected_session: Option<Uuid>,
-    pending_session: Option<Uuid>,
-    session_id: Uuid,
-) -> bool {
-    pending_session.map_or(selected_session == Some(session_id), |pending| {
-        pending == session_id
-    })
 }
 
 #[cfg(test)]
@@ -3862,7 +2323,7 @@ mod tests {
 
     impl Render for CollectionActivationHarness {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            session_group_header(&Theme::dark())
+            sidebar_section_header("", &Theme::dark().ui_colors())
                 .id("collection")
                 .w(px(120.0))
                 .track_focus(&self.focus)
@@ -3937,7 +2398,7 @@ mod tests {
         let first = SidebarGroup::Project(Uuid::from_u128(1));
         let collapsed = SidebarGroup::Project(Uuid::from_u128(2));
         let rows = [
-            SidebarRow::Search,
+            SidebarRow::TopSpacer,
             SidebarRow::Header(first),
             SidebarRow::Session(Uuid::from_u128(3)),
             SidebarRow::ShowMore(first),
@@ -3946,14 +2407,13 @@ mod tests {
             SidebarRow::GroupSpacer,
         ];
         for (current, key, expected) in [
-            (0, "up", None),
-            (0, "down", Some(1)),
+            (1, "up", None),
             (1, "down", Some(2)),
             (2, "down", Some(3)),
             (3, "down", Some(5)),
             (5, "up", Some(3)),
             (5, "down", None),
-            (3, "home", Some(0)),
+            (3, "home", Some(1)),
             (1, "end", Some(5)),
             (2, "space", None),
         ] {
@@ -4064,46 +2524,72 @@ mod tests {
     }
 
     #[test]
-    fn project_sessions_reveal_older_history_in_thirty_item_batches() {
+    fn project_sessions_show_up_to_six_or_start_with_five_and_reveal_ten_at_a_time() {
         let sessions = (1..=36).map(Uuid::from_u128).collect::<Vec<_>>();
-        let recent_cutoff = 100;
-        let timestamps = sessions
-            .iter()
-            .enumerate()
-            .map(|(index, session_id)| {
-                (
-                    *session_id,
-                    if index == 0 {
-                        recent_cutoff
-                    } else {
-                        recent_cutoff - 1
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
+        for (revealed, count, more) in [
+            (0, 5, true),
+            (10, 15, true),
+            (20, 25, true),
+            (30, 35, true),
+            (40, 36, false),
+            (usize::MAX, 36, false),
+        ] {
+            let (visible, show_more) = visible_project_sessions(&sessions, revealed);
+            assert_eq!(visible, &sessions[..count]);
+            assert_eq!(show_more, more);
+        }
+        for (count, initially_visible, more) in [
+            (0, 0, false),
+            (1, 1, false),
+            (5, 5, false),
+            (6, 6, false),
+            (7, 5, true),
+            (15, 5, true),
+            (16, 5, true),
+        ] {
+            let (visible, show_more) = visible_project_sessions(&sessions[..count], 0);
+            assert_eq!(visible, &sessions[..initially_visible]);
+            assert_eq!(show_more, more);
+            let (visible, show_more) =
+                visible_project_sessions(&sessions[..count], SIDEBAR_PROJECT_REVEAL_BATCH);
+            assert_eq!(visible, &sessions[..count.min(15)]);
+            assert_eq!(show_more, count > 15);
+        }
+    }
 
-        let (initial, show_more) =
-            visible_project_sessions(&sessions, &timestamps, recent_cutoff, 0);
-        assert_eq!(initial, vec![sessions[0]]);
-        assert!(show_more);
-
-        let (first_batch, show_more) = visible_project_sessions(
-            &sessions,
-            &timestamps,
-            recent_cutoff,
-            SIDEBAR_PROJECT_REVEAL_BATCH,
-        );
-        assert_eq!(first_batch, sessions[..31]);
-        assert!(show_more);
-
-        let (all_sessions, show_more) = visible_project_sessions(
-            &sessions,
-            &timestamps,
-            recent_cutoff,
-            SIDEBAR_PROJECT_REVEAL_BATCH * 2,
-        );
-        assert_eq!(all_sessions, sessions);
-        assert!(!show_more);
+    #[test]
+    fn collapsing_a_collection_resets_only_its_project_reveals() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let collection = Uuid::from_u128(3);
+        let project = SidebarGroup::Project(a);
+        let ungrouped = SidebarGroup::Project(b);
+        let mut state = PersistedState::empty();
+        state.sidebar_project_groups.push(SidebarProjectGroup {
+            id: collection,
+            name: "Work".into(),
+            projects: vec![a],
+            collapsed: false,
+        });
+        let mut reveals = HashMap::from([
+            (project, 20),
+            (ungrouped, 10),
+            (SidebarGroup::Projectless, 10),
+        ]);
+        assert!(reset_sidebar_collection_reveals(
+            &mut reveals,
+            &state,
+            Some(collection)
+        ));
+        assert!(!reveals.contains_key(&project));
+        assert_eq!(reveals.get(&ungrouped), Some(&10));
+        assert!(!reset_sidebar_collection_reveals(
+            &mut reveals,
+            &state,
+            Some(collection)
+        ));
+        assert!(reset_sidebar_collection_reveals(&mut reveals, &state, None));
+        assert_eq!(reveals, HashMap::from([(SidebarGroup::Projectless, 10)]));
     }
 
     #[test]
@@ -4158,7 +2644,7 @@ mod tests {
         sort_sidebar_sessions(&mut sessions, SidebarOrdering::Manual, &order);
         assert_eq!(ids(&sessions), expected);
         assert_eq!(
-            project_sidebar_groups(&sessions, &HashSet::new()),
+            project_sidebar_groups(&sessions, &HashSet::new(), &HashMap::new()),
             vec![
                 (
                     SidebarGroup::Project(project),
@@ -4204,7 +2690,6 @@ mod tests {
         let first_header = SidebarRow::Header(SidebarGroup::Project(project));
         let second_header = SidebarRow::Header(SidebarGroup::Project(other_project));
         let rows = vec![
-            SidebarRow::Search,
             first_header,
             SidebarRow::Session(first.id),
             SidebarRow::Session(second.id),
@@ -4234,7 +2719,8 @@ mod tests {
         let second = AgentSession::new(second_project, ProviderKind::Codex);
         let third = AgentSession::new(first_project, ProviderKind::Codex);
 
-        let groups = project_sidebar_groups(&[&second, &first, &third], &HashSet::new());
+        let groups =
+            project_sidebar_groups(&[&second, &first, &third], &HashSet::new(), &HashMap::new());
 
         assert_eq!(
             groups,
@@ -4249,10 +2735,122 @@ mod tests {
     }
 
     #[test]
+    fn accepted_chat_drop_keeps_its_slot_until_the_daemon_settles() {
+        let source = Uuid::from_u128(1);
+        let destination = Uuid::from_u128(2);
+        let general_workspace = Uuid::from_u128(3);
+        let remaining = AgentSession::new(source, ProviderKind::Codex);
+        let first = AgentSession::new(destination, ProviderKind::Codex);
+        let second = AgentSession::new(destination, ProviderKind::Codex);
+        for group in [
+            SidebarGroup::Project(destination),
+            SidebarGroup::Projectless,
+        ] {
+            for after in [false, true] {
+                let mut moved = AgentSession::new(source, ProviderKind::Codex);
+                let projectless = if group == SidebarGroup::Projectless {
+                    HashSet::from([destination, general_workspace])
+                } else {
+                    HashSet::new()
+                };
+                let pending = HashMap::from([(
+                    moved.id,
+                    SidebarSessionDrop {
+                        group,
+                        relative_to: Some((first.id, after)),
+                    },
+                )]);
+                let expected = vec![
+                    (SidebarGroup::Project(source), vec![remaining.id]),
+                    (
+                        group,
+                        if after {
+                            vec![first.id, moved.id, second.id]
+                        } else {
+                            vec![moved.id, first.id, second.id]
+                        },
+                    ),
+                ];
+                let original = project_sidebar_groups(
+                    &[&remaining, &moved, &first, &second],
+                    &projectless,
+                    &HashMap::new(),
+                );
+                // Mouse release clears the drag preview before the daemon replies.
+                assert_eq!(
+                    project_sidebar_groups(
+                        &[&remaining, &moved, &first, &second],
+                        &projectless,
+                        &pending,
+                    ),
+                    expected
+                );
+                assert_eq!(moved.project_id, source);
+                // Rejection rolls the presentation back without changing session data.
+                assert_eq!(
+                    project_sidebar_groups(
+                        &[&remaining, &moved, &first, &second],
+                        &projectless,
+                        &HashMap::new(),
+                    ),
+                    original
+                );
+                // The catalog can publish the new workspace before the request completes.
+                moved.project_id = if group == SidebarGroup::Projectless {
+                    general_workspace
+                } else {
+                    destination
+                };
+                assert_eq!(
+                    project_sidebar_groups(
+                        &[&remaining, &moved, &first, &second],
+                        &projectless,
+                        &pending,
+                    ),
+                    expected
+                );
+                let settled = if after {
+                    vec![&remaining, &first, &moved, &second]
+                } else {
+                    vec![&remaining, &moved, &first, &second]
+                };
+                assert_eq!(
+                    project_sidebar_groups(&settled, &projectless, &HashMap::new(),),
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn accepted_chat_drop_stays_visible_after_the_last_visible_chat() {
+        let source = Uuid::from_u128(1);
+        let destination = Uuid::from_u128(2);
+        let moved = AgentSession::new(source, ProviderKind::Codex);
+        let peers = (0..10)
+            .map(|_| AgentSession::new(destination, ProviderKind::Codex))
+            .collect::<Vec<_>>();
+        let mut sessions = vec![&moved];
+        sessions.extend(peers.iter());
+        let pending = HashMap::from([(
+            moved.id,
+            SidebarSessionDrop {
+                group: SidebarGroup::Project(destination),
+                relative_to: Some((peers[SIDEBAR_PROJECT_INITIAL_LIMIT - 1].id, true)),
+            },
+        )]);
+        let groups = project_sidebar_groups(&sessions, &HashSet::new(), &pending);
+        let (visible, show_more) = visible_project_sessions(&groups[0].1, pending.len());
+        assert_eq!(visible.last(), Some(&moved.id));
+        assert!(show_more);
+        assert!(!visible.contains(&peers[SIDEBAR_PROJECT_INITIAL_LIMIT].id));
+    }
+
+    #[test]
     fn chats_are_top_level_and_independent_of_collapsed_projects() {
         let project = SidebarGroup::Project(Uuid::from_u128(1));
         let chat = Uuid::from_u128(2);
-        let mut rows = vec![SidebarRow::Search];
+        let mut rows = Vec::new();
         append_sidebar_project_collections(
             &mut rows,
             vec![
@@ -4269,7 +2867,6 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                SidebarRow::Search,
                 SidebarRow::Collection(None),
                 SidebarRow::GroupSpacer,
                 SidebarRow::Header(SidebarGroup::Projectless),
@@ -4306,7 +2903,7 @@ mod tests {
             },
         ];
         let build = |groups: &[SidebarProjectGroup], collapsed| {
-            let mut rows = vec![SidebarRow::Search];
+            let mut rows = Vec::new();
             append_sidebar_project_collections(
                 &mut rows,
                 vec![section(other), section(project)],
@@ -4319,7 +2916,6 @@ mod tests {
         assert_eq!(
             build(&[], false),
             vec![
-                SidebarRow::Search,
                 SidebarRow::Collection(None),
                 SidebarRow::Header(SidebarGroup::Project(other)),
                 SidebarRow::Header(SidebarGroup::Project(project)),
@@ -4329,7 +2925,6 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                SidebarRow::Search,
                 SidebarRow::Collection(Some(a)),
                 SidebarRow::Header(SidebarGroup::Project(project)),
                 SidebarRow::GroupSpacer,
@@ -4348,7 +2943,7 @@ mod tests {
         assert!(!build(&groups, true).contains(&SidebarRow::Header(SidebarGroup::Project(other))));
         groups.swap(0, 1);
         assert_eq!(
-            build(&groups, false).get(1),
+            build(&groups, false).first(),
             Some(&SidebarRow::Collection(Some(b)))
         );
     }
@@ -4363,7 +2958,6 @@ mod tests {
         let collection = SidebarRow::Collection(Some(Uuid::from_u128(10)));
         let header = |id| SidebarRow::Header(SidebarGroup::Project(id));
         let original = Rc::new(vec![
-            SidebarRow::Search,
             collection,
             header(source),
             session,
@@ -4383,17 +2977,18 @@ mod tests {
             ordering,
             timestamps: HashMap::from([(source, 15), (other, 20), (third, 10)]),
             destination: None,
+            session_destination: None,
             bounds: Bounds::default(),
             cursor_offset: gpui::Point::default(),
             collapsed: false,
             working: false,
         };
         let mut manual = preview(original.clone(), SidebarOrdering::Manual);
-        let other_y = manual.offsets[4];
+        let other_y = manual.offsets[3];
         assert!(!manual.move_project(other_y + px(15.0)));
         assert!(manual.move_project(other_y + px(17.0)));
         assert_eq!(
-            &manual.rows[2..7],
+            &manual.rows[1..6],
             &[
                 header(other),
                 other_session,
@@ -4408,11 +3003,11 @@ mod tests {
         );
         // The placeholder absorbs subsequent movement, preventing oscillation.
         assert!(!manual.move_project(other_y + px(17.0)));
-        assert!(manual.move_project(manual.offsets[2] + px(15.0)));
+        assert!(manual.move_project(manual.offsets[1] + px(15.0)));
         assert_eq!(manual.rows, original);
         assert!(!manual.move_project(px(-10.0)));
         assert!(!manual.move_project(*manual.offsets.last().unwrap() + px(10.0)));
-        assert!(!manual.move_project(manual.offsets[9] + px(15.0)));
+        assert!(!manual.move_project(manual.offsets[8] + px(15.0)));
 
         for ordering in [SidebarOrdering::Newest, SidebarOrdering::Oldest] {
             let (first, second) = if ordering == SidebarOrdering::Newest {
@@ -4422,7 +3017,6 @@ mod tests {
             };
             let target = SidebarRow::Collection(Some(Uuid::from_u128(20)));
             let rows = Rc::new(vec![
-                SidebarRow::Search,
                 collection,
                 header(source),
                 session,
@@ -4437,10 +3031,10 @@ mod tests {
                 SidebarRow::GroupSpacer,
             ]);
             let mut automatic = preview(rows.clone(), ordering);
-            assert!(!automatic.move_project(automatic.offsets[1] + px(15.0)));
-            assert!(automatic.move_project(automatic.offsets[5] + px(15.0)));
+            assert!(!automatic.move_project(automatic.offsets[0] + px(15.0)));
+            assert!(automatic.move_project(automatic.offsets[4] + px(15.0)));
             assert_eq!(
-                &automatic.rows[3..9],
+                &automatic.rows[2..8],
                 &[
                     target,
                     header(first),
@@ -4454,9 +3048,9 @@ mod tests {
                 automatic.destination,
                 Some((Some(Uuid::from_u128(20)), Some(second)))
             );
-            assert!(automatic.move_project(automatic.offsets[10] + px(15.0)));
+            assert!(automatic.move_project(automatic.offsets[9] + px(15.0)));
             assert_eq!(
-                &automatic.rows[8..13],
+                &automatic.rows[7..12],
                 &[
                     SidebarRow::Collection(None),
                     header(source),
@@ -4467,11 +3061,11 @@ mod tests {
             );
             // Returning to the original collection is a preview too; cancellation
             // simply releases the snapshot and leaves this original Rc untouched.
-            assert!(automatic.move_project(automatic.offsets[1] + px(15.0)));
+            assert!(automatic.move_project(automatic.offsets[0] + px(15.0)));
             assert_eq!(automatic.rows, rows);
         }
         assert_eq!(
-            &original[2..7],
+            &original[1..6],
             &[
                 header(source),
                 session,
@@ -4501,13 +3095,13 @@ mod tests {
             ordering,
             timestamps: HashMap::new(),
             destination: None,
+            session_destination: None,
             bounds: Bounds::default(),
             cursor_offset: gpui::Point::default(),
             collapsed: false,
             working: false,
         };
         let original = Rc::new(vec![
-            SidebarRow::Search,
             a,
             project,
             first,
@@ -4523,11 +3117,13 @@ mod tests {
             SidebarRow::GroupSpacer,
         ]);
         let mut groups = preview(a, original.clone(), SidebarOrdering::Newest);
-        let b_y = groups.offsets[5];
-        assert!(!groups.move_row(b_y + px(15.0)));
-        assert!(groups.move_row(b_y + px(17.0)));
+        let b_y = groups.offsets[4];
+        let before_midpoint = sidebar_row_height(b) / 2.0 - px(1.0);
+        let after_midpoint = sidebar_row_height(b) / 2.0 + px(1.0);
+        assert!(!groups.move_row(b_y + before_midpoint));
+        assert!(groups.move_row(b_y + after_midpoint));
         assert_eq!(
-            &groups.rows[1..7],
+            &groups.rows[0..6],
             &[
                 b,
                 SidebarRow::GroupSpacer,
@@ -4537,10 +3133,10 @@ mod tests {
                 SidebarRow::GroupSpacer
             ]
         );
-        assert!(!groups.move_row(b_y + px(17.0)));
-        assert!(groups.move_row(groups.offsets[7] + px(17.0)));
+        assert!(!groups.move_row(b_y + after_midpoint));
+        assert!(groups.move_row(groups.offsets[6] + after_midpoint));
         assert_eq!(
-            &groups.rows[3..11],
+            &groups.rows[2..10],
             &[
                 c,
                 other_project,
@@ -4552,14 +3148,14 @@ mod tests {
                 SidebarRow::GroupSpacer
             ]
         );
-        assert!(!groups.move_row(groups.offsets[11] + px(17.0)));
-        assert!(groups.move_row(groups.offsets[1] + px(15.0)));
+        assert!(!groups.move_row(groups.offsets[10] + after_midpoint));
+        assert!(groups.move_row(groups.offsets[0] + before_midpoint));
         assert_eq!(groups.rows, original);
         // A collapsed/empty collection still moves together with its spacer.
         let mut collapsed = preview(b, original.clone(), SidebarOrdering::Oldest);
-        assert!(collapsed.move_row(collapsed.offsets[7] + px(17.0)));
+        assert!(collapsed.move_row(collapsed.offsets[6] + after_midpoint));
         assert_eq!(
-            &collapsed.rows[5..11],
+            &collapsed.rows[4..10],
             &[
                 c,
                 other_project,
@@ -4581,7 +3177,6 @@ mod tests {
 
         for header in [project, SidebarRow::Header(SidebarGroup::Projectless)] {
             let original = Rc::new(vec![
-                SidebarRow::Search,
                 header,
                 first,
                 second,
@@ -4595,22 +3190,192 @@ mod tests {
                 other,
             ]);
             let mut chats = preview(first, original.clone(), SidebarOrdering::Manual);
-            let second_y = chats.offsets[3];
-            assert!(!chats.move_row(second_y + px(25.0)));
-            assert!(chats.move_row(second_y + px(27.0)));
-            assert_eq!(&chats.rows[2..5], &[second, first, third]);
-            assert!(!chats.move_row(second_y + px(27.0)));
-            assert!(chats.move_row(chats.offsets[4] + px(27.0)));
-            assert_eq!(&chats.rows[2..5], &[second, third, first]);
-            assert!(!chats.move_row(chats.offsets[8] + px(27.0)));
-            assert!(!chats.move_row(chats.offsets[5] + px(15.0)));
-            assert!(!chats.move_row(chats.offsets[7] + px(15.0)));
-            assert!(chats.move_row(chats.offsets[2] + px(25.0)));
+            let second_y = chats.offsets[2];
+            let before_midpoint = sidebar_row_height(second) / 2.0 - px(1.0);
+            let after_midpoint = sidebar_row_height(second) / 2.0 + px(1.0);
+            assert!(!chats.move_row(second_y + before_midpoint));
+            assert!(chats.move_row(second_y + after_midpoint));
+            assert_eq!(&chats.rows[1..4], &[second, first, third]);
+            assert!(!chats.move_row(second_y + after_midpoint));
+            assert!(chats.move_row(chats.offsets[3] + after_midpoint));
+            assert_eq!(&chats.rows[1..4], &[second, third, first]);
+            assert!(!chats.move_row(chats.offsets[7] + after_midpoint));
+            assert!(!chats.move_row(chats.offsets[4] + px(15.0)));
+            assert!(!chats.move_row(chats.offsets[6] + px(15.0)));
+            assert!(chats.move_row(chats.offsets[1] + before_midpoint));
             assert_eq!(chats.rows, original);
             assert!(
                 !preview(first, original, SidebarOrdering::Newest).move_row(second_y + px(27.0))
             );
         }
+    }
+
+    #[test]
+    fn session_drop_previews_transfer_and_position_in_any_ordering() {
+        let source = SidebarRow::Session(Uuid::from_u128(100));
+        let first = SidebarRow::Session(Uuid::from_u128(200));
+        let second = SidebarRow::Session(Uuid::from_u128(300));
+        let target = SidebarGroup::Project(Uuid::from_u128(2));
+        let original = Rc::new(vec![
+            SidebarRow::Collection(Some(Uuid::from_u128(10))),
+            SidebarRow::Header(SidebarGroup::Project(Uuid::from_u128(1))),
+            source,
+            SidebarRow::GroupSpacer,
+            SidebarRow::Collection(None),
+            SidebarRow::Header(target),
+            first,
+            second,
+            SidebarRow::GroupSpacer,
+        ]);
+        for ordering in [
+            SidebarOrdering::Manual,
+            SidebarOrdering::Newest,
+            SidebarOrdering::Oldest,
+        ] {
+            for after in [false, true] {
+                let mut preview = SidebarDragPreview {
+                    row: source,
+                    siblings: sidebar_reorder_siblings(&original, source),
+                    offsets: sidebar_row_offsets(&original),
+                    rows: original.clone(),
+                    ordering,
+                    timestamps: HashMap::new(),
+                    destination: None,
+                    session_destination: None,
+                    bounds: Bounds::default(),
+                    cursor_offset: gpui::Point::default(),
+                    collapsed: false,
+                    working: false,
+                };
+                let y = preview.offsets[6]
+                    + sidebar_row_height(first) * if after { 0.75 } else { 0.25 };
+                assert!(preview.move_session(y));
+                assert_eq!(
+                    preview.session_destination,
+                    Some(SidebarSessionDrop {
+                        group: target,
+                        relative_to: Some((Uuid::from_u128(200), after)),
+                    })
+                );
+                let expected = if after {
+                    [first, source, second]
+                } else {
+                    [source, first, second]
+                };
+                assert_eq!(&preview.rows[5..8], &expected);
+                let slot = preview.rows.iter().position(|row| *row == source).unwrap();
+                assert!(!preview.move_session(preview.offsets[slot] + px(1.0)));
+                // Previewing never mutates the original list, including on cancellation.
+                assert_eq!(original[2], source);
+
+                let outside = *preview.offsets.last().unwrap() + px(10.0);
+                assert!(preview.move_session(outside));
+                assert_eq!(
+                    preview.session_destination.unwrap().group,
+                    SidebarGroup::Projectless
+                );
+                assert_eq!(
+                    &preview.rows[preview.rows.len() - 3..],
+                    &[
+                        SidebarRow::Header(SidebarGroup::Projectless),
+                        source,
+                        SidebarRow::GroupSpacer,
+                    ]
+                );
+                let group_index = preview
+                    .rows
+                    .iter()
+                    .position(|row| *row == SidebarRow::Header(target))
+                    .unwrap();
+                assert!(preview.move_session(preview.offsets[group_index] + px(1.0)));
+                assert_eq!(
+                    preview.session_destination.unwrap().relative_to,
+                    Some((Uuid::from_u128(200), false))
+                );
+                assert_eq!(preview.rows.iter().filter(|row| **row == source).count(), 1);
+
+                // A collection gap is outside all projects, even above the Chats group.
+                let gap = preview
+                    .rows
+                    .iter()
+                    .position(|row| *row == SidebarRow::GroupSpacer)
+                    .unwrap();
+                assert!(preview.move_session(preview.offsets[gap] + px(1.0)));
+                assert_eq!(
+                    preview.session_destination.unwrap().group,
+                    SidebarGroup::Projectless
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn session_drop_places_between_general_chats_and_into_empty_projects() {
+        let source = SidebarRow::Session(Uuid::from_u128(100));
+        let first = SidebarRow::Session(Uuid::from_u128(200));
+        let second = SidebarRow::Session(Uuid::from_u128(300));
+        let empty_project = SidebarGroup::Project(Uuid::from_u128(2));
+        let rows = Rc::new(vec![
+            SidebarRow::TopSpacer,
+            SidebarRow::Header(SidebarGroup::Project(Uuid::from_u128(1))),
+            source,
+            SidebarRow::Header(empty_project),
+            SidebarRow::GroupSpacer,
+            SidebarRow::Header(SidebarGroup::Projectless),
+            first,
+            second,
+            SidebarRow::ShowMore(SidebarGroup::Projectless),
+            SidebarRow::GroupSpacer,
+        ]);
+        let mut preview = SidebarDragPreview {
+            row: source,
+            siblings: sidebar_reorder_siblings(&rows, source),
+            offsets: sidebar_row_offsets(&rows),
+            rows,
+            ordering: SidebarOrdering::Newest,
+            timestamps: HashMap::new(),
+            destination: None,
+            session_destination: None,
+            bounds: Bounds::default(),
+            cursor_offset: gpui::Point::default(),
+            collapsed: false,
+            working: false,
+        };
+        assert!(!preview.move_session(px(1.0)));
+        assert!(preview.session_destination.is_none());
+        assert!(preview.move_session(preview.offsets[7] + px(1.0)));
+        assert_eq!(
+            preview.session_destination,
+            Some(SidebarSessionDrop {
+                group: SidebarGroup::Projectless,
+                relative_to: Some((Uuid::from_u128(300), false)),
+            })
+        );
+        assert_eq!(&preview.rows[5..8], &[first, source, second]);
+        let show_more = preview
+            .rows
+            .iter()
+            .position(|row| matches!(row, SidebarRow::ShowMore(_)))
+            .unwrap();
+        assert!(preview.move_session(preview.offsets[show_more] + px(1.0)));
+        assert_eq!(
+            preview.session_destination.unwrap().relative_to,
+            Some((Uuid::from_u128(300), true))
+        );
+        let empty = preview
+            .rows
+            .iter()
+            .position(|row| *row == SidebarRow::Header(empty_project))
+            .unwrap();
+        assert!(preview.move_session(preview.offsets[empty] + px(1.0)));
+        assert_eq!(
+            preview.session_destination,
+            Some(SidebarSessionDrop {
+                group: empty_project,
+                relative_to: None
+            })
+        );
+        assert_eq!(preview.rows[empty + 1], source);
     }
 
     #[test]
@@ -4620,7 +3385,7 @@ mod tests {
         let chat_a = SidebarRow::Session(Uuid::from_u128(100));
         let chat_b = SidebarRow::Session(Uuid::from_u128(200));
         let old = [
-            SidebarRow::Search,
+            SidebarRow::TopSpacer,
             a,
             chat_a,
             SidebarRow::GroupSpacer,
@@ -4629,7 +3394,7 @@ mod tests {
             SidebarRow::GroupSpacer,
         ];
         let new = [
-            SidebarRow::Search,
+            SidebarRow::TopSpacer,
             b,
             chat_b,
             SidebarRow::GroupSpacer,
@@ -4646,8 +3411,8 @@ mod tests {
         assert_eq!(animation.offsets[&b], section_height);
         assert_eq!(animation.offsets[&chat_a], animation.offsets[&a]);
         assert_eq!(animation.offsets[&chat_b], animation.offsets[&b]);
+        assert!(!animation.offsets.contains_key(&SidebarRow::TopSpacer));
         assert!(!animation.offsets.contains_key(&SidebarRow::GroupSpacer));
-        assert!(!animation.offsets.contains_key(&SidebarRow::Search));
         assert_eq!(animation.remaining_at(now), 1.0);
         let interrupted_at = now + SIDEBAR_REORDER_DURATION / 2;
         let remaining = animation.remaining_at(interrupted_at);
@@ -4657,6 +3422,8 @@ mod tests {
                 .unwrap();
         let old_y = sidebar_row_offsets(&old);
         let new_y = sidebar_row_offsets(&new);
+        assert_eq!(old_y[1], px(6.0));
+        assert_eq!(new_y[1], px(6.0));
         for (index, row) in old
             .iter()
             .enumerate()
@@ -4694,6 +3461,7 @@ mod tests {
         let groups = project_sidebar_groups(
             &[&first_projectless, &ordinary, &second_projectless],
             &HashSet::from([first_projectless_project, second_projectless_project]),
+            &HashMap::new(),
         );
 
         assert_eq!(
@@ -4710,10 +3478,11 @@ mod tests {
             project_sidebar_groups(
                 &[&ordinary],
                 &HashSet::from([first_projectless_project, second_projectless_project]),
+                &HashMap::new(),
             ),
             vec![(SidebarGroup::Project(ordinary_project), vec![ordinary.id])]
         );
-        assert!(project_sidebar_groups(&[], &HashSet::new()).is_empty());
+        assert!(project_sidebar_groups(&[], &HashSet::new(), &HashMap::new()).is_empty());
     }
 
     #[test]
@@ -4738,25 +3507,6 @@ mod tests {
     }
 
     #[test]
-    fn persisted_worktree_branches_supply_sidebar_labels() {
-        let local = SessionWorkspace::Local;
-        let planned = SessionWorkspace::NewWorktree {
-            base_branch: Some("develop".to_owned()),
-        };
-        let worktree = SessionWorkspace::Worktree {
-            path: PathBuf::from("/tmp/worktree"),
-            branch: "feature/sidebar".to_owned(),
-        };
-
-        assert_eq!(persisted_sidebar_branch_label(&local), None);
-        assert_eq!(persisted_sidebar_branch_label(&planned), Some("develop"));
-        assert_eq!(
-            persisted_sidebar_branch_label(&worktree),
-            Some("feature/sidebar")
-        );
-    }
-
-    #[test]
     fn pending_session_replaces_sidebar_selection_immediately() {
         let current = Uuid::from_u128(1);
         let pending = Uuid::from_u128(2);
@@ -4778,16 +3528,16 @@ mod tests {
     fn selected_session_uses_nearest_bottom_edge_for_an_unmeasured_lower_row() {
         let target = Uuid::from_u128(31);
         let group = SidebarGroup::Projectless;
-        let mut rows = vec![SidebarRow::Search, SidebarRow::Header(group)];
+        let mut rows = vec![SidebarRow::Header(group)];
         rows.extend((1..=40).map(|id| SidebarRow::Session(Uuid::from_u128(id))));
         rows.push(SidebarRow::GroupSpacer);
 
         let index = sidebar_session_row_index(&rows, target).unwrap();
         let offset = sidebar_bottom_aligned_offset(&rows, index, px(400.0));
 
-        assert_eq!(index, 32);
-        assert_eq!(offset.item_ix, 25);
-        assert_eq!(offset.offset_in_item, px(16.0));
+        assert_eq!(index, 31);
+        assert_eq!(offset.item_ix, 19);
+        assert_eq!(offset.offset_in_item, px(29.0));
         let visible_height = rows[offset.item_ix..=index]
             .iter()
             .copied()

@@ -9,132 +9,15 @@
 use gpui::{PathBuilder, relative};
 
 use super::*;
+use crate::ui::squircle::{SquircleStyled, squircle};
+use crate::ui::{StyledTypography, TextStyle};
 use crate::usage::{PlanUsage, format_tokens, reset_label};
 
 const USAGE_METER_MENU_ID: &str = "usage-meter";
 
-/// Providers with an account-level plan fetcher. Codex additionally refreshes
-/// live from its own stream notifications.
-pub(super) const PLAN_USAGE_PROVIDERS: [ProviderKind; 4] = [
-    ProviderKind::Claude,
-    ProviderKind::Codex,
-    ProviderKind::OpenCode,
-    ProviderKind::Grok,
-];
-
-/// Refresh cadences for the plan snapshots. Quota moves only when turns run,
-/// so idle refreshes stay rare; a settled turn or a just-opened panel asks
-/// sooner. Grok's fetch spawns a probe process, so its idle cadence is wider.
-const PLAN_USAGE_REFRESH: Duration = Duration::from_secs(300);
-const PLAN_USAGE_REFRESH_GROK: Duration = Duration::from_secs(600);
-const PLAN_USAGE_REFRESH_STALE: Duration = Duration::from_secs(30);
-const PLAN_USAGE_RETRY: Duration = Duration::from_secs(90);
+use super::settings::plan_usage::PLAN_USAGE_PROVIDERS;
 
 impl Michelle {
-    /// Start background fetches of any plan meters whose snapshot is due.
-    /// The slow maintenance clock and explicit panel-open requests call this;
-    /// guards keep it to one in-flight fetch per provider.
-    pub(super) fn maybe_refresh_plan_usage(&mut self, cx: &mut Context<Self>) {
-        // Disabling a provider only stops it backing new sessions; a session
-        // already locked to it keeps running, and while one is selected its
-        // usage panel still owes the account meters. Without this the panel
-        // would show its loading skeleton forever: fetchable provider, no
-        // snapshot, and no fetch ever allowed to start.
-        let selected_provider = self.selected_session().map(|session| session.provider);
-        for provider in PLAN_USAGE_PROVIDERS {
-            if self.plan_usage_pending.contains(&provider)
-                || (!self.provider_enabled(provider) && selected_provider != Some(provider))
-            {
-                continue;
-            }
-            let interval = if self.plan_usage_error.contains_key(&provider) {
-                PLAN_USAGE_RETRY
-            } else if self.plan_usage_stale.contains(&provider) {
-                PLAN_USAGE_REFRESH_STALE
-            } else if provider == ProviderKind::Grok {
-                PLAN_USAGE_REFRESH_GROK
-            } else {
-                PLAN_USAGE_REFRESH
-            };
-            if self
-                .plan_usage_checked_at
-                .get(&provider)
-                .is_some_and(|checked| checked.elapsed() < interval)
-            {
-                continue;
-            }
-            self.plan_usage_pending.insert(provider);
-            let tx = self.plan_usage_tx.clone();
-            let event_wake = self.event_wake_tx.clone();
-            let claude_version = self
-                .provider_versions
-                .get(&ProviderKind::Claude)
-                .cloned()
-                .flatten();
-            let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
-            let daemon = self.daemon.client();
-            cx.background_executor()
-                .spawn(async move {
-                    let result = match daemon.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        michelle_client::Command::FetchPlanUsage {
-                            provider,
-                            binary_override,
-                            cli_version: claude_version,
-                        },
-                    ) {
-                        Ok(michelle_client::ResponsePayload::PlanUsage { usage }) => Ok(usage),
-                        Ok(_) => Err(anyhow::anyhow!(
-                            "the daemon returned an invalid plan usage response"
-                        )),
-                        Err(error) => Err(error),
-                    };
-                    if tx
-                        .send((provider, result.map_err(|error| format!("{error:#}"))))
-                        .is_ok()
-                    {
-                        signal_event_pump(&event_wake);
-                    }
-                })
-                .detach();
-        }
-    }
-
-    pub(super) fn drain_plan_usage_events(&mut self) -> bool {
-        let mut changed = false;
-        while let Ok((provider, result)) = self.plan_usage_events.try_recv() {
-            self.plan_usage_pending.remove(&provider);
-            self.plan_usage_stale.remove(&provider);
-            self.plan_usage_checked_at.insert(provider, Instant::now());
-            match result {
-                Ok(Some(usage)) => {
-                    changed |= self.plan_usage.get(&provider) != Some(&usage)
-                        || self.plan_usage_error.contains_key(&provider)
-                        || self.plan_usage_unconfigured.contains(&provider);
-                    self.plan_usage.insert(provider, usage);
-                    self.plan_usage_error.remove(&provider);
-                    self.plan_usage_unconfigured.remove(&provider);
-                }
-                Ok(None) => {
-                    let had_usage = self.plan_usage.remove(&provider).is_some();
-                    let had_error = self.plan_usage_error.remove(&provider).is_some();
-                    let newly_unconfigured = self.plan_usage_unconfigured.insert(provider);
-                    changed |= had_usage || had_error || newly_unconfigured;
-                }
-                Err(error) => {
-                    let was_unconfigured = self.plan_usage_unconfigured.remove(&provider);
-                    changed |=
-                        self.plan_usage_error.get(&provider) != Some(&error) || was_unconfigured;
-                    // Keep any previous snapshot; stale meters with reset
-                    // times still self-correct visually.
-                    self.plan_usage_error.insert(provider, error);
-                }
-            }
-        }
-        changed
-    }
-
     /// Whether the footer shows the gauge. Always true with a session
     /// selected — an empty ring is the honest "nothing measured yet" state,
     /// and hiding it would make the control feel intermittent.
@@ -149,10 +32,10 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_page.is_some() || !self.usage_meter_available() {
+        if self.settings_ui.page.is_some() || !self.usage_meter_available() {
             return;
         }
-        let menus = self.menus.borrow();
+        let menus = self.shell_ui.menus.borrow();
         let Some(handle) = menus.get(USAGE_METER_MENU_ID).cloned() else {
             return;
         };
@@ -182,13 +65,13 @@ impl Michelle {
         let provider = session.provider;
         let context = session.context_usage;
         let theme = Theme::current(cx);
-        let plan = self.plan_usage.get(&provider).cloned();
-        let error = self.plan_usage_error.get(&provider).cloned();
+        let plan = self.settings.plan.snapshots.get(&provider).cloned();
+        let error = self.settings.plan.errors.get(&provider).cloned();
         // Fetchable but nothing cached yet: the panel shows a skeleton
         // whether the fetch is already in flight or lands on the next tick.
         let plan_loading = plan.is_none()
             && error.is_none()
-            && !self.plan_usage_unconfigured.contains(&provider)
+            && !self.settings.plan.unconfigured.contains(&provider)
             && PLAN_USAGE_PROVIDERS.contains(&provider);
 
         let weak = cx.entity().downgrade();
@@ -203,10 +86,11 @@ impl Michelle {
                         .map(|session| session.provider)
                         .filter(|provider| PLAN_USAGE_PROVIDERS.contains(provider))
                     {
-                        this.plan_usage_stale.insert(provider);
+                        this.settings.plan.stale.insert(provider);
                     }
                     this.maybe_refresh_plan_usage(cx);
                     card_focus = this
+                        .shell_ui
                         .menus
                         .borrow()
                         .get(USAGE_METER_MENU_ID)
@@ -225,7 +109,7 @@ impl Michelle {
             } else {
                 let mut composer_focus = None;
                 let _ = weak.update(cx, |this, cx| {
-                    composer_focus = Some(this.composer.read(cx).focus());
+                    composer_focus = Some(this.composer_ui.input.read(cx).focus());
                     cx.notify();
                 });
                 if let Some(focus) = composer_focus {
@@ -255,17 +139,21 @@ impl Michelle {
 
         let trigger = div()
             .id("usage-meter")
-            .h(px(20.0))
+            .h(px(26.0))
             .px(px(5.0))
             .rounded(px(5.0))
             .flex()
             .items_center()
+            .gap(px(6.0))
             .flex_none()
+            .text_style(TextStyle::Caption)
+            .text_color(theme.text_secondary)
             .cursor_default()
             .hover(|element| element.bg(theme.overlay))
             .when(handle.is_open(), |element| element.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tooltip))
-            .child(context_gauge(percent, theme.border_strong, fill));
+            .child(context_gauge(percent, theme.border_strong, fill))
+            .child(SharedString::from(context_usage_label(context)));
 
         Some(popover(
             trigger,
@@ -295,6 +183,17 @@ fn context_percent(usage: ContextUsage) -> Option<f64> {
         .window
         .filter(|window| *window > 0)
         .map(|window| (usage.tokens as f64 * 100.0 / window as f64).min(100.0))
+}
+
+fn context_usage_label(usage: Option<ContextUsage>) -> String {
+    match usage {
+        Some(usage) => match context_percent(usage) {
+            Some(percent) => format!("{percent:.0}%"),
+            None if usage.tokens > 0 => "—".to_owned(),
+            None => "0%".to_owned(),
+        },
+        None => "0%".to_owned(),
+    }
 }
 
 /// The trigger glyph: a ring whose arc fills clockwise from 12 o'clock as the
@@ -387,10 +286,15 @@ fn usage_panel(
         .track_focus(handle.focus_handle())
         .w(px(320.0))
         .p(px(14.0))
-        .rounded(px(10.0))
-        .border_1()
-        .border_color(theme.border_strong)
-        .bg(theme.raised)
+        .child(
+            squircle()
+                .rounded(px(12.0))
+                .bg(theme.raised)
+                .border(px(0.5))
+                .border_color(theme.border_strong)
+                .border_inside()
+                .absolute_expand(),
+        )
         .shadow_lg()
         .flex()
         .flex_col()
@@ -613,6 +517,26 @@ fn meter_bar(theme: &Theme, percent: f64) -> Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_usage_label_distinguishes_empty_unknown_and_measured_context() {
+        assert_eq!(context_usage_label(None), "0%");
+        assert_eq!(context_usage_label(Some(ContextUsage::default())), "0%");
+        assert_eq!(
+            context_usage_label(Some(ContextUsage {
+                tokens: 250_000,
+                window: None,
+            })),
+            "—"
+        );
+        assert_eq!(
+            context_usage_label(Some(ContextUsage {
+                tokens: 250_000,
+                window: Some(1_000_000),
+            })),
+            "25%"
+        );
+    }
 
     #[test]
     fn context_percent_caps_at_full_when_provider_over_reports() {
