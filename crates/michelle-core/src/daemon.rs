@@ -63,47 +63,68 @@ impl MichelleBackend {
     fn move_session_to_project(
         &self,
         session_id: Uuid,
-        project_id: Uuid,
-    ) -> anyhow::Result<AgentSession> {
+        project_id: Option<Uuid>,
+    ) -> anyhow::Result<(AgentSession, Project)> {
         let mut state = self.task_state.lock();
-        if !state
-            .projects
-            .iter()
-            .any(|project| project.id == project_id && !project.is_projectless())
-        {
-            bail!("the destination project no longer exists");
-        }
+        let destination = project_id
+            .map(|id| {
+                state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == id && !project.is_projectless())
+                    .cloned()
+                    .ok_or_else(|| anyhow!("the destination project no longer exists"))
+            })
+            .transpose()?;
         let index = state
             .sessions
             .iter()
             .position(|session| session.id == session_id)
             .ok_or_else(|| anyhow!("the chat no longer exists"))?;
         let previous_project = state.sessions[index].project_id;
-        if !state
+        if Some(previous_project) == project_id {
+            bail!("the chat already belongs to the destination project");
+        }
+        let source_is_projectless = state
             .projects
             .iter()
-            .any(|project| project.id == previous_project && project.is_projectless())
-        {
-            bail!("only a projectless chat can be moved into a project");
-        }
+            .find(|project| project.id == previous_project)
+            .ok_or_else(|| anyhow!("the source project no longer exists"))?
+            .is_projectless();
         self.task_store.hydrate(&mut state.sessions[index])?;
         if state.sessions[index].is_busy() {
             bail!("wait for the chat to finish working before moving it");
         }
+        let destination = match destination {
+            Some(project) => project,
+            None if source_is_projectless => {
+                bail!("the chat already belongs to the general Chats group");
+            }
+            None => {
+                let workspace = crate::projectless::create_workspace(Some(
+                    state.sessions[index].display_title(),
+                ))?;
+                let mut project = Project::from_path(workspace.cwd);
+                project.name = Project::PROJECTLESS_NAME.to_owned();
+                state.projects.push(project.clone());
+                project
+            }
+        };
 
         // The next prompt must start a provider in the destination checkout.
         let removed = self.sessions.lock().remove(&session_id);
         drop(removed);
         let session = &mut state.sessions[index];
-        session.project_id = project_id;
+        session.project_id = destination.id;
         session.workspace = SessionWorkspace::Local;
         session.runtime_event_cursor = None;
         session.updated_at = unix_time().max(session.updated_at.saturating_add(1));
         let moved = session.clone();
-        if !state
-            .sessions
-            .iter()
-            .any(|session| session.project_id == previous_project)
+        if source_is_projectless
+            && !state
+                .sessions
+                .iter()
+                .any(|session| session.project_id == previous_project)
         {
             state
                 .projects
@@ -113,7 +134,7 @@ impl MichelleBackend {
         self.task_store.save(&mut state)?;
         let pinned = self.sessions.lock().keys().copied().collect();
         trim_resident_transcripts(&mut state, &pinned);
-        Ok(moved)
+        Ok((moved, destination))
     }
 
     pub fn new(settings: DaemonSettingsStore, task_store: StateStore) -> anyhow::Result<Self> {
@@ -517,9 +538,13 @@ impl Backend for MichelleBackend {
                 drop(removed);
                 Ok(ResponsePayload::Ack)
             }
-            Command::MoveSessionToProject { project_id } => Ok(ResponsePayload::Session {
-                session: Some(self.move_session_to_project(session_id, project_id)?),
-            }),
+            Command::MoveSessionToProject { project_id } => {
+                let (session, project) = self.move_session_to_project(session_id, project_id)?;
+                Ok(ResponsePayload::Session {
+                    session: Some(session),
+                    project: Some(project),
+                })
+            }
             Command::HydrateSession { session_id } => {
                 // Live runtimes stay resident; everything else is trimmed to
                 // the recency window once the response is built.
@@ -536,7 +561,10 @@ impl Backend for MichelleBackend {
                     None
                 };
                 trim_resident_transcripts(&mut state, &pinned);
-                Ok(ResponsePayload::Session { session })
+                Ok(ResponsePayload::Session {
+                    session,
+                    project: None,
+                })
             }
             Command::SearchSessionMessages { query, limit } => {
                 let matches = self.task_store.session_message_search(query, limit)()?;
@@ -2167,7 +2195,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn moving_a_projectless_chat_preserves_history_and_restarts_in_the_project() {
+    fn moving_a_chat_preserves_history_and_restarts_in_the_project() {
         struct IdleDriver;
         impl driver::DriverControl for IdleDriver {
             fn prompt(&self, _: String) {}
@@ -2178,7 +2206,142 @@ mod tests {
             }
         }
 
-        let directory = std::env::temp_dir().join(format!("michelle-move-chat-{}", Uuid::new_v4()));
+        for (source_is_projectless, isolated_workspace) in
+            [(true, false), (false, false), (false, true)]
+        {
+            let directory =
+                std::env::temp_dir().join(format!("michelle-move-chat-{}", Uuid::new_v4()));
+            std::fs::create_dir_all(&directory).unwrap();
+            let database = directory.join("state.sqlite");
+            let backend = MichelleBackend::new(
+                DaemonSettingsStore::open(directory.join("daemon.json")).unwrap(),
+                StateStore::new(database.clone()),
+            )
+            .unwrap();
+            let source = Project::from_path(if source_is_projectless {
+                crate::projectless::workspace_root().unwrap().join("chat")
+            } else {
+                directory.join("source")
+            });
+            let target = Project::from_path(directory.join("project"));
+            let mut session = AgentSession::new(source.id, ProviderKind::Codex);
+            if isolated_workspace {
+                session.workspace = SessionWorkspace::Worktree {
+                    path: directory.join("worktree"),
+                    branch: "chat-branch".into(),
+                };
+            }
+            session.begin_turn("keep this conversation");
+            session.push_message(crate::model::MessageRole::Assistant, "original reply");
+            session.finish_active_turn(crate::model::TurnStatus::Completed);
+            session.provider_cursor = Some(ProviderResumeCursor::Codex {
+                thread_id: "original-thread".into(),
+            });
+            session.runtime_event_cursor = Some(crate::model::RuntimeEventCursor {
+                runtime_id: Uuid::new_v4(),
+                epoch: Uuid::new_v4(),
+                sequence: 10,
+            });
+            let id = session.id;
+            let previous_updated_at = session.updated_at;
+            let last_reply_at = session.last_reply_at;
+            let message_ids = session
+                .messages
+                .iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>();
+            let cursor = session.provider_cursor.clone();
+            {
+                let mut state = backend.task_state.lock();
+                state.projects = vec![source.clone(), target.clone()];
+                state.sessions = vec![session];
+                state.mark_session_dirty(id);
+                backend.task_store.save(&mut state).unwrap();
+                state.sessions[0].release_transcript();
+            }
+            let driver = Arc::new(IdleDriver);
+            backend.sessions.lock().insert(
+                id,
+                (Uuid::new_v4(), DriverHandle::from_control(driver.clone())),
+            );
+            for status in [
+                SessionStatus::Connecting,
+                SessionStatus::Working,
+                SessionStatus::Waiting,
+                SessionStatus::Background,
+            ] {
+                backend.task_state.lock().sessions[0].status = status;
+                assert!(
+                    backend
+                        .move_session_to_project(id, Some(target.id))
+                        .is_err()
+                );
+                assert!(backend.sessions.lock().contains_key(&id));
+                assert_eq!(backend.task_state.lock().sessions[0].project_id, source.id);
+            }
+            backend.task_state.lock().sessions[0].status = SessionStatus::Idle;
+            assert!(
+                backend
+                    .move_session_to_project(id, Some(Uuid::nil()))
+                    .is_err()
+            );
+            assert!(
+                backend
+                    .move_session_to_project(id, Some(source.id))
+                    .is_err()
+            );
+            let (moved, _) = backend
+                .move_session_to_project(id, Some(target.id))
+                .unwrap();
+            assert_eq!(moved.project_id, target.id);
+            assert_eq!(moved.workspace, SessionWorkspace::Local);
+            assert_eq!(moved.provider_cursor, cursor);
+            assert!(moved.runtime_event_cursor.is_none());
+            assert!(moved.updated_at > previous_updated_at);
+            assert_eq!(moved.last_reply_at, last_reply_at);
+            assert_eq!(
+                moved
+                    .messages
+                    .iter()
+                    .map(|message| message.id)
+                    .collect::<Vec<_>>(),
+                message_ids
+            );
+            assert_eq!(moved.turns.len(), 1);
+            assert_eq!(moved.messages[0].content, "keep this conversation");
+            assert_eq!(moved.messages[1].content, "original reply");
+            assert_eq!(moved.workspace.path().unwrap_or(&target.path), target.path);
+            assert!(!backend.sessions.lock().contains_key(&id));
+            assert_eq!(Arc::strong_count(&driver), 1);
+            assert!(
+                backend
+                    .move_session_to_project(id, Some(target.id))
+                    .is_err()
+            );
+            drop(backend);
+
+            let store = StateStore::new(database);
+            let mut restored = store.load().unwrap();
+            store.hydrate(&mut restored.sessions[0]).unwrap();
+            assert_eq!(restored.sessions[0].project_id, target.id);
+            assert_eq!(restored.sessions[0].provider_cursor, cursor);
+            assert_eq!(restored.sessions[0].messages.len(), message_ids.len());
+            assert_eq!(
+                restored
+                    .projects
+                    .iter()
+                    .any(|project| project.id == source.id),
+                !source_is_projectless
+            );
+            drop(store);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn moving_to_general_chats_preserves_history_and_the_source_project() {
+        let directory =
+            std::env::temp_dir().join(format!("michelle-detach-chat-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let database = directory.join("state.sqlite");
         let backend = MichelleBackend::new(
@@ -2186,80 +2349,74 @@ mod tests {
             StateStore::new(database.clone()),
         )
         .unwrap();
-        let source = Project::from_path(crate::projectless::workspace_root().unwrap().join("chat"));
-        let target = Project::from_path(directory.join("project"));
+        let source = Project::from_path(directory.join("source"));
+        std::fs::create_dir(&source.path).unwrap();
+        std::fs::write(source.path.join("work.txt"), "keep the source files").unwrap();
         let mut session = AgentSession::new(source.id, ProviderKind::Codex);
         session.begin_turn("keep this conversation");
-        session.push_message(crate::model::MessageRole::Assistant, "original reply");
         session.finish_active_turn(crate::model::TurnStatus::Completed);
         session.provider_cursor = Some(ProviderResumeCursor::Codex {
             thread_id: "original-thread".into(),
         });
         let id = session.id;
-        let message_ids = session
-            .messages
-            .iter()
-            .map(|message| message.id)
-            .collect::<Vec<_>>();
         let cursor = session.provider_cursor.clone();
         {
             let mut state = backend.task_state.lock();
-            state.projects = vec![source.clone(), target.clone()];
+            state.projects = vec![source.clone()];
             state.sessions = vec![session];
             state.mark_session_dirty(id);
             backend.task_store.save(&mut state).unwrap();
-            state.sessions[0].release_transcript();
         }
-        let driver = Arc::new(IdleDriver);
-        backend.sessions.lock().insert(
-            id,
-            (Uuid::new_v4(), DriverHandle::from_control(driver.clone())),
-        );
-        for status in [
-            SessionStatus::Working,
-            SessionStatus::Waiting,
-            SessionStatus::Background,
-        ] {
-            backend.task_state.lock().sessions[0].status = status;
-            assert!(backend.move_session_to_project(id, target.id).is_err());
-            assert!(backend.sessions.lock().contains_key(&id));
-            assert_eq!(backend.task_state.lock().sessions[0].project_id, source.id);
-        }
+        backend.task_state.lock().sessions[0].status = SessionStatus::Working;
+        assert!(backend.move_session_to_project(id, None).is_err());
+        assert_eq!(backend.task_state.lock().projects.len(), 1);
         backend.task_state.lock().sessions[0].status = SessionStatus::Idle;
-        assert!(backend.move_session_to_project(id, Uuid::nil()).is_err());
-        assert!(backend.move_session_to_project(id, source.id).is_err());
-        let moved = backend.move_session_to_project(id, target.id).unwrap();
-        assert_eq!(moved.project_id, target.id);
-        assert_eq!(moved.workspace, SessionWorkspace::Local);
+        let (moved, project) = backend.move_session_to_project(id, None).unwrap();
+        assert!(project.is_projectless());
+        assert!(project.path.is_dir());
+        assert_eq!(moved.project_id, project.id);
         assert_eq!(moved.provider_cursor, cursor);
-        assert_eq!(
-            moved
-                .messages
-                .iter()
-                .map(|message| message.id)
-                .collect::<Vec<_>>(),
-            message_ids
-        );
-        assert_eq!(moved.turns.len(), 1);
-        assert_eq!(moved.workspace.path().unwrap_or(&target.path), target.path);
-        assert!(!backend.sessions.lock().contains_key(&id));
-        assert_eq!(Arc::strong_count(&driver), 1);
-        assert!(backend.move_session_to_project(id, target.id).is_err());
+        assert_eq!(moved.messages[0].content, "keep this conversation");
+        assert!(backend.move_session_to_project(id, None).is_err());
         drop(backend);
 
-        let store = StateStore::new(database);
+        let store = StateStore::new(database.clone());
         let mut restored = store.load().unwrap();
         store.hydrate(&mut restored.sessions[0]).unwrap();
-        assert_eq!(restored.sessions[0].project_id, target.id);
+        assert_eq!(restored.sessions[0].project_id, project.id);
         assert_eq!(restored.sessions[0].provider_cursor, cursor);
-        assert_eq!(restored.sessions[0].messages.len(), message_ids.len());
         assert!(
-            !restored
+            restored
                 .projects
                 .iter()
                 .any(|project| project.id == source.id)
         );
+        assert_eq!(
+            std::fs::read_to_string(source.path.join("work.txt")).unwrap(),
+            "keep the source files"
+        );
         drop(store);
+
+        let backend = MichelleBackend::new(
+            DaemonSettingsStore::open(directory.join("daemon.json")).unwrap(),
+            StateStore::new(database),
+        )
+        .unwrap();
+        let (returned, _) = backend
+            .move_session_to_project(id, Some(source.id))
+            .unwrap();
+        assert_eq!(returned.project_id, source.id);
+        assert_eq!(returned.provider_cursor, cursor);
+        assert!(
+            !backend
+                .task_state
+                .lock()
+                .projects
+                .iter()
+                .any(|item| item.id == project.id)
+        );
+        drop(backend);
+        std::fs::remove_dir(&project.path).unwrap();
         std::fs::remove_dir_all(directory).unwrap();
     }
 

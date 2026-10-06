@@ -36,6 +36,8 @@ menu.toggle_right_panel:
   en: Toggle Right Panel
 menu.focus_composer:
   en: Focus Composer
+menu.open_terminal:
+  en: Open Terminal
 menu.toggle_model_picker:
   en: Toggle Model Picker
 menu.toggle_usage_panel:
@@ -305,10 +307,10 @@ settings.color_scheme:
   en: Color Scheme
 settings.color_scheme_description:
   en: Choose system, light, or dark appearance
-settings.ui_font_size:
-  en: UI font size
-settings.ui_font_size_description:
-  en: Text size across the interface and messages
+settings.content_font_size:
+  en: Content font size
+settings.content_font_size_description:
+  en: Text size in messages, documents, and prompt input
 settings.code_font_size:
   en: Code font size
 settings.code_font_size_description:
@@ -484,7 +486,7 @@ sidebar.move_to_group:
 sidebar.move_to_project:
   en: Move to Project
 sidebar.show_more:
-  en: Show more
+  en: Show More
 sidebar.working:
   en: Working for %{elapsed}
 sidebar.just_now:
@@ -859,9 +861,9 @@ activity.tool_calls:
   en: tool calls
 
 mode.supervised:
-  en: Supervised
+  en: Ask permissions
 mode.auto_accept_edits:
-  en: Auto-accept edits
+  en: Accept edits
 mode.auto:
   en: Auto
 mode.full_access:
@@ -1374,6 +1376,8 @@ errors.prepare_task_project_not_found:
   en: "Could not prepare the task: project not found"
 errors.store_pasted_image:
   en: "Could not attach the pasted image: %{error}"
+errors.store_pasted_text:
+  en: "Could not attach the pasted text: %{error}"
 errors.create_worktree:
   en: "Could not create the worktree: %{error}"
 errors.prepared_runtime_unavailable:

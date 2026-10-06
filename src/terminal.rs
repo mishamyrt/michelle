@@ -32,6 +32,7 @@ use parking_lot::Mutex;
 
 use crate::persistence::DEFAULT_RIGHT_PANEL_WIDTH;
 use crate::theme::{Theme, sp};
+use crate::ui::TOOLBAR_HEIGHT;
 use crate::ui::scrollbar::{self, ScrollbarState};
 
 /// Fallback advance width, used only until the font has been measured.
@@ -1065,7 +1066,8 @@ impl Render for TerminalView {
         let selection_color = theme.selection;
         let viewport = window.viewport_size();
         let panel_width = self.panel_width;
-        let body_height = (f32::from(viewport.height) - 48.0 - TERMINAL_TOOLBAR_HEIGHT).max(120.0);
+        let body_height =
+            (f32::from(viewport.height) - TOOLBAR_HEIGHT - TERMINAL_TOOLBAR_HEIGHT).max(120.0);
         // The rows are laid out by `StyledText` at the font's own advance, so
         // the grid must be sized from that same measured advance or the text
         // wraps short of (or past) the panel edge.
@@ -1890,6 +1892,17 @@ mod tests {
             ),
             Some(b"\x1b[1;5D".to_vec())
         );
+    }
+
+    #[test]
+    fn terminal_shortcut_is_not_forwarded_to_the_shell() {
+        for key in ["ctrl-`", "ctrl-ё", "ctrl-`->ё"] {
+            assert_eq!(
+                terminal_key_bytes(&Keystroke::parse(key).unwrap(), TermMode::empty()),
+                None,
+                "{key}"
+            );
+        }
     }
 
     #[cfg(target_os = "linux")]

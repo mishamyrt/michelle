@@ -5,18 +5,70 @@
 //!
 //! Discovery is filesystem work and lives on the background executor
 //! ([`Michelle::ensure_skills_catalog`]); frames read only the cached catalog.
-//! Mutations are one-shot user actions — each a single rename, write, or
-//! trash call — so they run synchronously in their click handlers and then
-//! invalidate the catalog.
+//! Catalog mutations run through the daemon on the background executor,
+//! with optimistic updates and a confirming rescan owned by the model.
 
 use std::path::Path;
 
 use gpui::KeyBinding;
 
-use super::composer::next_picker_highlight;
 use crate::skills::{SkillEntry, SkillSource, SkillsCatalog};
+use crate::ui::primitives::navigation::next_picker_highlight;
+use crate::ui::{
+    ActivationExt, Button, ButtonStyle, EmptyState, InfoRow, SearchField, TextStyle, Toggle,
+};
 
 use super::*;
+
+pub(super) mod model;
+
+pub(super) struct SkillsUi {
+    /// Filter query over the Skills page's rows.
+    pub(super) search: Entity<TextInput>,
+    /// Virtualized list over the filtered skill rows.
+    pub(super) list_state: ListState,
+    pub(super) scrollbar: Rc<ScrollbarState>,
+    /// The rows the list currently draws — sections and catalog indices —
+    /// refreshed once per frame rather than per row.
+    pub(super) rows: RefCell<Vec<SkillsRow>>,
+    /// The skill directory the detail pane shows. `None` falls back to the
+    /// first visible row, so the pane never opens empty.
+    pub(super) selected: Option<PathBuf>,
+    /// Parsed markdown for the selected skill's document, keyed by the skill
+    /// directory it was built from. One entry: only one detail shows at once.
+    pub(super) detail_markdown: RefCell<Option<(PathBuf, MarkdownView)>>,
+    /// Text selection over the detail pane's rendered document. Its own
+    /// registry, like the toast's, so it can never join a drag to another
+    /// surface's text.
+    pub(super) selection: TranscriptSelection,
+    /// Scroll position of the detail pane, tracked so it can draw a
+    /// scrollbar and land at the top when the selection moves.
+    pub(super) detail_scroll: ScrollHandle,
+    pub(super) detail_scrollbar: Rc<ScrollbarState>,
+    /// Source the list is narrowed to; `None` shows every ecosystem.
+    pub(super) source_filter: Option<crate::skills::SkillSource>,
+    /// The skill directory whose delete button is armed for its confirming
+    /// second click.
+    pub(super) delete_arming: Option<PathBuf>,
+}
+
+impl SkillsUi {
+    pub(super) fn new(search: Entity<TextInput>) -> Self {
+        Self {
+            search,
+            list_state: ListState::new(0, ListAlignment::Top, px(512.0)),
+            scrollbar: ScrollbarState::new(),
+            rows: RefCell::new(Vec::new()),
+            selected: None,
+            detail_markdown: RefCell::new(None),
+            selection: TranscriptSelection::default(),
+            detail_scroll: ScrollHandle::new(),
+            detail_scrollbar: ScrollbarState::new(),
+            source_filter: None,
+            delete_arming: None,
+        }
+    }
+}
 
 /// Key context the left pane declares around its search field.
 const SKILLS_PANE_CONTEXT: &str = "SkillsPane";
@@ -31,7 +83,7 @@ const SKILLS_LIST_WIDTH: f32 = 264.0;
 fn skill_source_icon(source: SkillSource) -> &'static str {
     match source {
         SkillSource::Shared => "shippingbox",
-        SkillSource::Provider(provider) => crate::ui::provider_icon(provider),
+        SkillSource::Provider(provider) => crate::app::presentation::provider_icon(provider),
     }
 }
 
@@ -42,9 +94,6 @@ fn skill_icon(skill: &SkillEntry) -> &'static str {
         skill_source_icon(skill.primary().source)
     }
 }
-
-/// A landed catalog older than this is rescanned when the page opens.
-const SKILLS_RESCAN_AFTER: Duration = Duration::from_secs(60);
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -70,225 +119,14 @@ pub(super) enum SkillsRow {
 }
 
 impl Michelle {
-    // ── Catalog ────────────────────────────────────────────────────────────
-
-    /// Start a background library scan unless a current-enough catalog (or an
-    /// in-flight scan) already covers it. Results from superseded scans are
-    /// discarded by generation.
-    pub(super) fn ensure_skills_catalog(&mut self, force: bool, cx: &mut Context<Self>) {
-        if self.skills_scan_pending {
-            return;
-        }
-        let fresh = self.skills_catalog.is_some()
-            && self
-                .skills_scanned_at
-                .is_some_and(|scanned| scanned.elapsed() < SKILLS_RESCAN_AFTER);
-        if !force && fresh {
-            return;
-        }
-        self.skills_scan_pending = true;
-        self.skills_scan_generation += 1;
-        let generation = self.skills_scan_generation;
-        let projects = self.skill_scan_projects();
-        let daemon = self.daemon.client();
-        cx.spawn(async move |this, cx| {
-            let catalog = cx
-                .background_executor()
-                .spawn(async move {
-                    match daemon.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        michelle_client::Command::LoadSkills { projects },
-                    )? {
-                        michelle_client::ResponsePayload::SkillsCatalog { catalog } => Ok(catalog),
-                        _ => anyhow::bail!("the daemon returned an invalid skills response"),
-                    }
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.skills_scan_generation != generation {
-                    // A mutation invalidated this scan; the flag and the
-                    // result now belong to the newer one.
-                    return;
-                }
-                this.skills_scan_pending = false;
-                match catalog {
-                    Ok(catalog) => {
-                        this.skills_catalog = Some(Rc::new(catalog));
-                        this.skills_scanned_at = Some(Instant::now());
-                    }
-                    Err(error) => this.show_toast(error.to_string()),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    /// Drop any in-flight scan's claim and rescan now. Called after every
-    /// mutation, so the library on screen always re-reads the disk it just
-    /// changed.
-    fn invalidate_skills_catalog(&mut self, cx: &mut Context<Self>) {
-        self.skills_scan_generation += 1;
-        self.skills_scan_pending = false;
-        self.ensure_skills_catalog(true, cx);
-    }
-
-    /// `(display name, path)` per scannable project. Projectless workspaces
-    /// are generated directories that never hold curated skills.
-    fn skill_scan_projects(&self) -> Vec<(String, PathBuf)> {
-        self.state
-            .projects
-            .iter()
-            .filter(|project| !project.is_projectless())
-            .map(|project| (project.display_name(), project.path.clone()))
-            .collect()
-    }
-
-    // ── Mutations ──────────────────────────────────────────────────────────
-
-    /// Flip every copy of the skill keyed by `primary_dir`. A skill installed
-    /// into several roots is one skill; the switch converges all of them.
-    fn toggle_skill_enabled(
-        &mut self,
-        primary_dir: PathBuf,
-        enabled: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let dirs = self
-            .skills_catalog
-            .as_ref()
-            .and_then(|catalog| {
-                catalog
-                    .skills
-                    .iter()
-                    .find(|skill| skill.primary().dir == primary_dir)
-            })
-            .map(|skill| {
-                skill
-                    .installs
-                    .iter()
-                    .map(|install| install.dir.clone())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_else(|| vec![primary_dir.clone()]);
-        // The switch answers immediately; the rescan confirms from disk.
-        if let Some(catalog) = self.skills_catalog.as_ref() {
-            let mut updated = catalog.as_ref().clone();
-            for skill in &mut updated.skills {
-                if skill.primary().dir == primary_dir {
-                    skill.enabled = enabled;
-                    skill.row_key = skill.row_key.wrapping_add(1);
-                    for install in &mut skill.installs {
-                        install.enabled = enabled;
-                        install.skill_file = install.dir.join(if enabled {
-                            crate::skills::SKILL_FILE
-                        } else {
-                            crate::skills::DISABLED_SKILL_FILE
-                        });
-                    }
-                }
-            }
-            self.skills_catalog = Some(Rc::new(updated));
-        }
-        self.skills_scan_generation += 1;
-        self.skills_scan_pending = false;
-        let daemon = self.daemon.client();
-        cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    daemon.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        michelle_client::Command::SetSkillsEnabled { dirs, enabled },
-                    )
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if let Err(error) = result {
-                    this.show_toast(tr!("skills.toggle_failed", error = error));
-                }
-                this.invalidate_skills_catalog(cx);
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    /// Trash every copy of the skill keyed by `primary_dir`.
-    fn delete_skill(&mut self, primary_dir: PathBuf, cx: &mut Context<Self>) {
-        let entry = self.skills_catalog.as_ref().and_then(|catalog| {
-            catalog
-                .skills
-                .iter()
-                .find(|skill| skill.primary().dir == primary_dir)
-                .cloned()
-        });
-        let name = entry
-            .as_ref()
-            .map(|skill| skill.name.clone())
-            .unwrap_or_else(|| {
-                primary_dir
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned()
-            });
-        let dirs = entry
-            .map(|skill| {
-                skill
-                    .installs
-                    .iter()
-                    .map(|install| install.dir.clone())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_else(|| vec![primary_dir.clone()]);
-        if self.skills_selected.as_ref() == Some(&primary_dir) {
-            self.skills_selected = None;
-        }
-        if let Some(catalog) = self.skills_catalog.as_ref() {
-            let mut updated = catalog.as_ref().clone();
-            updated
-                .skills
-                .retain(|skill| skill.primary().dir != primary_dir);
-            self.skills_catalog = Some(Rc::new(updated));
-        }
-        self.skills_delete_arming = None;
-        self.skills_scan_generation += 1;
-        self.skills_scan_pending = false;
-        let daemon = self.daemon.client();
-        cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    daemon.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        michelle_client::Command::TrashSkills { dirs },
-                    )
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                match result {
-                    Ok(_) => this.show_success_toast(tr!("skills.deleted_toast", name = name)),
-                    Err(error) => {
-                        this.show_toast(tr!("skills.delete_failed", error = error));
-                    }
-                }
-                this.invalidate_skills_catalog(cx);
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
     fn select_skill(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
-        self.skills_selected = Some(dir);
-        self.skills_delete_arming = None;
+        self.skills_ui.selected = Some(dir);
+        self.skills_ui.delete_arming = None;
         // Each skill's detail starts at its own top; a scroll position
         // carried over would land mid-document.
-        self.skills_detail_scroll.set_offset(gpui::Point::default());
+        self.skills_ui
+            .detail_scroll
+            .set_offset(gpui::Point::default());
         cx.notify();
     }
 
@@ -296,7 +134,7 @@ impl Michelle {
     /// its message list. The search field keeps focus so typing keeps
     /// narrowing.
     fn step_skill_selection(&mut self, key: &str, cx: &mut Context<Self>) {
-        let rows = self.skills_rows.borrow();
+        let rows = self.skills_ui.rows.borrow();
         let entries: Vec<(usize, usize)> = rows
             .iter()
             .enumerate()
@@ -309,10 +147,10 @@ impl Michelle {
         if entries.is_empty() {
             return;
         }
-        let Some(catalog) = self.skills_catalog.clone() else {
+        let Some(catalog) = self.skills.catalog.clone() else {
             return;
         };
-        let current = self.skills_selected.as_ref().and_then(|selected| {
+        let current = self.skills_ui.selected.as_ref().and_then(|selected| {
             entries.iter().position(|(_, index)| {
                 catalog
                     .skills
@@ -327,10 +165,12 @@ impl Michelle {
         let Some(skill) = catalog.skills.get(catalog_index) else {
             return;
         };
-        self.skills_selected = Some(skill.primary().dir.clone());
-        self.skills_delete_arming = None;
-        self.skills_detail_scroll.set_offset(gpui::Point::default());
-        self.skills_list_state.scroll_to_reveal_item(row_index);
+        self.skills_ui.selected = Some(skill.primary().dir.clone());
+        self.skills_ui.delete_arming = None;
+        self.skills_ui
+            .detail_scroll
+            .set_offset(gpui::Point::default());
+        self.skills_ui.list_state.scroll_to_reveal_item(row_index);
         cx.notify();
     }
 
@@ -338,8 +178,14 @@ impl Michelle {
 
     pub(super) fn render_skills_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let catalog = self.skills_catalog.clone();
-        let query = self.skills_search.read(cx).content().trim().to_lowercase();
+        let catalog = self.skills.catalog.clone();
+        let query = self
+            .skills_ui
+            .search
+            .read(cx)
+            .content()
+            .trim()
+            .to_lowercase();
 
         let Some(catalog) = catalog else {
             // The startup prefetch makes this a first-frames-only state.
@@ -350,14 +196,27 @@ impl Michelle {
                 .into_any_element();
         };
         if catalog.skills.is_empty() {
-            return skills_empty_state(&theme).into_any_element();
+            return EmptyState::new(tr!("skills.empty_title"))
+                .description(tr!("skills.empty_description"))
+                .icon(
+                    div()
+                        .size(px(44.0))
+                        .rounded(px(11.0))
+                        .bg(theme.overlay)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(icon("shippingbox", 21.0, theme.text_tertiary)),
+                )
+                .into_any_element();
         }
 
         let indices = self.visible_skill_indices(&catalog, &query);
         // The detail pane never sits empty while skills exist: the stored
         // selection wins when visible, the first visible row otherwise.
         let effective = self
-            .skills_selected
+            .skills_ui
+            .selected
             .as_ref()
             .filter(|selected| {
                 indices.iter().any(|index| {
@@ -386,7 +245,15 @@ impl Michelle {
             self.render_skill_detail_pane(skill, &theme, cx)
                 .into_any_element()
         } else {
-            skills_detail_placeholder(&theme).into_any_element()
+            EmptyState::new(tr!("skills.select_placeholder"))
+                .title_style(TextStyle::Body)
+                .text_color(theme.text_ghost)
+                .p(px(0.0))
+                .gap(px(8.0))
+                .flex_1()
+                .min_h_0()
+                .icon(icon("shippingbox", 22.0, theme.text_ghost))
+                .into_any_element()
         };
 
         div()
@@ -411,7 +278,7 @@ impl Michelle {
             .filter(|row| matches!(row, SkillsRow::Skill { .. }))
             .count();
         let total = catalog.skills.len();
-        let footer = if !query.is_empty() || self.skills_source_filter.is_some() {
+        let footer = if !query.is_empty() || self.skills_ui.source_filter.is_some() {
             tr!("skills.filter_caption", shown = shown, total = total)
         } else {
             let disabled = catalog.disabled_count();
@@ -445,20 +312,23 @@ impl Michelle {
                 .relative()
                 .child(
                     div().px(px(8.0)).size_full().child(
-                        list(self.skills_list_state.clone(), move |index, _window, cx| {
-                            entity
-                                .upgrade()
-                                .map(|entity| {
-                                    entity.update(cx, |this, cx| this.skills_row(index, cx))
-                                })
-                                .unwrap_or_else(|| div().into_any_element())
-                        })
+                        list(
+                            self.skills_ui.list_state.clone(),
+                            move |index, _window, cx| {
+                                entity
+                                    .upgrade()
+                                    .map(|entity| {
+                                        entity.update(cx, |this, cx| this.skills_row(index, cx))
+                                    })
+                                    .unwrap_or_else(|| div().into_any_element())
+                            },
+                        )
                         .size_full(),
                     ),
                 )
                 .child(scrollbar::vertical(
-                    &self.skills_list_state,
-                    &self.skills_scrollbar,
+                    &self.skills_ui.list_state,
+                    &self.skills_ui.scrollbar,
                 ))
                 .into_any_element()
         };
@@ -489,8 +359,7 @@ impl Michelle {
                     .flex_col()
                     .gap(px(7.0))
                     .child(
-                        TextField::new("skills-search-field", self.skills_search.clone())
-                            .icon("magnifyingglass", 13.0)
+                        SearchField::new("skills-search-field", self.skills_ui.search.clone())
                             .w_full(),
                     )
                     .child(self.render_skills_source_filter(catalog, theme, cx)),
@@ -521,7 +390,7 @@ impl Michelle {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let current = self.skills_source_filter;
+        let current = self.skills_ui.source_filter;
         let chip_label = match current {
             None => tr!("skills.filter_all"),
             Some(source) => source.label(),
@@ -575,7 +444,7 @@ impl Michelle {
                     items.push(
                         MenuItem::new(tr!("skills.filter_all"), move |_, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.skills_source_filter = None;
+                                this.skills_ui.source_filter = None;
                                 cx.notify();
                             });
                         })
@@ -594,7 +463,7 @@ impl Michelle {
                     items.push(
                         MenuItem::new(label, move |_, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.skills_source_filter = Some(source);
+                                this.skills_ui.source_filter = Some(source);
                                 cx.notify();
                             });
                         })
@@ -618,7 +487,7 @@ impl Michelle {
             .iter()
             .enumerate()
             .filter(|(_, skill)| {
-                self.skills_source_filter.is_none_or(|filter| {
+                self.skills_ui.source_filter.is_none_or(|filter| {
                     skill
                         .installs
                         .iter()
@@ -671,7 +540,7 @@ impl Michelle {
     /// Sharing a prefix keeps scroll position across filter keystrokes and
     /// selection moves; everything after the first change re-measures.
     fn sync_skills_rows(&self, rows: &[SkillsRow]) {
-        let mut cached = self.skills_rows.borrow_mut();
+        let mut cached = self.skills_ui.rows.borrow_mut();
         if cached.as_slice() == rows {
             return;
         }
@@ -683,9 +552,10 @@ impl Michelle {
         let old_count = cached.len();
         *cached = rows.to_vec();
         if old_count == 0 {
-            self.skills_list_state.reset(rows.len());
+            self.skills_ui.list_state.reset(rows.len());
         } else {
-            self.skills_list_state
+            self.skills_ui
+                .list_state
                 .splice(prefix..old_count, rows.len() - prefix);
         }
     }
@@ -695,7 +565,7 @@ impl Michelle {
     /// panicking.
     fn skills_row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let rows = self.skills_rows.borrow();
+        let rows = self.skills_ui.rows.borrow();
         let Some(entry) = rows.get(row) else {
             return div().into_any_element();
         };
@@ -731,7 +601,7 @@ impl Michelle {
                 let index = *index;
                 let selected = *selected;
                 drop(rows);
-                let catalog = self.skills_catalog.clone();
+                let catalog = self.skills.catalog.clone();
                 let Some(skill) = catalog
                     .as_deref()
                     .and_then(|catalog| catalog.skills.get(index))
@@ -856,7 +726,7 @@ impl Michelle {
         let dir = skill.primary().dir.clone();
         let skill_file = skill.primary().skill_file.clone();
         let enabled = skill.enabled;
-        let armed = self.skills_delete_arming.as_ref() == Some(&dir);
+        let armed = self.skills_ui.delete_arming.as_ref() == Some(&dir);
 
         let scope_caption = match &skill.project {
             Some(project) => tr!("skills.scope_in_project", project = project),
@@ -864,40 +734,16 @@ impl Michelle {
         };
         let caption = format!("{} · {}", skill.sources_label(), scope_caption);
 
-        let toggle = div()
-            .id(SharedString::from(format!(
-                "skill-enabled-{}",
-                skill.row_key
-            )))
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .w(px(36.0))
-            .h(px(20.0))
-            .p(px(2.0))
-            .flex_none()
-            .rounded_full()
-            .cursor_default()
-            .bg(if enabled { theme.inverse } else { theme.inset })
-            .border_1()
-            .border_color(if enabled {
-                theme.inverse
-            } else {
-                theme.border_strong
-            })
-            .flex()
-            .items_center()
-            .when(enabled, |element| element.justify_end())
-            .child(div().w(px(14.0)).h(px(14.0)).rounded_full().bg(if enabled {
-                theme.on_inverse
-            } else {
-                theme.text_tertiary
-            }))
-            .on_click(cx.listener({
-                let dir = dir.clone();
-                move |this, _, _, cx| {
-                    this.toggle_skill_enabled(dir.clone(), !enabled, cx);
-                }
-            }));
+        let toggle = Toggle::new(
+            SharedString::from(format!("skill-enabled-{}", skill.row_key)),
+            enabled,
+        )
+        .on_change(cx, {
+            let dir = dir.clone();
+            move |this, enabled, _, cx| {
+                this.toggle_skill_enabled(dir.clone(), enabled, cx);
+            }
+        });
 
         let mut contents = Vec::new();
         if skill.supporting_files == 1 {
@@ -956,29 +802,27 @@ impl Michelle {
         let info_count = info_rows.len();
         let mut info = div().mt(px(16.0)).flex().flex_col();
         for (index, (label, value)) in info_rows.into_iter().enumerate() {
-            info = info.child(skill_info_row(theme, label, value, index + 1 == info_count));
+            info = info.child(
+                InfoRow::new(label, value).when(index + 1 != info_count, |row| {
+                    row.border_b_1().border_color(theme.border)
+                }),
+            );
         }
 
         let action_button = |id: SharedString, icon_path: &'static str, label: String| {
-            div()
-                .id(id)
-                .tab_index(0)
-                .focus_visible(|style| style.border_color(theme.accent))
+            Button::new(id, label)
+                .button_style(ButtonStyle::Ghost)
                 .h(px(26.0))
                 .px(px(10.0))
                 .rounded(px(6.0))
                 .border_1()
                 .border_color(theme.border_strong)
-                .flex()
                 .flex_none()
-                .items_center()
                 .gap(px(5.0))
-                .cursor_default()
-                .text_size(sp(12.5))
+                .text_size(px(12.5))
                 .text_color(theme.text_secondary)
-                .hover(|element| element.bg(theme.overlay))
-                .child(icon(icon_path, 11.0, theme.text_tertiary))
-                .child(SharedString::from(label))
+                .hover(|style| style.bg(theme.overlay))
+                .icon(icon(icon_path, 11.0, theme.text_tertiary))
         };
 
         let open_button = action_button(
@@ -986,9 +830,9 @@ impl Michelle {
             "pencil",
             tr!("skills.open_file"),
         )
-        .on_click(cx.listener({
+        .on_activation(cx, {
             let skill_file = skill_file.clone();
-            move |this, _, _, cx| {
+            move |this, _, cx| {
                 if this.daemon.is_remote() {
                     this.show_toast(tr!("errors.remote_host_path"));
                     cx.notify();
@@ -996,16 +840,16 @@ impl Michelle {
                     crate::platform::open_with_default_app(&skill_file, cx);
                 }
             }
-        }));
+        });
 
         let reveal_button = action_button(
             SharedString::from(format!("skill-reveal-{}", skill.row_key)),
             "folder",
             tr!("skills.reveal"),
         )
-        .on_click(cx.listener({
+        .on_activation(cx, {
             let skill_file = skill_file.clone();
-            move |this, _, _, cx| {
+            move |this, _, cx| {
                 if this.daemon.is_remote() {
                     this.show_toast(tr!("errors.remote_host_path"));
                     cx.notify();
@@ -1013,7 +857,7 @@ impl Michelle {
                     crate::platform::reveal_in_file_manager(&skill_file, cx);
                 }
             }
-        }));
+        });
 
         let copy_feedback_id = format!("skill-copy-{}", skill.row_key);
         let copied = self.control_was_copied(&copy_feedback_id);
@@ -1026,81 +870,75 @@ impl Michelle {
                 tr!("skills.copy_path")
             },
         )
-        .on_click(cx.listener({
+        .on_activation(cx, {
             let dir = dir.clone();
             let copy_feedback_id = copy_feedback_id.clone();
-            move |this, _, _, cx| {
+            move |this, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(dir.display().to_string()));
                 this.show_control_copied(copy_feedback_id.clone(), cx);
             }
-        }));
+        });
 
-        let delete_button = div()
-            .id(SharedString::from(format!(
-                "skill-delete-{}",
-                skill.row_key
-            )))
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .h(px(26.0))
-            .px(px(10.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(if armed {
-                theme.danger
-            } else {
-                theme.border_strong
-            })
-            .when(armed, |element| element.bg(theme.danger.opacity(0.12)))
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(5.0))
-            .cursor_default()
-            .text_size(sp(12.5))
-            .text_color(if armed {
-                theme.danger
-            } else {
-                theme.text_secondary
-            })
-            .hover(|element| element.bg(theme.overlay).text_color(theme.danger))
-            .child(icon(
-                "trash",
-                11.0,
-                if armed {
-                    theme.danger
-                } else {
-                    theme.text_tertiary
-                },
-            ))
-            .child(if armed {
+        let delete_button = Button::new(
+            SharedString::from(format!("skill-delete-{}", skill.row_key)),
+            if armed {
                 tr!("skills.confirm_delete")
             } else {
                 tr!("skills.delete")
-            })
-            .on_click(cx.listener({
-                let dir = dir.clone();
-                move |this, _, _, cx| {
-                    if this.skills_delete_arming.as_ref() == Some(&dir) {
-                        this.delete_skill(dir.clone(), cx);
-                    } else {
-                        this.skills_delete_arming = Some(dir.clone());
-                        cx.notify();
-                    }
-                }
-            }))
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                if this.skills_delete_arming.take().is_some() {
+            },
+        )
+        .button_style(ButtonStyle::Ghost)
+        .h(px(26.0))
+        .px(px(10.0))
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(if armed {
+            theme.danger
+        } else {
+            theme.border_strong
+        })
+        .when(armed, |button| button.bg(theme.danger.opacity(0.12)))
+        .flex_none()
+        .gap(px(5.0))
+        .text_size(px(12.5))
+        .text_color(if armed {
+            theme.danger
+        } else {
+            theme.text_secondary
+        })
+        .hover(|style| style.bg(theme.overlay).text_color(theme.danger))
+        .icon(icon(
+            "trash",
+            11.0,
+            if armed {
+                theme.danger
+            } else {
+                theme.text_tertiary
+            },
+        ))
+        .on_activation(cx, {
+            let dir = dir.clone();
+            move |this, _, cx| {
+                if this.skills_ui.delete_arming.as_ref() == Some(&dir) {
+                    this.delete_skill(dir.clone(), cx);
+                } else {
+                    this.skills_ui.delete_arming = Some(dir.clone());
                     cx.notify();
                 }
-            }));
+            }
+        })
+        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+            if this.skills_ui.delete_arming.take().is_some() {
+                cx.notify();
+            }
+        }));
 
         // The skill's document, rendered with the transcript's own markdown
         // engine. The parse is cached per selected skill; re-rendering an
         // unchanged document costs `Rc` clones, not a re-parse.
         let palette = MarkdownPalette::from_theme(theme);
         let document: Option<AnyElement> = (!skill.body.is_empty()).then(|| {
-            let mut cache = self.skills_detail_markdown.borrow_mut();
+            let mut cache = self.skills_ui.detail_markdown.borrow_mut();
             let primary_dir = skill.primary().dir.clone();
             if !matches!(cache.as_ref(), Some((cached, _)) if cached == &primary_dir) {
                 *cache = Some((primary_dir, MarkdownView::new()));
@@ -1110,8 +948,8 @@ impl Michelle {
             let ctx = MarkdownCtx::new(
                 format!("skill-md-{}", skill.row_key),
                 &palette,
-                self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
-                self.skills_selection.clone(),
+                self.content_markdown_metrics(MarkdownMetrics::COMPACT),
+                self.skills_ui.selection.clone(),
             )
             .with_math_enabled(self.state.render_math)
             .with_math_context_menu(self.menu_handle("skill-detail-math", cx));
@@ -1136,7 +974,7 @@ impl Michelle {
                 .into_any_element()
         });
         let selection_input = {
-            let selection = self.skills_selection.clone();
+            let selection = self.skills_ui.selection.clone();
             canvas(
                 |_, _, _| (),
                 move |_, _, window, _| md::render::install_selection_input(window, &selection),
@@ -1150,13 +988,13 @@ impl Michelle {
             .id("skill-detail-scroll")
             .size_full()
             .overflow_y_scroll()
-            .track_scroll(&self.skills_detail_scroll)
+            .track_scroll(&self.skills_ui.detail_scroll)
             .px(px(24.0))
             .pt(px(18.0))
             .pb(px(20.0))
             // Painted before the document, so the frame's selection registry
             // holds exactly the text elements this frame put on screen.
-            .child(md::render::frame_reset(self.skills_selection.clone()))
+            .child(md::render::frame_reset(self.skills_ui.selection.clone()))
             .child(
                 div()
                     .flex()
@@ -1275,88 +1113,10 @@ impl Michelle {
             .relative()
             .child(content)
             .child(scrollbar::vertical(
-                &self.skills_detail_scroll,
-                &self.skills_detail_scrollbar,
+                &self.skills_ui.detail_scroll,
+                &self.skills_ui.detail_scrollbar,
             ))
     }
-}
-
-fn skills_empty_state(theme: &Theme) -> Div {
-    div()
-        .size_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap(px(10.0))
-        .px(px(40.0))
-        .py(px(40.0))
-        .child(
-            div()
-                .w(px(44.0))
-                .h(px(44.0))
-                .rounded(px(11.0))
-                .bg(theme.overlay)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(icon("shippingbox", 21.0, theme.text_tertiary)),
-        )
-        .child(
-            div()
-                .text_size(sp(13.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.text)
-                .child(tr!("skills.empty_title")),
-        )
-        .child(
-            div()
-                .max_w(px(420.0))
-                .text_size(sp(12.5))
-                .line_height(sp(17.0))
-                .text_color(theme.text_secondary)
-                .text_center()
-                .child(tr!("skills.empty_description")),
-        )
-}
-
-fn skills_detail_placeholder(theme: &Theme) -> Div {
-    div()
-        .flex_1()
-        .min_h_0()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap(px(8.0))
-        .child(icon("shippingbox", 22.0, theme.text_ghost))
-        .child(
-            div()
-                .text_size(sp(12.5))
-                .text_color(theme.text_ghost)
-                .child(tr!("skills.select_placeholder")),
-        )
-}
-
-/// One label/value line of the detail pane's info table.
-fn skill_info_row(theme: &Theme, label: String, value: AnyElement, last: bool) -> Div {
-    div()
-        .py(px(8.0))
-        .when(!last, |element| {
-            element.border_b_1().border_color(theme.border)
-        })
-        .flex()
-        .items_baseline()
-        .gap(px(12.0))
-        .child(
-            div()
-                .w(px(84.0))
-                .flex_none()
-                .text_size(sp(12.5))
-                .text_color(theme.text_tertiary)
-                .child(SharedString::from(label)),
-        )
-        .child(div().flex_1().min_w_0().flex().child(value))
 }
 
 fn plain_info_value(theme: &Theme, value: String) -> AnyElement {

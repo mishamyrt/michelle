@@ -7,12 +7,38 @@
 //! filter field, one keyboard cursor and one list. Rows are only ranked while
 //! a panel is open; a closed picker costs what any other closed menu does.
 
-use gpui::ElementId;
+use crate::ui::SelectableRow;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 
-use super::composer::next_picker_highlight;
 use super::*;
+use crate::ui::primitives::navigation::next_picker_highlight;
+
+pub(super) mod model;
+use model::visible_project_entries;
+
+pub(in crate::app) struct ProjectPickerUi {
+    pub(in crate::app) search: Entity<TextInput>,
+    pub(in crate::app) highlight: Option<usize>,
+    pub(in crate::app) list_state: ListState,
+    pub(in crate::app) rows: RefCell<Vec<Uuid>>,
+    pub(in crate::app) scrollbar: Rc<ScrollbarState>,
+}
+
+impl ProjectPickerUi {
+    pub(in crate::app) fn new(
+        project_search: Entity<TextInput>,
+        project_picker_list_state: ListState,
+    ) -> Self {
+        Self {
+            search: project_search,
+            highlight: None,
+            list_state: project_picker_list_state,
+            rows: RefCell::new(Vec::new()),
+            scrollbar: ScrollbarState::new(),
+        }
+    }
+}
 
 const PROJECT_PICKER_ROW_HEIGHT: f32 = 26.0;
 /// Rows drawn before the list scrolls. Whole rows only: the edge fade is the
@@ -67,6 +93,7 @@ impl Michelle {
             return;
         }
         let other_open: Vec<_> = self
+            .shell_ui
             .menus
             .borrow()
             .values()
@@ -91,15 +118,15 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) -> ContextMenuHandle {
         let weak = cx.entity().downgrade();
-        let search = self.project_search.clone();
+        let search = self.project_picker_ui.search.clone();
         let search_focus = search.read(cx).focus_handle(cx);
         self.menu_handle_with(site.menu_id(), cx, move |open, window, cx| {
             let _ = weak.update(cx, |this, cx| {
-                this.project_picker_highlight = None;
+                this.project_picker_ui.highlight = None;
                 if open {
                     // Forces the next sync to reset the list, which also
                     // scrolls the current project back into view.
-                    this.project_picker_row_cache.borrow_mut().clear();
+                    this.project_picker_ui.rows.borrow_mut().clear();
                     search.update(cx, |input, cx| input.clear(cx));
                 } else {
                     let focus = this.composer_focus(cx);
@@ -132,9 +159,10 @@ impl Michelle {
         let projects = Rc::new(if handle.is_open() {
             visible_project_entries(
                 &self.state.projects,
+                &self.state.sidebar_project_groups,
                 selected_project,
-                self.project_search.read(cx).content(),
-                &mut self.project_picker_matcher.borrow_mut(),
+                self.project_picker_ui.search.read(cx).content(),
+                &mut self.project_picker.matcher.borrow_mut(),
             )
         } else {
             Vec::new()
@@ -153,12 +181,13 @@ impl Michelle {
                 .collect::<Vec<_>>(),
         );
         let highlight = self
-            .project_picker_highlight
+            .project_picker_ui
+            .highlight
             .filter(|index| *index < actions.len());
         let weak = cx.entity().downgrade();
-        let search = self.project_search.clone();
-        let list_state = self.project_picker_list_state.clone();
-        let scrollbar_state = self.project_picker_scrollbar.clone();
+        let search = self.project_picker_ui.search.clone();
+        let list_state = self.project_picker_ui.list_state.clone();
+        let scrollbar_state = self.project_picker_ui.scrollbar.clone();
 
         popover(
             trigger,
@@ -197,23 +226,13 @@ impl Michelle {
                                 let project_id = *project_id;
                                 let select_weak = list_weak.clone();
                                 let select_popover = list_popover.clone();
-                                project_picker_row(
-                                    ("project-row", index),
-                                    highlight == Some(index),
-                                    &theme,
+                                SelectableRow::new(
+                                    SharedString::from(format!("project-row-{project_id}")),
+                                    name.clone(),
                                 )
-                                .w_full()
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .flex_1()
-                                        .truncate()
-                                        .text_color(theme.text)
-                                        .child(name.clone()),
-                                )
-                                .when(selected_project == Some(project_id), |element| {
-                                    element.child(icon("checkmark", 11.0, theme.text_secondary))
-                                })
+                                .h(px(PROJECT_PICKER_ROW_HEIGHT))
+                                .selected(selected_project == Some(project_id))
+                                .highlighted(highlight == Some(index))
                                 .on_click(move |_, window, cx| {
                                     select_popover.close(window, cx);
                                     window.refresh();
@@ -251,20 +270,12 @@ impl Michelle {
                     let weak = weak.clone();
                     let popover = popover.clone();
                     let index = actions.iter().position(|candidate| *candidate == action);
-                    project_picker_row(id, highlight.is_some() && highlight == index, &theme)
+                    SelectableRow::new(id, label)
+                        .h(px(PROJECT_PICKER_ROW_HEIGHT))
                         .mx(px(4.0))
-                        .child(icon(icon_path, 12.0, theme.text_secondary))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .truncate()
-                                .text_color(theme.text)
-                                .child(label),
-                        )
-                        .when(selected, |element| {
-                            element.child(icon("checkmark", 11.0, theme.text_secondary))
-                        })
+                        .selected(selected)
+                        .highlighted(highlight.is_some() && highlight == index)
+                        .leading(icon(icon_path, 12.0, theme.text_secondary))
                         .on_click(move |_, window, cx| {
                             popover.close(window, cx);
                             window.refresh();
@@ -320,7 +331,7 @@ impl Michelle {
                         let action = confirm_weak
                             .update(cx, |this, _| {
                                 confirm_actions
-                                    .get(this.project_picker_highlight.unwrap_or(0))
+                                    .get(this.project_picker_ui.highlight.unwrap_or(0))
                                     .copied()
                             })
                             .ok()
@@ -383,7 +394,7 @@ impl Michelle {
     /// Keep the virtualized list's item count in step with the filtered rows.
     /// Rows have one fixed height, so a changed set only needs its count.
     fn sync_project_picker_rows(&self, rows: &[(Uuid, SharedString)]) {
-        let mut cached = self.project_picker_row_cache.borrow_mut();
+        let mut cached = self.project_picker_ui.rows.borrow_mut();
         if cached
             .iter()
             .eq(rows.iter().map(|(project_id, _)| project_id))
@@ -391,7 +402,8 @@ impl Michelle {
             return;
         }
         *cached = rows.iter().map(|(project_id, _)| *project_id).collect();
-        self.project_picker_list_state
+        self.project_picker_ui
+            .list_state
             .reset_with_uniform_height(rows.len(), px(PROJECT_PICKER_ROW_HEIGHT));
     }
 
@@ -405,124 +417,28 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) {
         let current = self
-            .project_picker_highlight
+            .project_picker_ui
+            .highlight
             .filter(|index| *index < action_count);
         let Some(next) = next_picker_highlight(current, action_count, key) else {
             return;
         };
-        self.project_picker_highlight = Some(next);
+        self.project_picker_ui.highlight = Some(next);
         // The pinned actions sit outside the list and are always visible.
         if next < row_count {
-            self.project_picker_list_state.scroll_to_reveal_item(next);
+            self.project_picker_ui
+                .list_state
+                .scroll_to_reveal_item(next);
         }
         cx.notify();
     }
-
-    fn apply_project_picker_action(
-        &mut self,
-        action: ProjectPickerAction,
-        site: ProjectPickerSite,
-        cx: &mut Context<Self>,
-    ) {
-        match action {
-            ProjectPickerAction::Select(project_id) => {
-                if self.state.selected_project == Some(project_id) {
-                    return;
-                }
-                match site {
-                    ProjectPickerSite::EmptyState => self.select_project(project_id, cx),
-                    ProjectPickerSite::Composer => {
-                        self.select_project_from_composer(project_id, cx)
-                    }
-                }
-            }
-            ProjectPickerAction::NewProject => self.add_project(cx),
-            ProjectPickerAction::NoProject => {
-                if self.selected_project().is_some_and(Project::is_projectless) {
-                    return;
-                }
-                match site {
-                    ProjectPickerSite::EmptyState => self.create_projectless_session(cx),
-                    ProjectPickerSite::Composer => {
-                        self.create_projectless_session_from_composer(cx)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// The shared row: fixed height for the virtualized list, hover, and the
-/// keyboard cursor drawn beneath it.
-fn project_picker_row(id: impl Into<ElementId>, highlighted: bool, theme: &Theme) -> Stateful<Div> {
-    div()
-        .id(id)
-        .h(px(PROJECT_PICKER_ROW_HEIGHT))
-        .px(px(8.0))
-        .rounded(px(6.0))
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .cursor_default()
-        .text_size(sp(12.5))
-        .line_height(sp(15.0))
-        .when(highlighted, |element| element.bg(theme.overlay_strong))
-        .hover(|element| element.bg(theme.overlay))
-        .active(|element| element.opacity(0.85))
-}
-
-/// The picker's project rows. Without a query that is every real project, the
-/// current one first; with one, only fuzzy matches, best first. The matcher
-/// has no length penalty, so equal scores fall back to fzf's default
-/// tiebreak — the shorter name, which puts an exact name above its longer
-/// namesakes — and then to the unfiltered order.
-fn visible_project_entries(
-    projects: &[Project],
-    selected: Option<Uuid>,
-    query: &str,
-    matcher: &mut Matcher,
-) -> Vec<(Uuid, SharedString)> {
-    let ordered = projects
-        .iter()
-        .filter(|project| Some(project.id) == selected)
-        .chain(
-            projects
-                .iter()
-                .filter(|project| Some(project.id) != selected),
-        )
-        .filter(|project| !project.is_projectless());
-    let query = query.trim();
-    if query.is_empty() {
-        return ordered
-            .map(|project| (project.id, project.display_name().into()))
-            .collect();
-    }
-
-    let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
-    let mut utf32 = Vec::new();
-    let mut scored = ordered
-        .filter_map(|project| {
-            let name = project.display_name();
-            let score = pattern.score(Utf32Str::new(&name, &mut utf32), matcher)?;
-            Some((
-                score,
-                name.chars().count(),
-                project.id,
-                SharedString::from(name),
-            ))
-        })
-        .collect::<Vec<_>>();
-    // Stable, so full ties hold their unfiltered order.
-    scored.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
-    scored
-        .into_iter()
-        .map(|(_, _, project_id, name)| (project_id, name))
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
+    use michelle_client::persistence::SidebarProjectGroup;
 
     use super::*;
 
@@ -538,7 +454,8 @@ mod tests {
     fn project_picker_lists_the_current_project_first() {
         let projects = vec![project("before.town"), project("wikis"), project("crow")];
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
-        let entries = visible_project_entries(&projects, Some(projects[1].id), "", &mut matcher);
+        let entries =
+            visible_project_entries(&projects, &[], Some(projects[1].id), "", &mut matcher);
         assert_eq!(names(&entries), vec!["wikis", "before.town", "crow"]);
     }
 
@@ -551,7 +468,7 @@ mod tests {
             project("michelle-crow-sync"),
         ];
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
-        let entries = visible_project_entries(&projects, None, "  CROW ", &mut matcher);
+        let entries = visible_project_entries(&projects, &[], None, "  CROW ", &mut matcher);
         // Every match survives, the exact name ranks above its longer
         // namesakes, and the non-matching project is gone.
         assert_eq!(
@@ -559,10 +476,10 @@ mod tests {
             vec!["crow", "crow-companion", "michelle-crow-sync"]
         );
 
-        let entries = visible_project_entries(&projects, None, "sts", &mut matcher);
+        let entries = visible_project_entries(&projects, &[], None, "sts", &mut matcher);
         assert_eq!(names(&entries), vec!["speech-to-subtitle"]);
 
-        assert!(visible_project_entries(&projects, None, "zzz", &mut matcher).is_empty());
+        assert!(visible_project_entries(&projects, &[], None, "zzz", &mut matcher).is_empty());
     }
 
     #[test]
@@ -571,7 +488,60 @@ mod tests {
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
         // The current project leads ties the same way it leads the full list.
         let entries =
-            visible_project_entries(&projects, Some(projects[1].id), "alpha", &mut matcher);
+            visible_project_entries(&projects, &[], Some(projects[1].id), "alpha", &mut matcher);
         assert_eq!(names(&entries), vec!["alpha-two", "alpha-one"]);
     }
+
+    #[test]
+    fn project_picker_matches_group_and_project_words() {
+        let projects = vec![project("frontend"), project("backend"), project("frontend")];
+        let mut groups = vec![SidebarProjectGroup {
+            id: Uuid::new_v4(),
+            name: "geoportal".into(),
+            projects: vec![projects[0].id, projects[1].id],
+            collapsed: true,
+        }];
+        let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
+
+        for query in ["geo front", "FRONT GEO"] {
+            let entries = visible_project_entries(&projects, &groups, None, query, &mut matcher);
+            assert_eq!(entries[0].0, projects[0].id);
+            assert_eq!(names(&entries), vec!["geoportal • frontend"]);
+        }
+
+        let entries = visible_project_entries(&projects, &groups, None, "geo", &mut matcher);
+        assert_eq!(
+            names(&entries),
+            vec!["geoportal • backend", "geoportal • frontend"]
+        );
+
+        let entries = visible_project_entries(&projects, &groups, None, "frontend", &mut matcher);
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|(id, _)| *id == projects[2].id));
+
+        groups[0].name = "Maps".into();
+        assert!(
+            visible_project_entries(&projects, &groups, None, "geo front", &mut matcher).is_empty()
+        );
+        let entries = visible_project_entries(&projects, &groups, None, "maps front", &mut matcher);
+        assert_eq!(names(&entries), vec!["Maps • frontend"]);
+    }
+}
+
+pub(super) fn subscribe_search(search_input: &Entity<TextInput>, cx: &mut Context<Michelle>) {
+    cx.subscribe(
+        search_input,
+        |this: &mut Michelle, search, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Edited) {
+                if search.read(cx).content().trim().is_empty() {
+                    this.project_picker_ui.highlight = None;
+                } else {
+                    this.project_picker_ui.highlight = Some(0);
+                    this.project_picker_ui.list_state.scroll_to_reveal_item(0);
+                }
+                cx.notify();
+            }
+        },
+    )
+    .detach();
 }

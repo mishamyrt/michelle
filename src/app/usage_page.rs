@@ -11,6 +11,84 @@ use chrono::{Datelike, Local, NaiveDate};
 use gpui::{PathBuilder, relative};
 
 use super::*;
+use crate::ui::{ControlSize, InlineNotice, ProgressBar, Segment, SegmentedControl, Skeleton};
+
+pub(super) mod model;
+
+/// Which presentation the Usage page shows: the daily dashboard, the monthly
+/// statement, or the per-project ranking.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum UsageViewMode {
+    Daily,
+    Monthly,
+    Projects,
+}
+
+/// Which unit the Usage page's headline and chart read in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum UsageMetric {
+    Cost,
+    Tokens,
+}
+
+/// Which table the Usage page's breakdown section shows.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum UsageBreakdown {
+    Model,
+    Day,
+}
+
+/// Interaction and per-frame caches for the Usage page. Loaded data lives in its model.
+pub(super) struct UsageUi {
+    pub(super) view: UsageViewMode,
+    /// The selected window for the daily and project views; the statement
+    /// view fixes its own.
+    pub(super) window: crate::usage_history::UsageWindow,
+    pub(super) metric: UsageMetric,
+    pub(super) breakdown: UsageBreakdown,
+    /// Scroll position of the monthly statement card, which scrolls
+    /// internally like the projects card so the two list views feel alike.
+    pub(super) months_scroll: ScrollHandle,
+    pub(super) months_scrollbar: Rc<ScrollbarState>,
+    /// Filter query over the Usage page's project rows.
+    pub(super) project_filter: Entity<TextInput>,
+    /// Virtualized list over the filtered project rows, so only visible rows
+    /// build elements no matter how many working directories have usage.
+    pub(super) projects_list: ListState,
+    pub(super) projects_scrollbar: Rc<ScrollbarState>,
+    /// Indices into `UsageModel::history.projects` the filter leaves visible — the
+    /// row builder reads only this.
+    pub(super) projects_rows: RefCell<Vec<usize>>,
+    /// `(peak value, rank-by-cost)` for the visible rows' bars, refreshed
+    /// once per frame rather than per row.
+    pub(super) projects_scale: Cell<(f64, bool)>,
+    /// Hovered or keyboard-selected day index on the Usage page's chart.
+    pub(super) chart_hover: Option<usize>,
+    /// The chart plot's window bounds, written during paint so the mouse-move
+    /// handler can map positions to day indices.
+    pub(super) chart_bounds: Rc<Cell<Option<gpui::Bounds<Pixels>>>>,
+}
+
+impl UsageUi {
+    pub(super) fn new(project_filter: Entity<TextInput>, projects_list: ListState) -> Self {
+        Self {
+            view: UsageViewMode::Daily,
+            window: crate::usage_history::UsageWindow::TrailingDays(30),
+            metric: UsageMetric::Cost,
+            breakdown: UsageBreakdown::Model,
+            months_scroll: ScrollHandle::new(),
+            months_scrollbar: ScrollbarState::new(),
+            project_filter,
+            projects_list,
+            projects_scrollbar: ScrollbarState::new(),
+            projects_rows: RefCell::new(Vec::new()),
+            projects_scale: Cell::new((0.0, true)),
+            chart_hover: None,
+            chart_bounds: Rc::default(),
+        }
+    }
+}
+
 use crate::usage_history::{
     self, MONTHLY_WINDOW, MonthSlice, PricingStatus, ProjectSlice, ProviderDay, UsageHistory,
     UsageProvider, UsageWindow, WINDOW_CHOICES,
@@ -26,8 +104,6 @@ const CHART_GUTTER: f32 = 56.0;
 /// Uniform height hint for the virtualized project rows, so the scrollbar
 /// knows the total extent before rows are measured.
 const USAGE_PROJECT_ROW_HEIGHT: f32 = 96.0;
-/// A snapshot older than this rescans when the page is next opened.
-const USAGE_RESCAN_AFTER: Duration = Duration::from_secs(120);
 fn provider_kind(provider: UsageProvider) -> ProviderKind {
     match provider {
         UsageProvider::Claude => ProviderKind::Claude,
@@ -36,120 +112,30 @@ fn provider_kind(provider: UsageProvider) -> ProviderKind {
 }
 
 impl Michelle {
-    /// Switch the settings view to `page`, warming the Usage scan when that
-    /// is where the user is heading.
-    pub(super) fn open_settings_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
-        // Secrets are revealed only for the current visit to the page. This
-        // also masks the token again when the Daemon row is reselected.
-        self.daemon_token_revealed = false;
-        self.settings_page = Some(page);
-        // Each page starts at its own top; a scroll position carried over
-        // from the previous page would land mid-content.
-        self.settings_scroll.set_offset(gpui::Point::default());
-        if page == SettingsPage::Usage {
-            self.ensure_usage_history(false, cx);
-        }
-        if page == SettingsPage::Skills {
-            self.ensure_skills_catalog(false, cx);
-        }
-        cx.notify();
-    }
-
     /// The scan window the active view needs: the statement view always
     /// covers a year of calendar months; the daily and project views share
     /// the trailing-days selector.
-    fn effective_usage_window(&self) -> UsageWindow {
-        match self.usage_view {
+    pub(super) fn effective_usage_window(&self) -> UsageWindow {
+        match self.usage_ui.view {
             UsageViewMode::Monthly => MONTHLY_WINDOW,
-            UsageViewMode::Daily | UsageViewMode::Projects => self.usage_window,
+            UsageViewMode::Daily | UsageViewMode::Projects => self.usage_ui.window,
         }
-    }
-
-    /// Start a background transcript scan unless a current-enough snapshot
-    /// (or an in-flight scan for the same window) already covers it. `force`
-    /// is the refresh button. Results from superseded scans are discarded by
-    /// generation, so a window change mid-scan cannot land stale data.
-    pub(super) fn ensure_usage_history(&mut self, force: bool, cx: &mut Context<Self>) {
-        let window = self.effective_usage_window();
-        let satisfied = self
-            .usage_history
-            .as_ref()
-            .is_some_and(|history| history.window == window)
-            && self
-                .usage_history_scanned_at
-                .is_some_and(|scanned| scanned.elapsed() < USAGE_RESCAN_AFTER);
-        // A scan for this window already inbound absorbs even a forced
-        // refresh — it only just started reading the same files, and a
-        // duplicate would burn a background pass to produce the same answer.
-        if self.usage_history_pending_for == Some(window) {
-            return;
-        }
-        if !force && satisfied {
-            return;
-        }
-        self.usage_history_pending_for = Some(window);
-        self.usage_history_generation += 1;
-        let generation = self.usage_history_generation;
-        let daemon = self.daemon.client();
-        let project_roots: Vec<PathBuf> = self
-            .state
-            .projects
-            .iter()
-            .map(|project| project.path.clone())
-            .collect();
-        cx.spawn(async move |this, cx| {
-            let history = cx
-                .background_executor()
-                .spawn(async move {
-                    match daemon.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        michelle_client::Command::LoadUsageHistory {
-                            window,
-                            project_roots,
-                        },
-                    )? {
-                        michelle_client::ResponsePayload::UsageHistory { history } => Ok(history),
-                        _ => anyhow::bail!("the daemon returned an invalid usage response"),
-                    }
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.usage_history_generation != generation {
-                    return;
-                }
-                this.usage_history_pending_for = None;
-                // The day axis may have changed length; a stale index would
-                // point at the wrong day.
-                this.usage_chart_hover = None;
-                match history {
-                    Ok(history) => {
-                        this.usage_history_scanned_at = Some(Instant::now());
-                        this.usage_history = Some(history);
-                    }
-                    Err(error) => this.show_toast(error.to_string()),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
     }
 
     fn set_usage_window(&mut self, window: UsageWindow, cx: &mut Context<Self>) {
-        if self.usage_window == window {
+        if self.usage_ui.window == window {
             return;
         }
-        self.usage_window = window;
+        self.usage_ui.window = window;
         self.ensure_usage_history(false, cx);
         cx.notify();
     }
 
     fn set_usage_view(&mut self, view: UsageViewMode, cx: &mut Context<Self>) {
-        if self.usage_view == view {
+        if self.usage_ui.view == view {
             return;
         }
-        self.usage_view = view;
+        self.usage_ui.view = view;
         // The statement view scans a different window; the others share one.
         self.ensure_usage_history(false, cx);
         cx.notify();
@@ -157,7 +143,7 @@ impl Michelle {
 
     pub(super) fn render_usage_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let pending = self.usage_history_pending_for.is_some();
+        let pending = self.usage.pending_for.is_some();
         let expected = self.effective_usage_window();
         // A snapshot of the other shape (statement months vs trailing days)
         // must not masquerade as this view's data — a 30-day scan rendered as
@@ -166,7 +152,7 @@ impl Michelle {
         // replacement scans: the range caption names what is actually shown,
         // and swapping to a spinner on every window click would blink away a
         // page that is still substantially right.
-        let history = self.usage_history.as_ref().filter(|history| {
+        let history = self.usage.history.as_ref().filter(|history| {
             matches!(
                 (history.window, expected),
                 (UsageWindow::TrailingDays(_), UsageWindow::TrailingDays(_))
@@ -182,7 +168,7 @@ impl Michelle {
             .flex_col()
             .when(
                 matches!(
-                    self.usage_view,
+                    self.usage_ui.view,
                     UsageViewMode::Monthly | UsageViewMode::Projects
                 ),
                 |element| {
@@ -198,7 +184,7 @@ impl Michelle {
             // skeleton in the incoming view's silhouette, so the swap to
             // data doesn't jump.
             return page
-                .child(usage_skeleton(self.usage_view, &theme))
+                .child(usage_skeleton(self.usage_ui.view, &theme))
                 .into_any_element();
         };
 
@@ -206,7 +192,7 @@ impl Michelle {
             page = page.child(usage_notices(history, &theme));
         }
 
-        page = match self.usage_view {
+        page = match self.usage_ui.view {
             UsageViewMode::Daily => page
                 .child(
                     div()
@@ -231,8 +217,8 @@ impl Michelle {
                 self,
                 history,
                 &theme,
-                &self.usage_months_scroll,
-                &self.usage_months_scrollbar,
+                &self.usage_ui.months_scroll,
+                &self.usage_ui.months_scrollbar,
                 cx,
             )),
             UsageViewMode::Projects => page.child(self.render_usage_projects(history, &theme, cx)),
@@ -265,54 +251,34 @@ impl Michelle {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let monthly = self.usage_view == UsageViewMode::Monthly;
+        let monthly = self.usage_ui.view == UsageViewMode::Monthly;
 
-        let mut view_options = div()
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .overflow_hidden();
-        for (view, label) in [
-            (UsageViewMode::Daily, tr!("usage.daily")),
-            (UsageViewMode::Monthly, tr!("usage.monthly")),
-            (UsageViewMode::Projects, tr!("usage.projects")),
-        ] {
-            let selected = self.usage_view == view;
-            view_options = view_options.child(
-                div()
-                    .id(SharedString::from(format!(
-                        "usage-view-{}",
-                        label.to_ascii_lowercase()
-                    )))
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .h(px(26.0))
-                    .px(px(11.0))
-                    .flex()
-                    .items_center()
-                    .cursor_default()
-                    .text_size(sp(12.5))
-                    .text_color(if selected {
-                        theme.text
-                    } else {
-                        theme.text_secondary
-                    })
-                    .when(selected, |element| element.bg(theme.overlay))
-                    .when(!selected, |element| {
-                        element.hover(|element| element.text_color(theme.text))
-                    })
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_usage_view(view, cx);
-                    })),
-            );
-        }
+        let view_options = SegmentedControl::new(
+            "usage-views",
+            self.usage_ui.view,
+            [
+                (UsageViewMode::Daily, "usage-view-daily", tr!("usage.daily")),
+                (
+                    UsageViewMode::Monthly,
+                    "usage-view-monthly",
+                    tr!("usage.monthly"),
+                ),
+                (
+                    UsageViewMode::Projects,
+                    "usage-view-projects",
+                    tr!("usage.projects"),
+                ),
+            ]
+            .map(|(value, id, label)| {
+                Segment::new(id, value, label, &self.transcript_control_focus(id, cx))
+            }),
+        )
+        .on_change(cx, |this, view, _, cx| this.set_usage_view(view, cx));
 
         // The statement view fixes its own range, so the window selector
         // would be a dead control there.
         let window_selector = (!monthly).then(|| {
-            let selected = self.usage_window;
+            let selected = self.usage_ui.window;
             let weak = cx.entity().downgrade();
             let handle = self.menu_handle("usage-window-selector", cx);
             dropdown_menu(
@@ -350,7 +316,7 @@ impl Michelle {
         });
 
         let refresh_glyph: AnyElement = if pending {
-            motion::spin(icon("arrow.clockwise", 12.0, theme.text_tertiary))
+            motion::spinner(12.0, theme.text_tertiary)
         } else {
             icon("arrow.clockwise", 12.0, theme.text_tertiary).into_any_element()
         };
@@ -419,7 +385,7 @@ impl Michelle {
         theme: &Theme,
         _cx: &mut Context<Self>,
     ) -> Div {
-        let metric = self.usage_metric;
+        let metric = self.usage_ui.metric;
         let headline = match metric {
             UsageMetric::Cost => format!("{}*", format_usd(history.cost_usd)),
             UsageMetric::Tokens => format_tokens_compact(history.total_tokens as f64),
@@ -524,18 +490,10 @@ impl Michelle {
                             ),
                     )
                     .child(
-                        div()
+                        ProgressBar::new(Some(share))
                             .h(px(4.0))
-                            .w_full()
-                            .rounded_full()
-                            .bg(theme.overlay_strong)
-                            .child(
-                                div()
-                                    .h_full()
-                                    .w(relative((share as f32).clamp(0.0, 1.0)))
-                                    .rounded_full()
-                                    .bg(color),
-                            ),
+                            .track_color(theme.overlay_strong)
+                            .fill_color(color),
                     )
                     .child(
                         div()
@@ -564,47 +522,33 @@ impl Michelle {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let metric = self.usage_metric;
-        let mut toggle = div()
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .overflow_hidden();
-        for (option, label) in [
-            (UsageMetric::Cost, tr!("usage.cost_upper")),
-            (UsageMetric::Tokens, tr!("usage.tokens_upper")),
-        ] {
-            let selected = metric == option;
-            toggle = toggle.child(
-                div()
-                    .id(SharedString::from(format!("usage-metric-{label}")))
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .h(px(22.0))
-                    .px(px(9.0))
-                    .flex()
-                    .items_center()
-                    .cursor_default()
-                    .text_size(sp(12.5))
-                    .text_color(if selected {
-                        theme.text
-                    } else {
-                        theme.text_secondary
-                    })
-                    .when(selected, |element| element.bg(theme.overlay))
-                    .when(!selected, |element| {
-                        element.hover(|element| element.text_color(theme.text))
-                    })
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.usage_metric != option {
-                            this.usage_metric = option;
-                            cx.notify();
-                        }
-                    })),
-            );
-        }
+        let metric = self.usage_ui.metric;
+        let toggle = SegmentedControl::new(
+            "usage-metrics",
+            metric,
+            [
+                (
+                    UsageMetric::Cost,
+                    "usage-metric-cost",
+                    tr!("usage.cost_upper"),
+                ),
+                (
+                    UsageMetric::Tokens,
+                    "usage-metric-tokens",
+                    tr!("usage.tokens_upper"),
+                ),
+            ]
+            .map(|(value, id, label)| {
+                Segment::new(id, value, label, &self.transcript_control_focus(id, cx))
+            }),
+        )
+        .control_size(ControlSize::Mini)
+        .on_change(cx, |this, option, _, cx| {
+            if this.usage_ui.metric != option {
+                this.usage_ui.metric = option;
+                cx.notify();
+            }
+        });
 
         let mut legend = div().flex().items_center().gap(px(14.0));
         for provider in UsageProvider::ALL {
@@ -693,7 +637,7 @@ impl Michelle {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let metric = self.usage_metric;
+        let metric = self.usage_ui.metric;
         let day_count = days.len();
         // One column per day, per provider in ALL order. The chart paths and
         // the hover readout both consume this, so the number under the cursor
@@ -759,12 +703,12 @@ impl Michelle {
             );
         }
 
-        let hover = self.usage_chart_hover.filter(|index| *index < day_count);
+        let hover = self.usage_ui.chart_hover.filter(|index| *index < day_count);
         let colors = [
             provider_color(theme, ProviderKind::Claude),
             provider_color(theme, ProviderKind::Codex),
         ];
-        let bounds_cell = self.usage_chart_bounds.clone();
+        let bounds_cell = self.usage_ui.chart_bounds.clone();
         let paint_series = series.clone();
         let paint_ticks = ticks.clone();
         let grid_color = theme.border;
@@ -888,7 +832,7 @@ impl Michelle {
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                let Some(bounds) = this.usage_chart_bounds.get() else {
+                let Some(bounds) = this.usage_ui.chart_bounds.get() else {
                     return;
                 };
                 if day_count == 0 || f32::from(bounds.size.width) <= 0.0 {
@@ -898,14 +842,14 @@ impl Michelle {
                     ((event.position.x - bounds.origin.x) / bounds.size.width).clamp(0.0, 1.0);
                 let index = ((fraction * day_count.saturating_sub(1) as f32).round() as usize)
                     .min(day_count - 1);
-                if this.usage_chart_hover != Some(index) {
-                    this.usage_chart_hover = Some(index);
+                if this.usage_ui.chart_hover != Some(index) {
+                    this.usage_ui.chart_hover = Some(index);
                     cx.notify();
                 }
             }))
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                if !hovered && this.usage_chart_hover.is_some() {
-                    this.usage_chart_hover = None;
+                if !hovered && this.usage_ui.chart_hover.is_some() {
+                    this.usage_ui.chart_hover = None;
                     cx.notify();
                 }
             }))
@@ -918,21 +862,23 @@ impl Michelle {
                 let last = day_count - 1;
                 let next = match event.keystroke.key.as_str() {
                     "left" => Some(
-                        this.usage_chart_hover
+                        this.usage_ui
+                            .chart_hover
                             .map_or(last, |index| index.saturating_sub(1)),
                     ),
                     "right" => Some(
-                        this.usage_chart_hover
+                        this.usage_ui
+                            .chart_hover
                             .map_or(0, |index| (index + 1).min(last)),
                     ),
                     "home" => Some(0),
                     "end" => Some(last),
-                    "escape" if this.usage_chart_hover.is_some() => None,
+                    "escape" if this.usage_ui.chart_hover.is_some() => None,
                     _ => return,
                 };
                 cx.stop_propagation();
-                if this.usage_chart_hover != next {
-                    this.usage_chart_hover = next;
+                if this.usage_ui.chart_hover != next {
+                    this.usage_ui.chart_hover = next;
                     cx.notify();
                 }
             }))
@@ -964,47 +910,33 @@ impl Michelle {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let breakdown = self.usage_breakdown;
-        let mut toggle = div()
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .overflow_hidden();
-        for (option, label) in [
-            (UsageBreakdown::Model, tr!("usage.model_upper")),
-            (UsageBreakdown::Day, tr!("usage.day_upper")),
-        ] {
-            let selected = breakdown == option;
-            toggle = toggle.child(
-                div()
-                    .id(SharedString::from(format!("usage-breakdown-{label}")))
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .h(px(22.0))
-                    .px(px(9.0))
-                    .flex()
-                    .items_center()
-                    .cursor_default()
-                    .text_size(sp(12.5))
-                    .text_color(if selected {
-                        theme.text
-                    } else {
-                        theme.text_secondary
-                    })
-                    .when(selected, |element| element.bg(theme.overlay))
-                    .when(!selected, |element| {
-                        element.hover(|element| element.text_color(theme.text))
-                    })
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.usage_breakdown != option {
-                            this.usage_breakdown = option;
-                            cx.notify();
-                        }
-                    })),
-            );
-        }
+        let breakdown = self.usage_ui.breakdown;
+        let toggle = SegmentedControl::new(
+            "usage-breakdowns",
+            breakdown,
+            [
+                (
+                    UsageBreakdown::Model,
+                    "usage-breakdown-model",
+                    tr!("usage.model_upper"),
+                ),
+                (
+                    UsageBreakdown::Day,
+                    "usage-breakdown-day",
+                    tr!("usage.day_upper"),
+                ),
+            ]
+            .map(|(value, id, label)| {
+                Segment::new(id, value, label, &self.transcript_control_focus(id, cx))
+            }),
+        )
+        .control_size(ControlSize::Mini)
+        .on_change(cx, |this, option, _, cx| {
+            if this.usage_ui.breakdown != option {
+                this.usage_ui.breakdown = option;
+                cx.notify();
+            }
+        });
 
         div()
             .flex_1()
@@ -1046,7 +978,8 @@ impl Michelle {
     ) -> Div {
         let by_cost = rank_by_cost(history);
         let filter = self
-            .usage_project_filter
+            .usage_ui
+            .project_filter
             .read(cx)
             .content()
             .trim()
@@ -1078,7 +1011,7 @@ impl Michelle {
                 }
             })
             .fold(0.0_f64, f64::max);
-        self.usage_projects_scale.set((peak, by_cost));
+        self.usage_ui.projects_scale.set((peak, by_cost));
         self.sync_usage_project_rows(&indices);
 
         let caption = if filter.is_empty() {
@@ -1118,7 +1051,7 @@ impl Michelle {
                 .child(
                     div().px(px(20.0)).size_full().child(
                         list(
-                            self.usage_projects_list.clone(),
+                            self.usage_ui.projects_list.clone(),
                             move |index, _window, cx| {
                                 entity
                                     .upgrade()
@@ -1134,8 +1067,8 @@ impl Michelle {
                     ),
                 )
                 .child(scrollbar::vertical(
-                    &self.usage_projects_list,
-                    &self.usage_projects_scrollbar,
+                    &self.usage_ui.projects_list,
+                    &self.usage_ui.projects_scrollbar,
                 ))
                 .into_any_element()
         };
@@ -1197,10 +1130,13 @@ impl Michelle {
                             ),
                     )
                     .child(
-                        TextField::new("usage-project-filter", self.usage_project_filter.clone())
-                            .icon("magnifyingglass", 13.0)
-                            .w(px(240.0))
-                            .flex_none(),
+                        TextField::new(
+                            "usage-project-filter",
+                            self.usage_ui.project_filter.clone(),
+                        )
+                        .icon("magnifyingglass", 13.0)
+                        .w(px(240.0))
+                        .flex_none(),
                     ),
             )
             .child(body)
@@ -1210,7 +1146,7 @@ impl Michelle {
     /// Filtering preserves order, so unrelated churn splices only the
     /// changed suffix and scroll position survives typing in the filter.
     fn sync_usage_project_rows(&self, indices: &[usize]) {
-        let mut cached = self.usage_projects_rows.borrow_mut();
+        let mut cached = self.usage_ui.projects_rows.borrow_mut();
         if cached.as_slice() == indices {
             return;
         }
@@ -1222,14 +1158,17 @@ impl Michelle {
         let old_count = cached.len();
         *cached = indices.to_vec();
         if old_count == 0 {
-            self.usage_projects_list
+            self.usage_ui
+                .projects_list
                 .reset_with_uniform_height(indices.len(), px(USAGE_PROJECT_ROW_HEIGHT));
         } else {
-            self.usage_projects_list
+            self.usage_ui
+                .projects_list
                 .splice(prefix..old_count, indices.len() - prefix);
             // Newly inserted rows have no measured height yet; the uniform
             // hint keeps the scrollbar's total height honest.
-            self.usage_projects_list
+            self.usage_ui
+                .projects_list
                 .clone()
                 .with_uniform_item_height(px(USAGE_PROJECT_ROW_HEIGHT));
         }
@@ -1240,15 +1179,16 @@ impl Michelle {
     /// as an empty row for that frame rather than panicking.
     fn usage_project_row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let (peak, by_cost) = self.usage_projects_scale.get();
+        let (peak, by_cost) = self.usage_ui.projects_scale.get();
         let colors = usage_provider_colors(&theme);
-        let rows = self.usage_projects_rows.borrow();
+        let rows = self.usage_ui.projects_rows.borrow();
         let last = row + 1 == rows.len();
         let Some(index) = rows.get(row).copied() else {
             return div().into_any_element();
         };
         let Some(project) = self
-            .usage_history
+            .usage
+            .history
             .as_ref()
             .and_then(|history| history.projects.get(index))
         else {
@@ -1277,10 +1217,7 @@ impl Michelle {
             caption_parts.push(tr!("usage.last_active", date = format_day_short(last_day)));
         }
         let models_control = self.usage_models_control(
-            format!(
-                "usage-project-models-{}-{index}",
-                self.usage_history_generation
-            ),
+            format!("usage-project-models-{}-{index}", self.usage.generation),
             &project.top_models,
             project.cost_usd,
             &theme,
@@ -1449,26 +1386,17 @@ impl Michelle {
 
 /// Says plainly when the totals are incomplete: an unreadable transcript
 /// directory, or no rate table to price against.
-fn usage_notices(history: &UsageHistory, theme: &Theme) -> Div {
-    let mut notice = div()
-        .mt(px(14.0))
-        .px(px(12.0))
-        .py(px(8.0))
-        .rounded(px(8.0))
-        .border_1()
-        .border_color(theme.border)
-        .flex()
-        .flex_col()
-        .gap(px(3.0))
-        .text_size(sp(12.5))
-        .text_color(theme.text_tertiary);
+fn usage_notices(history: &UsageHistory, theme: &Theme) -> InlineNotice {
+    let mut content = div().flex().flex_col().gap(px(3.0));
     for error in &history.errors {
-        notice = notice.child(SharedString::from(error.clone()));
+        content = content.child(SharedString::from(error.clone()));
     }
     if history.pricing == PricingStatus::Unavailable {
-        notice = notice.child(tr!("usage.rates_unavailable"));
+        content = content.child(tr!("usage.rates_unavailable"));
     }
-    notice
+    InlineNotice::new(content)
+        .mt(px(14.0))
+        .text_color(theme.text_tertiary)
 }
 
 /// One day's per-provider values under the cursor, anchored to the hovered
@@ -1891,18 +1819,15 @@ fn usage_quality_panel(history: &UsageHistory, theme: &Theme) -> Div {
 /// honors the system's reduce-motion setting on its own.
 fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
     let bar = |width: f32, height: f32| {
-        div()
+        Skeleton::new()
             .h(px(height))
             .w(px(width))
-            .flex_none()
             .rounded(px(height / 2.0))
             .bg(theme.overlay_strong)
     };
     let track = || {
-        div()
+        Skeleton::new()
             .h(px(4.0))
-            .w_full()
-            .flex_none()
             .rounded_full()
             .bg(theme.overlay_strong)
     };
@@ -1965,9 +1890,8 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
                                 .child(bar(150.0, 10.0)),
                         )
                         .child(
-                            div()
+                            Skeleton::new()
                                 .h(px(CHART_HEIGHT))
-                                .w_full()
                                 .rounded(px(8.0))
                                 .bg(theme.overlay),
                         )
@@ -2024,10 +1948,9 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
                         )
                         .when(view == UsageViewMode::Projects, |element| {
                             element.child(
-                                div()
+                                Skeleton::new()
                                     .h(px(26.0))
                                     .w(px(240.0))
-                                    .flex_none()
                                     .rounded(px(7.0))
                                     .bg(theme.overlay_strong),
                             )
@@ -2040,14 +1963,7 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
         }
     };
 
-    motion::pulse(Duration::from_millis(1400), move |phase| {
-        div()
-            .child(body)
-            .opacity(pulsating_between(0.45, 0.9)(phase))
-            .into_any_element()
-    })
-    .every(2)
-    .into_any_element()
+    Skeleton::pulse(div().child(body)).into_any_element()
 }
 
 /* ------------------------------------------------------------------------- */
@@ -2145,41 +2061,22 @@ fn usage_split_bar(
     length: f32,
     by_provider: &[ProviderDay; 2],
     by_cost: bool,
-) -> Div {
+) -> ProgressBar {
     let values = [
         usage_provider_value(&by_provider[0], by_cost),
         usage_provider_value(&by_provider[1], by_cost),
     ];
     let sum = values[0] + values[1];
-    let length = if length > 0.0 {
-        length.clamp(0.02, 1.0)
+    let fractions = if sum > 0.0 {
+        values.map(|value| value / sum)
     } else {
-        0.0
+        [0.0; 2]
     };
-    let mut bar = div()
-        .h_full()
-        .w(relative(length))
-        .rounded_full()
-        .overflow_hidden()
-        .flex();
-    if sum > 0.0 {
-        for (index, value) in values.into_iter().enumerate() {
-            if value > 0.0 {
-                bar = bar.child(
-                    div()
-                        .h_full()
-                        .w(relative((value / sum) as f32))
-                        .bg(colors[index]),
-                );
-            }
-        }
-    }
-    div()
+    ProgressBar::new(Some(length as f64))
         .h(px(4.0))
-        .w_full()
-        .rounded_full()
-        .bg(theme.overlay)
-        .child(bar)
+        .track_color(theme.overlay)
+        .minimum_fill(if length > 0.0 { 0.02 } else { 0.0 })
+        .segments(fractions.into_iter().zip(colors))
 }
 
 fn usage_provider_value(entry: &ProviderDay, by_cost: bool) -> f64 {
@@ -2875,6 +2772,56 @@ fn count_noun(count: u64, noun: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn provider_mix_bars_keep_cost_and_token_shares(cx: &mut gpui::TestAppContext) {
+        struct Harness {
+            by_cost: bool,
+        }
+        impl Render for Harness {
+            fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                crate::ui::squircle::test_support::clear(window, cx);
+                div().w(px(200.0)).child(usage_split_bar(
+                    &Theme::dark(),
+                    [gpui::rgb(0xAB1234).into(), gpui::rgb(0x1256AB).into()],
+                    0.5,
+                    &[
+                        ProviderDay {
+                            cost_usd: 90.0,
+                            total_tokens: 25,
+                        },
+                        ProviderDay {
+                            cost_usd: 10.0,
+                            total_tokens: 75,
+                        },
+                    ],
+                    self.by_cost,
+                ))
+            }
+        }
+        let (view, cx) = cx.add_window_view(|_, _| Harness { by_cost: false });
+        for by_cost in [false, true] {
+            view.update(cx, |view, cx| {
+                view.by_cost = by_cost;
+                cx.notify();
+            });
+            cx.update(|window, cx| {
+                let quads = crate::ui::squircle::test_support::painted_surfaces(window, cx);
+                for (color, width) in [
+                    (0xAB1234, if by_cost { 90.0 } else { 25.0 }),
+                    (0x1256AB, if by_cost { 10.0 } else { 75.0 }),
+                ] {
+                    let quad = quads
+                        .iter()
+                        .find(|quad| quad.background.as_solid() == Some(gpui::rgb(color).into()))
+                        .unwrap();
+                    assert!(
+                        (quad.bounds.size.width.0 / window.scale_factor() - width).abs() < 0.01
+                    );
+                }
+            });
+        }
+    }
 
     #[test]
     fn token_counts_compact_to_three_significant_figures() {

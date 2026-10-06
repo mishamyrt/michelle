@@ -595,7 +595,7 @@ impl Element for MathText {
         }
         self.selection.registry.borrow_mut().push(RegisteredText {
             key: self.key.clone(),
-            text: Rc::from(self.flat.text.as_ref()),
+            text: self.flat.text.clone().into(),
             block_break: self.block_break,
             geometry: TextGeometry::Math(self.geometry.clone()),
         });

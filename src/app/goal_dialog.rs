@@ -12,6 +12,17 @@ use crate::model::{GoalOperation, MessageRole, ThreadGoal, ThreadGoalStatus};
 use crate::usage::format_tokens;
 
 use super::*;
+use crate::ui::{
+    ActionRow, ActivationExt, ButtonRole, Dialog, KeyHint, TextArea, focus_dialog_input,
+};
+pub(super) mod model;
+#[cfg(test)]
+use model::edited_goal_status;
+
+pub(super) struct GoalUi {
+    pub(in crate::app) dialog: Option<goal_dialog::GoalDialogState>,
+    pub(in crate::app) request: Option<goal_dialog::GoalDialogRequest>,
+}
 
 actions!(michelle_goal_dialog, [ConfirmGoalDialog, DismissGoalDialog]);
 
@@ -61,7 +72,7 @@ impl Michelle {
         replace: bool,
         cx: &mut Context<Self>,
     ) {
-        self.goal_dialog_request = Some(GoalDialogRequest {
+        self.goal_ui.request = Some(GoalDialogRequest {
             session_id,
             prefill,
             replace,
@@ -92,7 +103,8 @@ impl Michelle {
             objective.update(cx, |input, cx| input.set_content(content, cx));
         }
         let objective_focus = objective.read(cx).focus();
-        self.goal_dialog = Some(GoalDialogState {
+        let objective_id = objective.entity_id();
+        self.goal_ui.dialog = Some(GoalDialogState {
             session_id: request.session_id,
             replace: request.replace,
             objective,
@@ -100,18 +112,20 @@ impl Michelle {
             status_focus: cx.focus_handle(),
             clear_focus: cx.focus_handle(),
         });
-        // Like Michelle's other deferred surfaces, the modal joins the dispatch
-        // tree only after it has drawn. Focus it two frames later so typing
-        // cannot fall through to the composer beneath it.
-        window.on_next_frame(move |window, _| {
-            window.on_next_frame(move |window, cx| window.focus(&objective_focus, cx));
+        focus_dialog_input(window, cx, objective_focus, move |this, _| {
+            this.goal_ui.request.is_none()
+                && this
+                    .goal_ui
+                    .dialog
+                    .as_ref()
+                    .is_some_and(|dialog| dialog.objective.entity_id() == objective_id)
         });
         cx.notify();
     }
 
     fn close_goal_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.goal_dialog_request = None;
-        if self.goal_dialog.take().is_none() {
+        self.goal_ui.request = None;
+        if self.goal_ui.dialog.take().is_none() {
             return;
         }
         let focus = self.composer_focus(cx);
@@ -119,186 +133,16 @@ impl Michelle {
         cx.notify();
     }
 
-    /// Hand a goal operation to the session's runtime, starting one first
-    /// when none exists yet. Goals attach to the provider thread, not to any
-    /// turn — the Codex CLI opens its thread at launch, so `/goal` works
-    /// there before the first message. Michelle starts providers lazily, so the
-    /// goal path starts the runtime itself and the queued operations drain
-    /// the moment it installs.
-    pub(super) fn dispatch_goal_operation(
-        &mut self,
-        session_id: Uuid,
-        operation: GoalOperation,
-        cx: &mut Context<Self>,
-    ) {
-        self.record_goal_submission(session_id, &operation, cx);
-        self.begin_goal_pursuit_turn(session_id, &operation, cx);
-        if let Some(runtime) = self.runtimes.get(&session_id) {
-            runtime.driver.goal(operation);
-            return;
-        }
-        self.pending_goal_operations
-            .entry(session_id)
-            .or_default()
-            .push(operation);
-        self.start_goal_runtime(session_id, cx);
-    }
-
-    /// A submitted objective leaves a persistent transcript record — the
-    /// centered pill a system message renders as — the way a submission
-    /// leaves its user message. Pushed before the pursuit turn exists so it
-    /// stays turn-less and survives an unwound pursuit.
-    fn record_goal_submission(
-        &mut self,
-        session_id: Uuid,
-        operation: &GoalOperation,
-        cx: &mut Context<Self>,
-    ) {
-        let GoalOperation::Set {
-            objective: Some(objective),
-            ..
-        } = operation
-        else {
-            return;
-        };
-        let Some(session) = self.state.session_mut(session_id) else {
-            return;
-        };
-        session.set_title_from_prompt(objective);
-        let notice = tr!("goal.set_notice", objective = notice_objective(objective));
-        session.push_message(MessageRole::System, notice);
-        session.updated_at = crate::model::unix_time();
-        self.state.mark_session_dirty(session_id);
-        cx.notify();
-    }
-
-    /// Activating a goal on an idle thread makes Codex pursue it right away
-    /// (`apply_external_goal_set` → `continue_if_idle`), so begin its turn
-    /// optimistically — exactly how a submission's turn begins at accept —
-    /// instead of leaving the empty-task page up until the provider's start
-    /// report arrives seconds later. The provider's `turn/started` confirms
-    /// the turn; errors and a watchdog unwind an unconfirmed one.
-    fn begin_goal_pursuit_turn(
-        &mut self,
-        session_id: Uuid,
-        operation: &GoalOperation,
-        cx: &mut Context<Self>,
-    ) {
-        if !matches!(
-            operation,
-            GoalOperation::Set {
-                status: Some(ThreadGoalStatus::Active),
-                ..
-            }
-        ) {
-            return;
-        }
-        let Some(session) = self
-            .state
-            .session_mut(session_id)
-            .filter(|session| session.active_turn_id().is_none() && !session.status.is_busy())
-        else {
-            return;
-        };
-        let turn_id = session.begin_provider_turn();
-        session.status = SessionStatus::Connecting;
-        self.state.mark_session_dirty(session_id);
-        cx.notify();
-        // Continuation can legitimately never come — an inherited deferral,
-        // or a goal feature disabled provider-side. Do not let the working
-        // indicator outlive that silence.
-        cx.spawn(async move |michelle, cx| {
-            cx.background_executor()
-                .timer(std::time::Duration::from_secs(30))
-                .await;
-            let _ = michelle.update(cx, |michelle, cx| {
-                let stale = michelle
-                    .state
-                    .sessions
-                    .iter()
-                    .find(|session| session.id == session_id)
-                    .is_some_and(|session| {
-                        session.active_turn_id() == Some(turn_id)
-                            && session.active_turn_is_unconfirmed_pursuit()
-                    });
-                if stale {
-                    michelle.unwind_unconfirmed_pursuit_turn(session_id);
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
-    /// Remove an optimistic pursuit turn whose provider start never came,
-    /// returning the session to rest. Confirmed turns and submissions are
-    /// never touched: only a running provider turn without a user message
-    /// and without a provider start report qualifies.
-    pub(super) fn unwind_unconfirmed_pursuit_turn(&mut self, session_id: Uuid) {
-        let Some(session) = self
-            .state
-            .session_mut(session_id)
-            .filter(|session| session.active_turn_is_unconfirmed_pursuit())
-        else {
-            return;
-        };
-        if let Some(turn_id) = session.active_turn_id() {
-            session.unwind_unstarted_turn(turn_id);
-        }
-        if session.status.is_busy() {
-            session.status = SessionStatus::Idle;
-        }
-        self.state.mark_session_dirty(session_id);
-    }
-
-    /// Flush operations accepted before the runtime existed. Called after
-    /// any runtime install so the goal lands on the thread that was started
-    /// for it — whether the goal path or a racing submission started it.
-    pub(super) fn drain_pending_goal_operations(&mut self, session_id: Uuid) {
-        let Some(operations) = self.pending_goal_operations.remove(&session_id) else {
-            return;
-        };
-        if let Some(runtime) = self.runtimes.get(&session_id) {
-            for operation in operations {
-                runtime.driver.goal(operation);
-            }
-        }
-    }
-
     fn confirm_goal_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.goal_dialog.as_ref() else {
+        let Some(dialog) = self.goal_ui.dialog.as_ref() else {
             return;
         };
         let session_id = dialog.session_id;
         let replace = dialog.replace;
         let objective = dialog.objective.read(cx).content().trim().to_owned();
-        if objective.is_empty() {
+        if !self.save_goal_objective(session_id, objective, replace, cx) {
             return;
         }
-        let current_status = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .and_then(|session| session.thread_goal.as_ref())
-            .map(|goal| goal.status);
-        let (status, replace) = match current_status {
-            // Editing keeps a resumable status; finished goals restart.
-            Some(status) if !replace => (edited_goal_status(status), false),
-            // Replacing always pursues the new objective from scratch. A goal
-            // that vanished since the dialog opened degrades to a plain set.
-            Some(_) => (ThreadGoalStatus::Active, true),
-            None => (ThreadGoalStatus::Active, false),
-        };
-        self.dispatch_goal_operation(
-            session_id,
-            GoalOperation::Set {
-                objective: Some(objective),
-                status: Some(status),
-                replace,
-            },
-            cx,
-        );
         self.close_goal_dialog(window, cx);
     }
 
@@ -308,7 +152,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(session_id) = self.goal_dialog.as_ref().map(|dialog| dialog.session_id) else {
+        let Some(session_id) = self.goal_ui.dialog.as_ref().map(|dialog| dialog.session_id) else {
             return;
         };
         self.dispatch_goal_operation(
@@ -324,7 +168,7 @@ impl Michelle {
     }
 
     fn goal_dialog_clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(session_id) = self.goal_dialog.as_ref().map(|dialog| dialog.session_id) else {
+        let Some(session_id) = self.goal_ui.dialog.as_ref().map(|dialog| dialog.session_id) else {
             return;
         };
         self.dispatch_goal_operation(session_id, GoalOperation::Clear, cx);
@@ -336,10 +180,10 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if let Some(request) = self.goal_dialog_request.take() {
+        if let Some(request) = self.goal_ui.request.take() {
             self.materialize_goal_dialog(request, window, cx);
         }
-        let dialog = self.goal_dialog.as_ref()?;
+        let dialog = self.goal_ui.dialog.as_ref()?;
         let theme = Theme::current(cx);
         let current = self
             .state
@@ -374,10 +218,8 @@ impl Michelle {
                 goal_usage_summary(goal),
             )
         });
-        let weak = cx.entity().downgrade();
 
-        let mut card = div()
-            .id("goal-dialog-card")
+        let mut card = Dialog::new("goal-dialog-layer", "goal-dialog-card")
             .key_context(DIALOG_CONTEXT)
             .on_action(cx.listener(|michelle, _: &ConfirmGoalDialog, window, cx| {
                 michelle.confirm_goal_dialog(window, cx);
@@ -385,18 +227,9 @@ impl Michelle {
             .on_action(cx.listener(|michelle, _: &DismissGoalDialog, window, cx| {
                 michelle.close_goal_dialog(window, cx);
             }))
-            .tab_group()
-            .tab_stop(false)
-            .w_full()
-            .max_w(px(420.0))
-            .overflow_hidden()
-            .rounded(px(18.0))
             .bg(theme.composer)
-            .shadow_xl()
-            .flex()
-            .flex_col()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
+            .on_dismiss(cx, |this, window, cx| this.close_goal_dialog(window, cx))
+            .header(
                 div()
                     .h(px(48.0))
                     .px(px(16.0))
@@ -434,14 +267,9 @@ impl Michelle {
                     }),
             )
             .child(
-                div()
-                    .h(px(112.0))
-                    .px(px(16.0))
-                    .py(px(10.0))
-                    .text_size(sp(14.0))
-                    .line_height(sp(21.0))
-                    .text_color(theme.text)
-                    .child(dialog.objective.clone()),
+                TextArea::new("goal-dialog-objective", dialog.objective.clone())
+                    .text_size(px(self.state.content_font_size))
+                    .line_height(px(self.state.content_font_size * 1.5)),
             );
         if replace && current.is_some() {
             card = card.child(
@@ -454,148 +282,52 @@ impl Michelle {
                     .child(tr!("goal.replace_notice")),
             );
         }
-        let save = render_goal_action_row(
-            "goal-dialog-save",
-            &dialog.save_focus,
-            "checkmark",
-            save_label,
-            can_save,
-            Some(crate::platform::primary_shortcut("⌘↩", "Ctrl+Enter")),
-            theme.text,
-            weak.clone(),
-            &theme,
-            |michelle, window, cx| michelle.confirm_goal_dialog(window, cx),
-        );
-        let mut actions_column = div().p(px(8.0)).flex().flex_col().gap(px(2.0)).child(save);
-        if let Some((status, label, icon_path)) = status_action {
-            let toggle_weak = cx.entity().downgrade();
-            actions_column = actions_column.child(render_goal_action_row(
-                "goal-dialog-status",
-                &dialog.status_focus,
-                icon_path,
-                label,
-                true,
-                None,
-                theme.text,
-                toggle_weak,
-                &theme,
-                move |michelle, window, cx| michelle.goal_dialog_set_status(status, window, cx),
-            ));
-        }
-        if current.is_some() && !replace {
-            let clear_weak = cx.entity().downgrade();
-            actions_column = actions_column.child(render_goal_action_row(
-                "goal-dialog-clear",
-                &dialog.clear_focus,
-                "trash",
-                tr!("goal.clear"),
-                true,
-                None,
-                theme.danger,
-                clear_weak,
-                &theme,
-                |michelle, window, cx| michelle.goal_dialog_clear(window, cx),
-            ));
-        }
-        let card = card
-            .child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border))
-            .child(actions_column);
-
-        let scrim = if theme.is_dark {
-            gpui::hsla(0.0, 0.0, 0.0, 0.34)
-        } else {
-            gpui::hsla(0.0, 0.0, 0.0, 0.16)
-        };
-        let layer = div()
-            .id("goal-dialog-layer")
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(scrim)
-            .p(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|michelle, _, window, cx| michelle.close_goal_dialog(window, cx)),
-            )
-            .child(card);
-        Some(gpui::deferred(layer).with_priority(4).into_any_element())
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_goal_action_row(
-    id: &'static str,
-    focus: &FocusHandle,
-    icon_path: &'static str,
-    label: String,
-    enabled: bool,
-    shortcut: Option<&'static str>,
-    tint: gpui::Hsla,
-    weak: WeakEntity<Michelle>,
-    theme: &Theme,
-    activate: impl Fn(&mut Michelle, &mut Window, &mut Context<Michelle>) + Clone + 'static,
-) -> Stateful<Div> {
-    let foreground = if enabled { tint } else { theme.text_ghost };
-    let click_activate = activate.clone();
-    let click_weak = weak.clone();
-    let key_weak = weak;
-    div()
-        .id(id)
-        .track_focus(focus)
-        .when(enabled, |row| row.tab_index(0))
-        .h(px(38.0))
-        .w_full()
-        .px(px(10.0))
-        .rounded(px(9.0))
-        .flex()
-        .items_center()
-        .gap(px(10.0))
-        .cursor_default()
-        .text_size(sp(14.0))
-        .text_color(foreground)
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
-        .when(enabled, |row| {
-            row.hover(|style| style.bg(theme.overlay_strong))
-        })
-        .child(icon(icon_path, 15.0, foreground))
-        .child(div().min_w_0().flex_1().truncate().child(label))
-        .when_some(shortcut, |row, shortcut| {
-            row.child(
-                div()
-                    .h(px(22.0))
-                    .min_w(px(34.0))
-                    .px(px(7.0))
-                    .rounded(px(11.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(theme.overlay_strong)
-                    .text_size(sp(12.5))
-                    .text_color(if enabled {
+        let save = ActionRow::new("goal-dialog-save", save_label)
+            .track_focus(&dialog.save_focus)
+            .icon("checkmark")
+            .disabled(!can_save)
+            .trailing(
+                KeyHint::new(crate::platform::primary_shortcut("⌘↩", "Ctrl+Enter")).text_color(
+                    if can_save {
                         theme.text_secondary
                     } else {
                         theme.text_ghost
-                    })
-                    .child(shortcut),
+                    },
+                ),
             )
-        })
-        .when(enabled, |row| {
-            row.on_click(move |_, window, cx| {
-                let _ = click_weak.update(cx, |michelle, cx| click_activate(michelle, window, cx));
-            })
-            .on_key_down(move |event: &KeyDownEvent, window, cx| {
-                if !event.keystroke.modifiers.modified()
-                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                {
-                    let _ = key_weak.update(cx, |michelle, cx| activate(michelle, window, cx));
-                    cx.stop_propagation();
-                }
-            })
-        })
+            .on_activation(cx, |this, window, cx| this.confirm_goal_dialog(window, cx));
+        let mut actions_column = div().p(px(8.0)).flex().flex_col().gap(px(2.0)).child(save);
+        if let Some((status, label, icon_path)) = status_action {
+            actions_column = actions_column.child(
+                ActionRow::new("goal-dialog-status", label)
+                    .track_focus(&dialog.status_focus)
+                    .icon(icon_path)
+                    .on_activation(cx, move |this, window, cx| {
+                        this.goal_dialog_set_status(status, window, cx)
+                    }),
+            );
+        }
+        if current.is_some() && !replace {
+            actions_column = actions_column.child(
+                ActionRow::new("goal-dialog-clear", tr!("goal.clear"))
+                    .track_focus(&dialog.clear_focus)
+                    .icon("trash")
+                    .role(ButtonRole::Destructive)
+                    .on_activation(cx, |this, window, cx| this.goal_dialog_clear(window, cx)),
+            );
+        }
+        let card = card.actions(actions_column);
+
+        Some(
+            card.scrim(gpui::hsla(
+                0.0,
+                0.0,
+                0.0,
+                if theme.is_dark { 0.34 } else { 0.16 },
+            ))
+            .into_any_element(),
+        )
+    }
 }
 
 /// The status vocabulary Codex's own UI uses, translated.
@@ -714,16 +446,6 @@ fn notice_objective(objective: &str) -> String {
     }
     let clipped: String = objective.chars().take(NOTICE_OBJECTIVE_CHARS - 1).collect();
     format!("{}…", clipped.trim_end())
-}
-
-/// Saving an objective keeps a resumable status but restarts a finished one,
-/// mirroring Codex's `/goal edit` semantics.
-fn edited_goal_status(status: ThreadGoalStatus) -> ThreadGoalStatus {
-    if status.is_terminal() {
-        ThreadGoalStatus::Active
-    } else {
-        status
-    }
 }
 
 #[cfg(test)]

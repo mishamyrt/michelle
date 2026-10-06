@@ -29,6 +29,10 @@ pub use michelle_protocol::persistence::{
     ComposerDraftTarget, ComposerDrafts, SessionMessageMatch,
 };
 
+mod app_files;
+use app_files::AppFileSaveQueue;
+pub use app_files::AppFileWriter;
+
 const STATE_VERSION: u32 = 5;
 const APP_STATE_VERSION: u32 = 1;
 
@@ -68,8 +72,8 @@ fn default_computer_use_enabled() -> bool {
     false
 }
 
-fn default_ui_font_size() -> f32 {
-    DEFAULT_UI_FONT_SIZE
+fn default_content_font_size() -> f32 {
+    DEFAULT_CONTENT_FONT_SIZE
 }
 
 fn default_code_font_size() -> f32 {
@@ -240,7 +244,7 @@ pub struct PersistedWindowState {
     pub display: Option<Uuid>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct AppSettings {
     pub favorite_models: Vec<FavoriteModel>,
@@ -249,10 +253,10 @@ pub struct AppSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme_name: Option<String>,
     pub language: AppLanguage,
-    /// Base text size for the interface, in pixels: chrome and prose are
-    /// authored against the 14px default and scale from it. Hand-edited
-    /// values are clamped when applied.
-    pub ui_font_size: f32,
+    /// Base text size for messages, documents and prompt input, in logical
+    /// pixels. The legacy disk key preserves preferences and rollback support.
+    #[serde(rename = "ui_font_size")]
+    pub content_font_size: f32,
     /// Text size for code surfaces — the file editor, diffs, code blocks,
     /// and tool output — in pixels. Hand-edited values are clamped when
     /// applied.
@@ -272,7 +276,7 @@ impl Default for AppSettings {
             theme: ThemePreference::System,
             theme_name: None,
             language: AppLanguage::default(),
-            ui_font_size: DEFAULT_UI_FONT_SIZE,
+            content_font_size: DEFAULT_CONTENT_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
             render_math: true,
             daemon_exposure: DaemonExposureSettings::default(),
@@ -281,7 +285,7 @@ impl Default for AppSettings {
     }
 }
 
-pub const DEFAULT_UI_FONT_SIZE: f32 = 14.0;
+pub const DEFAULT_CONTENT_FONT_SIZE: f32 = 14.0;
 pub const DEFAULT_CODE_FONT_SIZE: f32 = 13.0;
 
 /// Bounds a possibly hand-edited font size to something the layout survives.
@@ -293,15 +297,15 @@ fn sanitized_font_size(size: f32, fallback: f32) -> f32 {
     }
 }
 
-pub fn sanitized_ui_font_size(size: f32) -> f32 {
-    sanitized_font_size(size, DEFAULT_UI_FONT_SIZE)
+pub fn sanitized_content_font_size(size: f32) -> f32 {
+    sanitized_font_size(size, DEFAULT_CONTENT_FONT_SIZE)
 }
 
 pub fn sanitized_code_font_size(size: f32) -> f32 {
     sanitized_font_size(size, DEFAULT_CODE_FONT_SIZE)
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct AppState {
     app_state_version: u32,
     #[serde(default)]
@@ -340,6 +344,8 @@ struct AppState {
     sidebar_projects_collapsed: bool,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     sidebar_collapsed_projects: HashSet<Uuid>,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    sidebar_hidden_projects: HashSet<Uuid>,
     #[serde(default = "default_right_panel_width")]
     right_panel_width: f32,
     /// Whether markdown files in the right panel open as a rendered preview
@@ -378,8 +384,8 @@ pub struct PersistedState {
     pub theme_name: Option<String>,
     #[serde(default)]
     pub language: AppLanguage,
-    #[serde(default = "default_ui_font_size")]
-    pub ui_font_size: f32,
+    #[serde(default = "default_content_font_size", rename = "ui_font_size")]
+    pub content_font_size: f32,
     #[serde(default = "default_code_font_size")]
     pub code_font_size: f32,
     #[serde(default = "default_render_math")]
@@ -406,6 +412,8 @@ pub struct PersistedState {
     pub sidebar_projects_collapsed: bool,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub sidebar_collapsed_projects: HashSet<Uuid>,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub sidebar_hidden_projects: HashSet<Uuid>,
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f32,
     /// Whether markdown files in the right panel open as a rendered preview
@@ -429,6 +437,14 @@ pub struct PersistedState {
 }
 
 impl PersistedState {
+    /// Keep the project and its chats available for reopening.
+    pub fn remove_sidebar_project(&mut self, id: Uuid) -> bool {
+        self.projects
+            .iter()
+            .any(|project| project.id == id && !project.is_projectless())
+            && self.sidebar_hidden_projects.insert(id)
+    }
+
     pub fn sidebar_group_for_project(&self, project: Uuid) -> Option<Uuid> {
         self.sidebar_project_groups
             .iter()
@@ -557,7 +573,7 @@ impl PersistedState {
             theme: ThemePreference::System,
             theme_name: None,
             language: AppLanguage::default(),
-            ui_font_size: DEFAULT_UI_FONT_SIZE,
+            content_font_size: DEFAULT_CONTENT_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
             render_math: true,
             daemon_exposure: DaemonExposureSettings::default(),
@@ -571,6 +587,7 @@ impl PersistedState {
             sidebar_project_groups: Vec::new(),
             sidebar_projects_collapsed: false,
             sidebar_collapsed_projects: HashSet::new(),
+            sidebar_hidden_projects: HashSet::new(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             markdown_preview: false,
             window_state: None,
@@ -686,7 +703,7 @@ impl PersistedState {
             theme: self.theme,
             theme_name: self.theme_name.clone(),
             language: self.language,
-            ui_font_size: self.ui_font_size,
+            content_font_size: self.content_font_size,
             code_font_size: self.code_font_size,
             render_math: self.render_math,
             daemon_exposure: self.daemon_exposure.clone(),
@@ -715,6 +732,7 @@ impl PersistedState {
             sidebar_project_groups: self.sidebar_project_groups.clone(),
             sidebar_projects_collapsed: self.sidebar_projects_collapsed,
             sidebar_collapsed_projects: self.sidebar_collapsed_projects.clone(),
+            sidebar_hidden_projects: self.sidebar_hidden_projects.clone(),
             right_panel_width: self.right_panel_width,
             markdown_preview: self.markdown_preview,
             window_state: self.window_state,
@@ -726,7 +744,7 @@ impl PersistedState {
         self.theme = settings.theme;
         self.theme_name = settings.theme_name;
         self.language = settings.language;
-        self.ui_font_size = sanitized_ui_font_size(settings.ui_font_size);
+        self.content_font_size = sanitized_content_font_size(settings.content_font_size);
         self.code_font_size = sanitized_code_font_size(settings.code_font_size);
         self.render_math = settings.render_math;
         self.daemon_exposure = settings.daemon_exposure;
@@ -752,6 +770,7 @@ impl PersistedState {
         self.sidebar_project_groups = app_state.sidebar_project_groups;
         self.sidebar_projects_collapsed = app_state.sidebar_projects_collapsed;
         self.sidebar_collapsed_projects = app_state.sidebar_collapsed_projects;
+        self.sidebar_hidden_projects = app_state.sidebar_hidden_projects;
         self.right_panel_width = app_state.right_panel_width;
         self.markdown_preview = app_state.markdown_preview;
         self.window_state = app_state.window_state;
@@ -930,6 +949,8 @@ pub struct StateStore {
     app_state_path: PathBuf,
     app_settings_path: PathBuf,
     legacy_settings_paths: Vec<PathBuf>,
+    app_file_saves: AppFileSaveQueue,
+    app_file_writer: Option<AppFileWriter>,
     daemon: DaemonSupervisor,
     remote_default_cwd: Mutex<Option<PathBuf>>,
     /// A task snapshot may only be written after this client has successfully
@@ -957,10 +978,16 @@ impl StateStore {
     }
 
     pub fn remote(daemon: DaemonSupervisor) -> Self {
+        let app_state_path = default_app_state_path();
+        let app_settings_path = default_app_settings_path();
+        let (app_file_saves, app_file_writer) =
+            AppFileWriter::channel(app_settings_path.clone(), app_state_path.clone());
         Self {
-            app_state_path: default_app_state_path(),
-            app_settings_path: default_app_settings_path(),
+            app_state_path,
+            app_settings_path,
             legacy_settings_paths: default_legacy_settings_paths(),
+            app_file_saves,
+            app_file_writer: Some(app_file_writer),
             path: Self::default_path(),
             daemon,
             remote_default_cwd: Mutex::new(None),
@@ -1129,8 +1156,8 @@ impl StateStore {
     }
 
     pub fn save(&self, state: &mut PersistedState) -> io::Result<()> {
-        self.write_app_settings(&state.app_settings())?;
-        self.write_app_state(&state.app_state())?;
+        self.app_file_saves
+            .save(state.app_settings(), state.app_state())?;
         if !self.task_state_loaded.load(Ordering::Acquire) {
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
@@ -1159,6 +1186,21 @@ impl StateStore {
             .map_err(to_io_error)?;
         state.dirty_sessions.clear();
         Ok(())
+    }
+
+    /// Run this writer once on the background executor. Ordinary saves only
+    /// queue snapshots; filesystem errors arrive through `app_save_errors`.
+    pub fn take_app_file_writer(&mut self) -> Option<AppFileWriter> {
+        self.app_file_writer.take()
+    }
+
+    pub fn app_save_errors(&self) -> smol::channel::Receiver<io::Error> {
+        self.app_file_saves.errors()
+    }
+
+    /// Await the latest queued generation during graceful app shutdown.
+    pub fn wait_for_app_writes(&self) -> impl Future<Output = ()> + Send + 'static + use<> {
+        self.app_file_saves.wait()
     }
 
     pub fn remove_session(&self, session_id: Uuid) -> io::Result<()> {
@@ -1214,7 +1256,7 @@ pub fn hydrate_session(
         )
         .map_err(to_io_error)?
     {
-        ResponsePayload::Session { session } => Ok(session),
+        ResponsePayload::Session { session, .. } => Ok(session),
         _ => Err(io::Error::other(
             "Michelle daemon returned an invalid session-hydration response",
         )),
@@ -1249,6 +1291,55 @@ fn restore_task_state_skeletons(sessions: &mut [AgentSession]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_font_preferences_round_trip_without_changing_disk_keys() {
+        let settings: AppSettings = serde_json::from_str(
+            r#"{"ui_font_size":18,"code_font_size":11,"theme":"dark","render_math":false}"#,
+        )
+        .unwrap();
+        let mut state = PersistedState::empty();
+        state.apply_app_settings(settings);
+        assert_eq!(state.content_font_size, 18.0);
+        assert_eq!(state.code_font_size, 11.0);
+
+        let saved = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(saved["ui_font_size"], 18.0);
+        assert!(saved.get("content_font_size").is_none());
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(saved).unwrap());
+        assert_eq!(restored.content_font_size, 18.0);
+        assert_eq!(restored.code_font_size, 11.0);
+        assert_eq!(restored.theme, ThemePreference::Dark);
+        assert!(!restored.render_math);
+
+        let legacy_state = serde_json::to_value(&state).unwrap();
+        assert_eq!(legacy_state["ui_font_size"], 18.0);
+        assert!(legacy_state.get("content_font_size").is_none());
+        let restored: PersistedState = serde_json::from_value(legacy_state).unwrap();
+        assert_eq!(restored.content_font_size, 18.0);
+        assert_eq!(restored.code_font_size, 11.0);
+    }
+
+    #[test]
+    fn content_font_preferences_default_and_sanitize_independently_of_code() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.content_font_size, 14.0);
+        assert_eq!(defaults.code_font_size, 13.0);
+        for (input, expected) in [(-1.0, 9.0), (18.0, 18.0), (100.0, 24.0)] {
+            let mut state = PersistedState::empty();
+            state.apply_app_settings(AppSettings {
+                content_font_size: input,
+                ..AppSettings::default()
+            });
+            assert_eq!(state.content_font_size, expected);
+            assert_eq!(state.code_font_size, 13.0);
+        }
+        for input in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(sanitized_content_font_size(input), 14.0);
+            assert_eq!(sanitized_code_font_size(input), 13.0);
+        }
+    }
 
     #[test]
     fn user_theme_selection_preserves_legacy_color_scheme_preferences() {
@@ -1307,7 +1398,7 @@ mod tests {
             .unwrap();
             assert_eq!(settings.language, AppLanguage::System);
             assert_eq!(settings.theme, ThemePreference::Dark);
-            assert_eq!(settings.ui_font_size, 18.0);
+            assert_eq!(settings.content_font_size, 18.0);
             assert!(!settings.render_math);
         }
     }
@@ -1370,6 +1461,7 @@ mod tests {
         assert!(state.sidebar_project_groups.is_empty());
         assert!(!state.sidebar_projects_collapsed);
         assert!(state.sidebar_collapsed_projects.is_empty());
+        assert!(state.sidebar_hidden_projects.is_empty());
         assert_eq!(state.last_runtime_mode, RuntimeMode::FullAccess);
     }
 
@@ -1392,6 +1484,28 @@ mod tests {
                     .is_none()
             );
         }
+    }
+
+    #[test]
+    fn removed_sidebar_projects_survive_restart_without_losing_chats() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project = state.projects[0].id;
+        let chats = serde_json::to_value(&state.sessions).unwrap();
+        assert!(!state.remove_sidebar_project(Uuid::nil()));
+        assert!(state.remove_sidebar_project(project));
+        assert!(!state.remove_sidebar_project(project));
+        assert_eq!(state.projects.len(), 1);
+        assert_eq!(serde_json::to_value(&state.sessions).unwrap(), chats);
+
+        let saved = serde_json::to_vec(&state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
+        assert_eq!(restored.sidebar_hidden_projects, HashSet::from([project]));
+
+        restored.sidebar_hidden_projects.remove(&project);
+        let saved = serde_json::to_vec(&restored.app_state()).unwrap();
+        restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
+        assert!(restored.sidebar_hidden_projects.is_empty());
     }
 
     #[test]

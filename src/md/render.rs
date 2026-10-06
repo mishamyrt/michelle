@@ -134,30 +134,30 @@ impl Metrics {
         block_gap: 7.0,
     };
 
-    /// The UI and code font sizes the constants above were authored against.
+    /// The content and code font sizes the constants above were authored against.
     /// [`Metrics::scaled`] is the identity at these values, so the settings'
     /// defaults reproduce the authored transcript exactly.
-    const AUTHORED_UI_FONT_SIZE: f32 = 14.0;
+    const AUTHORED_CONTENT_FONT_SIZE: f32 = 14.0;
     const AUTHORED_CODE_FONT_SIZE: f32 = 13.0;
 
     /// These metrics rescaled to the user's font settings: prose follows the
-    /// UI font size, code spans and blocks follow the code font size, and each
+    /// content font size, code spans and blocks follow the code font size, and each
     /// surface keeps its authored proportions. Values land on half pixels so
     /// scaled text stays as crisp as the authored sizes.
-    pub fn scaled(self, ui_font_size: f32, code_font_size: f32) -> Self {
-        let ui = ui_font_size / Self::AUTHORED_UI_FONT_SIZE;
+    pub fn scaled(self, content_font_size: f32, code_font_size: f32) -> Self {
+        let content = content_font_size / Self::AUTHORED_CONTENT_FONT_SIZE;
         let code = code_font_size / Self::AUTHORED_CODE_FONT_SIZE;
         let half = |value: f32| (value * 2.0).round() / 2.0;
         Self {
-            text_size: half(self.text_size * ui),
-            line_height: half(self.line_height * ui),
+            text_size: half(self.text_size * content),
+            line_height: half(self.line_height * content),
             code_text_size: half(self.code_text_size * code),
             code_line_height: half(self.code_line_height * code),
-            block_gap: half(self.block_gap * ui),
+            block_gap: half(self.block_gap * content),
         }
     }
 
-    /// Document scale for a full-page reading surface: prose at the user's UI
+    /// Document scale for a full-page reading surface: prose at the user's content
     /// font size and code at the code font size, keeping [`Metrics::BODY`]'s
     /// proportions.
     pub fn document(text_size: f32, code_text_size: f32) -> Self {
@@ -448,6 +448,8 @@ pub fn flatten_plain(
 /// elements and reuses every settled one.
 pub struct MarkdownView {
     parser: IncrementalParser,
+    /// Raw source shared by message actions, allocated once per text revision.
+    source: RefCell<Option<SharedString>>,
     /// Mended replacement for the final block while streaming.
     tail: Vec<TopBlock>,
     flats: RefCell<HashMap<usize, Rc<FlatText>>>,
@@ -479,6 +481,7 @@ impl MarkdownView {
     pub fn new() -> Self {
         Self {
             parser: IncrementalParser::new(),
+            source: RefCell::new(None),
             tail: Vec::new(),
             flats: RefCell::new(HashMap::new()),
             volatile_from: Cell::new(0),
@@ -511,6 +514,13 @@ impl MarkdownView {
         self.parser.text().len()
     }
 
+    pub fn shared_source(&self) -> SharedString {
+        self.source
+            .borrow_mut()
+            .get_or_insert_with(|| self.parser.text().into())
+            .clone()
+    }
+
     pub fn set_text(&mut self, text: &str, mend: bool) {
         let was_streaming = self.streaming.replace(mend);
         if !mend && was_streaming {
@@ -524,6 +534,7 @@ impl MarkdownView {
         let append = !changed || text.starts_with(self.parser.text());
         if changed {
             self.parser.set_text(text);
+            *self.source.get_mut() = None;
         }
         // The mended display tail depends only on the source and the
         // streaming flag. Deriving it re-mends — and, with a hanging marker,
@@ -812,10 +823,11 @@ fn text_element_with_selection(
                 }
             }
             // Paint order is document order, so simply appending here
-            // rebuilds the frame's selection continuity.
+            // rebuilds the frame's selection continuity. Converting the shared
+            // string into an Arc reuses its heap buffer instead of copying it.
             selection.registry.borrow_mut().push(RegisteredText {
                 key: key.clone(),
-                text: Rc::from(text.as_ref()),
+                text: text.clone().into(),
                 block_break,
                 geometry: TextGeometry::Text(layout.clone()),
             });
@@ -1978,6 +1990,23 @@ mod tests {
     use super::*;
     use crate::md::parser;
     use gpui::TestAppContext;
+    use std::sync::Arc;
+
+    #[test]
+    fn prose_and_code_settings_scale_only_their_own_metrics() {
+        assert_eq!(Metrics::BODY.scaled(14.0, 13.0), Metrics::BODY);
+        let prose = Metrics::BODY.scaled(18.0, 13.0);
+        assert_eq!(prose.text_size, 18.0);
+        assert_eq!(prose.line_height, 27.0);
+        assert_eq!(prose.code_text_size, 13.0);
+        assert_eq!(prose.code_line_height, 19.5);
+        let code = Metrics::BODY.scaled(14.0, 20.0);
+        assert_eq!(code.text_size, 14.0);
+        assert_eq!(code.line_height, 21.0);
+        assert_eq!(code.block_gap, 10.0);
+        assert_eq!(code.code_text_size, 20.0);
+        assert_eq!(code.code_line_height, 30.0);
+    }
 
     fn palette() -> Palette {
         Palette::from_theme(&Theme::dark())
@@ -2188,6 +2217,105 @@ mod tests {
             plain.iter().map(|run| run.len).sum::<usize>()
         );
         assert!(highlighted.iter().all(|run| &run.font == &code_font));
+    }
+
+    #[test]
+    fn message_actions_reuse_raw_source_until_the_text_changes() {
+        let source = format!("{} **unfinished", "Большой текст. ".repeat(4096));
+        let mut view = MarkdownView::new();
+        view.set_text(&source, true);
+        let first: Arc<str> = view.shared_source().into();
+        assert_eq!(first.as_ref(), source);
+
+        for streaming in [true, false] {
+            view.set_text(&source, streaming);
+            let current = view.shared_source().into();
+            assert!(Arc::ptr_eq(&first, &current));
+        }
+
+        let appended = format!("{source}**");
+        view.set_text(&appended, true);
+        let current = view.shared_source().into();
+        assert!(!Arc::ptr_eq(&first, &current));
+        assert_eq!(&*current, appended);
+
+        view.set_text("Replacement", false);
+        assert_eq!(view.shared_source().as_ref(), "Replacement");
+        assert_eq!(first.as_ref(), source, "captured actions keep their source");
+    }
+
+    #[gpui::test]
+    fn selection_registration_shares_text_buffers_across_frames(cx: &mut TestAppContext) {
+        struct Harness {
+            markdown: MarkdownView,
+            selection: TranscriptSelection,
+        }
+        impl gpui::Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                let palette = palette();
+                let ctx = Ctx::new(
+                    "shared-text",
+                    &palette,
+                    Metrics::BODY,
+                    self.selection.clone(),
+                );
+                div()
+                    .w(px(400.0))
+                    .child(frame_reset(self.selection.clone()))
+                    .children(markdown(&self.markdown, &ctx))
+            }
+        }
+
+        let text = "Большой текст для выделения. ".repeat(16);
+        let mut view = MarkdownView::new();
+        view.set_text(
+            &format!("{text}\n\n```text\n{text}\n```\n\n{text} $x^2$"),
+            false,
+        );
+        let (harness, cx) = cx.add_window_view(|_, _| Harness {
+            markdown: view,
+            selection: TranscriptSelection::default(),
+        });
+        let mut previous: Option<Vec<Arc<str>>> = None;
+        for _ in 0..2 {
+            cx.run_until_parked();
+            let current = harness.read_with(cx, |harness, _| {
+                let registry = harness.selection.registry.borrow();
+                assert_eq!(registry.entries().len(), 3);
+                registry
+                    .entries()
+                    .iter()
+                    .map(|entry| {
+                        let shaped: Arc<str> = harness.markdown.flats.borrow()[&entry.key.index]
+                            .text
+                            .clone()
+                            .into();
+                        assert!(Arc::ptr_eq(&shaped, &entry.text));
+                        entry.text.clone()
+                    })
+                    .collect::<Vec<_>>()
+            });
+            if let Some(previous) = previous {
+                assert!(
+                    previous
+                        .iter()
+                        .zip(&current)
+                        .all(|(previous, current)| Arc::ptr_eq(previous, current))
+                );
+            }
+            previous = Some(current);
+            harness.update(cx, |_, cx| cx.notify());
+        }
+        harness.update(cx, |harness, _| {
+            let registry = harness.selection.registry.borrow();
+            let spans = registry.resolve((0, 0), (2, registry.entries()[2].text.len()));
+            harness.selection.selection.borrow_mut().set_spans(spans);
+            drop(registry);
+            let captured = harness.selection.selection.borrow().text();
+            harness.markdown.set_text("Replacement", false);
+            harness.selection.registry.borrow_mut().clear();
+            assert_eq!(harness.selection.selection.borrow().text(), captured);
+        });
     }
 
     #[test]

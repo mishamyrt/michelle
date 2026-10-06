@@ -41,7 +41,7 @@
   pulse-clock ticks at ≤ 60 Hz (spinners; other pulses stay at ≤ ~30 Hz) —
   and by what one frame can see. Read
   [docs/performance.md](docs/performance.md) before touching the event pump,
-  the pulse clock (`src/ui/motion.rs`), veils, overlay scrollbars, pane
+  the pulse clock (`src/ui/primitives/motion.rs`), veils, overlay scrollbars, pane
   caching, or anything else a streaming frame reaches; it also records the
   counter-based measurement playbook that actually finds regressions.
 
@@ -64,6 +64,20 @@
 - Keep text and icons legible against their surface in both themes, and give
   interactive targets enough hit area — extend the hit region rather than
   shrinking to the glyph.
+
+## UI library
+
+- Reusable tokens, colors, SF Symbols, controls, and drawing primitives belong
+  to `src/ui`. See [src/ui/README.md](src/ui/README.md); new screens can import
+  `crate::ui::prelude::*`.
+- `ui::Palette` contains abstract color families, label shades, fills, and
+  separators. Keep application roles and the TOML schema in `src/theme`, where
+  themes compose these tokens and publish a `UiColors` snapshot for controls.
+  UI components read that snapshot from memory. Provider/session presentation
+  belongs to `src/app/presentation`, and reusable controls accept labels, icons,
+  and handlers.
+- Keep module facades small. Split growing components by responsibility, and
+  keep component-specific geometry local rather than adding every value to tokens.
 
 ## Product reference
 

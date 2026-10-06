@@ -165,7 +165,10 @@ impl Michelle {
                     if replaces_changes {
                         // The rows this activity's diff was built from are gone;
                         // an expanded card rebuilds from the new ones.
-                        self.activity_diffs.borrow_mut().remove(&activity_id);
+                        self.transcript_model
+                            .activity_diffs
+                            .borrow_mut()
+                            .remove(&activity_id);
                     }
                     return;
                 }
@@ -223,7 +226,12 @@ impl Michelle {
         // any provider. While preparation is still running, a reused runtime
         // could only be draining leftovers of a settled turn — output landing
         // in the new turn then would attribute stale text to it.
-        if self.submission_preparations.contains(&session_id) {
+        if self
+            .sessions
+            .runtime
+            .submission_preparations
+            .contains(&session_id)
+        {
             return false;
         }
         self.state
@@ -289,7 +297,7 @@ impl Michelle {
                     session.available_commands = names;
                     // The drain has no `Context`; the frame loop rebuilds the
                     // drawn index when it sees this.
-                    self.composer_sources_stale = true;
+                    self.composer_model.sources.stale = true;
                 }
             }
             DriverEvent::PromptSubmitted {
@@ -463,7 +471,8 @@ impl Michelle {
                 if self.accepts_turn_output(session_id) && !questions.is_empty() {
                     runtime.pending_user_input = Some(PendingUserInput::new(request_id, questions));
                     if self.state.selected_session == Some(session_id) {
-                        self.user_input_answer
+                        self.session_ui
+                            .user_input_answer
                             .update(cx, |input, cx| input.clear(cx));
                     }
                     if let Some(session) = self.state.session_mut(session_id) {
@@ -542,7 +551,7 @@ impl Michelle {
                             .insert(0, submission.into_queued_message());
                     }
                     if allow_queue_drain {
-                        self.pending_queue_drains.push(session_id);
+                        self.sessions.runtime.pending_queue_drains.push(session_id);
                     }
                 } else {
                     // The user stopped the turn (or the provider died) before
@@ -559,16 +568,18 @@ impl Michelle {
                     .find(|session| session.id == session_id)
                     .map(|session| session.provider)
                 {
-                    self.plan_usage.insert(provider, usage);
+                    self.settings.plan.snapshots.insert(provider, usage);
                 }
             }
             DriverEvent::GoalUpdated(goal) => {
                 // Conversation meta like usage: it applies regardless of turn
                 // state, and `None` means the provider cleared the goal.
                 if goal.is_some() {
-                    self.goal_observed_at.insert(session_id, Instant::now());
+                    self.goal_model
+                        .observed_at
+                        .insert(session_id, Instant::now());
                 } else {
-                    self.goal_observed_at.remove(&session_id);
+                    self.goal_model.observed_at.remove(&session_id);
                 }
                 if let Some(session) = self.state.session_mut(session_id) {
                     if let Some(goal) = &goal
@@ -621,9 +632,11 @@ impl Michelle {
                     .iter()
                     .find(|session| session.id == session_id)
                     .map(|session| session.provider)
-                    .filter(|provider| usage_meter::PLAN_USAGE_PROVIDERS.contains(provider))
+                    .filter(|provider| {
+                        settings::plan_usage::PLAN_USAGE_PROVIDERS.contains(provider)
+                    })
                 {
-                    self.plan_usage_stale.insert(provider);
+                    self.settings.plan.stale.insert(provider);
                 }
                 if self
                     .state
@@ -691,7 +704,7 @@ impl Michelle {
                 // cached view of the workspace is no longer trustworthy. This
                 // handler has no `Context`, so the drain loop acts on the flag.
                 if self.state.selected_session == Some(session_id) {
-                    self.workspace_queries_stale = true;
+                    self.right_panel_model.workspace_queries_stale = true;
                 }
                 runtime.computer_use_previews.clear();
                 runtime.driver.refresh_background_work();
@@ -699,7 +712,7 @@ impl Michelle {
                 if allow_queue_drain && success {
                     // Start the next queued follow-up once the runtime has
                     // been re-inserted so the same process is reused.
-                    self.pending_queue_drains.push(session_id);
+                    self.sessions.runtime.pending_queue_drains.push(session_id);
                 }
                 if let Some(previous_kinds) = previous_kinds.as_deref() {
                     self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
@@ -840,14 +853,20 @@ impl Michelle {
             preview.decode_task = Some(cx.spawn(async move |this, cx| {
                 let image = decode.await;
                 let _ = this.update(cx, |this, cx| {
-                    let Some(preview) = this.runtimes.get_mut(&session_id).and_then(|runtime| {
-                        runtime.computer_use_previews.iter_mut().find(|preview| {
-                            preview
-                                .target
-                                .as_ref()
-                                .is_some_and(|target| target.window_id == window_id)
+                    let Some(preview) = this
+                        .sessions
+                        .runtime
+                        .runtimes
+                        .get_mut(&session_id)
+                        .and_then(|runtime| {
+                            runtime.computer_use_previews.iter_mut().find(|preview| {
+                                preview
+                                    .target
+                                    .as_ref()
+                                    .is_some_and(|target| target.window_id == window_id)
+                            })
                         })
-                    }) else {
+                    else {
                         return;
                     };
                     let image = image.map(|(source_id, image)| {

@@ -1,5 +1,7 @@
 use super::*;
 
+pub(super) mod model;
+
 fn workspace_ack(
     workspace: &michelle_client::WorkspaceClient,
     operation: michelle_client::WorkspaceOperation,
@@ -923,8 +925,8 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
 impl Michelle {
     pub(super) fn restart_task_state_sync(&self) {
         let clients = self.daemon.subscribe_clients();
-        let results = self.task_state_sync_tx.clone();
-        let event_wake = self.event_wake_tx.clone();
+        let results = self.sessions.runtime.task_state_sync_tx.clone();
+        let event_wake = self.sessions.runtime.event_wake_tx.clone();
         std::thread::Builder::new()
             .name("michelle-task-state-sync".into())
             .spawn(move || {
@@ -980,7 +982,7 @@ impl Michelle {
 
     fn drain_task_state_sync_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut latest = None;
-        while let Ok(result) = self.task_state_sync_events.try_recv() {
+        while let Ok(result) = self.sessions.runtime.task_state_sync_events.try_recv() {
             latest = Some(result);
         }
         let Some(result) = latest else {
@@ -1003,17 +1005,29 @@ impl Michelle {
         snapshot: RemoteTaskStateSnapshot,
         cx: &mut Context<Self>,
     ) {
-        let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
+        let runtime_ids = self
+            .sessions
+            .runtime
+            .runtimes
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
         let removed = merge_remote_session_catalog(
             &mut self.state.sessions,
             snapshot.sessions,
             |session_id| runtime_ids.contains(&session_id),
         );
         for session_id in &removed {
-            self.runtime_attach_pending.remove(session_id);
-            self.runtime_attach_misses.remove(session_id);
-            self.runtimes.remove(session_id);
-            self.background_work.remove(session_id);
+            self.sessions
+                .runtime
+                .runtime_attach_pending
+                .remove(session_id);
+            self.sessions
+                .runtime
+                .runtime_attach_misses
+                .remove(session_id);
+            self.sessions.runtime.runtimes.remove(session_id);
+            self.sessions.runtime.background_work.remove(session_id);
             self.remove_right_panel_session_state(*session_id);
             self.task_switcher.remove(*session_id);
         }
@@ -1078,13 +1092,17 @@ impl Michelle {
     }
 
     pub(super) fn start_runtime_attachment(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.runtimes.contains_key(&session_id)
-            || !self.runtime_attach_pending.insert(session_id)
+        if self.sessions.runtime.runtimes.contains_key(&session_id)
+            || !self
+                .sessions
+                .runtime
+                .runtime_attach_pending
+                .insert(session_id)
         {
             return;
         }
         let daemon = self.daemon.clone();
-        let event_wake = self.event_wake_tx.clone();
+        let event_wake = self.sessions.runtime.event_wake_tx.clone();
         cx.spawn(async move |michelle, cx| {
             let result = cx
                 .background_executor()
@@ -1103,12 +1121,20 @@ impl Michelle {
         result: anyhow::Result<Option<(AgentSession, PreparedDriver)>>,
         cx: &mut Context<Self>,
     ) {
-        if !self.runtime_attach_pending.remove(&session_id) {
+        if !self
+            .sessions
+            .runtime
+            .runtime_attach_pending
+            .remove(&session_id)
+        {
             return;
         }
         match result {
             Ok(Some((session, prepared))) => {
-                self.runtime_attach_misses.remove(&session_id);
+                self.sessions
+                    .runtime
+                    .runtime_attach_misses
+                    .remove(&session_id);
                 let Some(index) = self
                     .state
                     .sessions
@@ -1117,7 +1143,7 @@ impl Michelle {
                 else {
                     return;
                 };
-                if !self.runtimes.contains_key(&session_id) {
+                if !self.sessions.runtime.runtimes.contains_key(&session_id) {
                     self.state.sessions[index] = session;
                     self.install_prepared_driver(session_id, prepared);
                     if self.state.selected_session == Some(session_id) {
@@ -1135,10 +1161,18 @@ impl Michelle {
                     .find(|session| session.id == session_id)
                     .is_some_and(|session| session.status.is_busy());
                 if !busy {
-                    self.runtime_attach_misses.remove(&session_id);
+                    self.sessions
+                        .runtime
+                        .runtime_attach_misses
+                        .remove(&session_id);
                     return;
                 }
-                let misses = self.runtime_attach_misses.entry(session_id).or_default();
+                let misses = self
+                    .sessions
+                    .runtime
+                    .runtime_attach_misses
+                    .entry(session_id)
+                    .or_default();
                 *misses = misses.saturating_add(1);
                 if *misses < 4 {
                     cx.spawn(async move |michelle, cx| {
@@ -1151,7 +1185,10 @@ impl Michelle {
                     })
                     .detach();
                 } else {
-                    self.runtime_attach_misses.remove(&session_id);
+                    self.sessions
+                        .runtime
+                        .runtime_attach_misses
+                        .remove(&session_id);
                     self.interrupt_orphaned_runtime(session_id, cx);
                 }
             }
@@ -1214,7 +1251,7 @@ impl Michelle {
                 .retain(|block| !block.activities.is_empty());
         }
         if let Some(checkpoint) = checkpoint {
-            self.pending_checkpoint_captures.push(checkpoint);
+            self.sessions.checkpoints.pending.push(checkpoint);
             self.start_pending_checkpoint_captures(cx);
         }
         if self.state.selected_session == Some(session_id) {
@@ -1226,7 +1263,7 @@ impl Michelle {
     }
 
     pub fn composer_focus(&self, cx: &App) -> FocusHandle {
-        self.composer.read(cx).focus()
+        self.composer_ui.input.read(cx).focus()
     }
 
     pub(super) fn selected_project(&self) -> Option<&Project> {
@@ -1266,256 +1303,10 @@ impl Michelle {
     }
 
     pub(super) fn selected_runtime(&self) -> Option<&SessionRuntime> {
-        self.runtimes.get(&self.state.selected_session?)
-    }
-
-    pub(super) fn provider_probe(&self, provider: ProviderKind) -> Option<&ProviderProbe> {
-        self.probes.iter().find(|probe| probe.provider == provider)
-    }
-
-    pub(super) fn request_provider_model_discovery(&mut self, provider: ProviderKind) {
-        if !provider.supports_model_discovery()
-            || self.provider_model_discoveries.contains(&provider)
-        {
-            return;
-        }
-        let Some(probe) = self
-            .provider_probe(provider)
-            .filter(|probe| probe.installed)
-            .cloned()
-        else {
-            return;
-        };
-        self.provider_model_discoveries.insert(provider);
-        self.provider_model_discoveries_pending.insert(provider);
-        let provider_probe_tx = self.provider_probe_tx.clone();
-        let event_wake = self.event_wake_tx.clone();
-        let daemon = self.daemon.client();
-        let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
-        if std::thread::Builder::new()
-            .name(format!("michelle-{}-model-discovery", provider.id()))
-            .spawn(move || {
-                let discovered = match daemon.request(
-                    Uuid::nil(),
-                    Uuid::nil(),
-                    michelle_client::Command::ProbeProvider {
-                        provider,
-                        binary_override,
-                        discover_models: true,
-                        probe_version: false,
-                    },
-                ) {
-                    Ok(michelle_client::ResponsePayload::ProviderProbe { probe, .. }) => probe,
-                    _ => probe,
-                };
-                if provider_probe_tx.send(discovered).is_ok() {
-                    signal_event_pump(&event_wake);
-                }
-            })
-            .is_err()
-        {
-            self.provider_model_discoveries.remove(&provider);
-            self.provider_model_discoveries_pending.remove(&provider);
-        }
-    }
-
-    /// Re-run one provider's model-owned catalog discovery, for selectors whose
-    /// contents can change while Michelle stays open — models the user just
-    /// authored in a provider's config, or DeepSeek's custom agent presets.
-    /// The stale catalog stays on screen until the fresh probe lands, so an
-    /// open menu never blanks into a loading state while it refreshes.
-    pub(super) fn refresh_provider_model_discovery(&mut self, provider: ProviderKind) {
-        if self.provider_model_discoveries_pending.contains(&provider) {
-            return;
-        }
-        self.provider_model_discoveries.remove(&provider);
-        self.request_provider_model_discovery(provider);
-    }
-
-    /// Ask every installed CLI for its version, one short-lived subprocess per
-    /// provider on its own thread. Answers land in `provider_versions` through
-    /// the drain loop; render reads only that map.
-    pub(super) fn request_provider_version_probes(&mut self) {
-        let targets = self
-            .probes
-            .iter()
-            .filter(|probe| probe.installed)
-            .map(|probe| probe.provider)
-            .collect::<Vec<_>>();
-        for provider in targets {
-            if !self.provider_version_probes_pending.insert(provider) {
-                continue;
-            }
-            let provider_version_tx = self.provider_version_tx.clone();
-            let event_wake = self.event_wake_tx.clone();
-            let daemon = self.daemon.client();
-            let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
-            if std::thread::Builder::new()
-                .name(format!("michelle-{}-version-probe", provider.id()))
-                .spawn(move || {
-                    let version = match daemon.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        michelle_client::Command::ProbeProvider {
-                            provider,
-                            binary_override,
-                            discover_models: false,
-                            probe_version: true,
-                        },
-                    ) {
-                        Ok(michelle_client::ResponsePayload::ProviderProbe { version, .. }) => {
-                            version
-                        }
-                        _ => None,
-                    };
-                    if provider_version_tx.send((provider, version)).is_ok() {
-                        signal_event_pump(&event_wake);
-                    }
-                })
-                .is_err()
-            {
-                self.provider_version_probes_pending.remove(&provider);
-            }
-        }
-    }
-
-    pub(super) fn drain_provider_version_events(&mut self) -> bool {
-        let mut changed = false;
-        while let Ok((provider, version)) = self.provider_version_events.try_recv() {
-            self.provider_version_probes_pending.remove(&provider);
-            self.provider_versions.insert(provider, version);
-            changed = true;
-        }
-        changed
-    }
-
-    /// Re-detect provider CLIs off-thread — every provider for the Providers
-    /// page's refresh, or one whose binary override just changed. Also re-runs
-    /// model discovery and version probes for whatever the detection finds
-    /// installed.
-    pub(super) fn refresh_provider_detection(&mut self, scope: Option<ProviderKind>) {
-        if self.provider_detection_remaining > 0 {
-            return;
-        }
-        let providers = match scope {
-            Some(provider) => vec![provider],
-            None => ProviderKind::ALL.to_vec(),
-        };
-        self.provider_detection_remaining = providers.len();
-        let overrides = self.state.provider_binary_overrides.clone();
-        let provider_detection_tx = self.provider_detection_tx.clone();
-        let event_wake = self.event_wake_tx.clone();
-        let detect_providers = providers.clone();
-        let daemon = self.daemon.client();
-        if std::thread::Builder::new()
-            .name("michelle-provider-detection".into())
-            .spawn(move || {
-                for provider in detect_providers {
-                    let response = daemon.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        michelle_client::Command::ProbeProvider {
-                            provider,
-                            binary_override: overrides.get(&provider).cloned(),
-                            discover_models: false,
-                            probe_version: false,
-                        },
-                    );
-                    let probe = match response {
-                        Ok(michelle_client::ResponsePayload::ProviderProbe { probe, .. }) => probe,
-                        _ => ProviderProbe {
-                            provider,
-                            installed: false,
-                            path: None,
-                            models: crate::model_catalog::fallback_models(provider),
-                            agent_presets: crate::model_catalog::fallback_agent_presets(provider),
-                        },
-                    };
-                    if provider_detection_tx.send(probe).is_ok() {
-                        signal_event_pump(&event_wake);
-                    }
-                }
-            })
-            .is_err()
-        {
-            self.provider_detection_remaining = 0;
-            return;
-        }
-        // A refresh means "re-check everything about these providers":
-        // clearing the per-launch guard lets each one's catalog discovery run
-        // again as its detection lands below.
-        for provider in providers {
-            self.provider_model_discoveries.remove(&provider);
-        }
-    }
-
-    pub(super) fn drain_provider_detection_events(&mut self) -> bool {
-        let mut changed = false;
-        let mut installed_providers = Vec::new();
-        while let Ok(probe) = self.provider_detection_events.try_recv() {
-            let provider = probe.provider;
-            let installed = probe.installed;
-            self.provider_detection_remaining = self.provider_detection_remaining.saturating_sub(1);
-            if self.provider_detection_remaining == 0 {
-                self.provider_detection_checked_at = Some(Instant::now());
-            }
-            if let Some(existing) = self
-                .probes
-                .iter_mut()
-                .find(|existing| existing.provider == provider)
-            {
-                if self.provider_model_discoveries_pending.contains(&provider) {
-                    // A manual refresh may overlap an older live discovery.
-                    // Keep that newer catalog while still accepting PATH
-                    // detection from this response.
-                    existing.installed = probe.installed;
-                    existing.path = probe.path;
-                } else {
-                    *existing = probe;
-                }
-            } else {
-                self.probes.push(probe);
-            }
-            if installed {
-                installed_providers.push(provider);
-            } else {
-                self.provider_versions.remove(&provider);
-            }
-            changed = true;
-        }
-        for provider in installed_providers {
-            self.request_provider_model_discovery(provider);
-        }
-        if changed {
-            self.request_provider_version_probes();
-        }
-        changed
-    }
-
-    /// Whether the provider can back a new session: installed and not switched
-    /// off in the Providers settings.
-    pub(super) fn provider_enabled(&self, provider: ProviderKind) -> bool {
-        !self.state.disabled_providers.contains(&provider)
-            && self
-                .provider_probe(provider)
-                .is_some_and(|probe| probe.installed)
-    }
-
-    /// Whether the model picker has no provider left to offer — nothing
-    /// detected on this machine, or everything switched off — so the
-    /// composer's trigger, the picker panel, and the send button all swap to
-    /// their unavailable state.
-    pub(super) fn model_picker_has_no_providers(&self) -> bool {
-        let locked_provider = self
-            .selected_session()
-            .filter(|session| !session.messages.is_empty())
-            .map(|session| session.provider);
-        super::composer::picker_has_no_providers(
-            &self.probes,
-            &self.state.disabled_providers,
-            locked_provider,
-            self.provider_detection_checked_at.is_some(),
-        )
+        self.sessions
+            .runtime
+            .runtimes
+            .get(&self.state.selected_session?)
     }
 
     pub(super) fn model_for_session<'a>(&'a self, session: &'a AgentSession) -> Option<&'a str> {
@@ -1560,7 +1351,7 @@ impl Michelle {
     }
 
     pub(super) fn save(&mut self) {
-        self.last_stream_save = Instant::now();
+        self.sessions.runtime.last_stream_save = Instant::now();
         let daemon_error = self
             .daemon
             .update_settings(self.state.daemon_settings())
@@ -1574,193 +1365,7 @@ impl Michelle {
         if let Some(error) = daemon_error.or(app_error) {
             self.show_toast(tr!("errors.save_local_state", error = error));
         } else {
-            self.stream_state_dirty = false;
-        }
-    }
-
-    fn checkpoint_capture_pending(&self, session_id: Uuid, turn_count: usize) -> bool {
-        self.checkpoint_captures_in_flight
-            .contains(&(session_id, turn_count))
-            || self
-                .pending_checkpoint_captures
-                .iter()
-                .any(|capture| capture.session_id == session_id && capture.turn_count == turn_count)
-    }
-
-    fn ending_checkpoint_pending(&self, session_id: Uuid) -> bool {
-        self.state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .and_then(|session| session.turns.last())
-            .filter(|turn| turn.status != TurnStatus::Running)
-            .is_some_and(|turn| self.checkpoint_capture_pending(session_id, turn.turn_count))
-    }
-
-    fn defer_queue_drain(&mut self, session_id: Uuid) {
-        if !self.pending_queue_drains.contains(&session_id) {
-            self.pending_queue_drains.push(session_id);
-        }
-    }
-
-    /// Queues the newest finished turn's checkpoint for capture.
-    ///
-    /// Bookkeeping only. The capture itself is upwards of ten `git`
-    /// invocations, one of them a `git add -A` over the whole worktree, and the
-    /// hottest caller is the driver-event drain that shares the UI thread with
-    /// rendering — so the work belongs to
-    /// [`Self::start_pending_checkpoint_captures`], which every caller that
-    /// holds a `Context` runs straight after queueing.
-    pub(super) fn capture_latest_turn_checkpoint_for(&mut self, session_id: Uuid) {
-        let Some((session, turn_count)) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .and_then(|session| {
-                session
-                    .turns
-                    .last()
-                    .filter(|turn| turn.status != TurnStatus::Running)
-                    .map(|turn| (session, turn.turn_count))
-            })
-        else {
-            return;
-        };
-        if self.checkpoint_capture_pending(session_id, turn_count) {
-            return;
-        }
-        let Some(project_path) = self
-            .workspace_path_for_session(session)
-            .map(std::path::Path::to_path_buf)
-        else {
-            return;
-        };
-        self.pending_checkpoint_captures
-            .push(PendingCheckpointCapture {
-                session_id,
-                turn_count,
-                project_path,
-            });
-    }
-
-    /// Runs queued turn checkpoints on the background executor.
-    ///
-    /// A capture lands a frame or many later, and the turn it belongs to may be
-    /// gone by then, so the result is matched back by turn count rather than
-    /// position. Nothing on screen waits for it: the transcript's rewind
-    /// affordance appears when `invalidate_checkpoint_refs` prompts the next
-    /// prefetch to notice the new ref.
-    pub(super) fn start_pending_checkpoint_captures(&mut self, cx: &mut Context<Self>) {
-        for request in std::mem::take(&mut self.pending_checkpoint_captures) {
-            let PendingCheckpointCapture {
-                session_id,
-                turn_count,
-                project_path,
-            } = request;
-            if !self
-                .checkpoint_captures_in_flight
-                .insert((session_id, turn_count))
-            {
-                continue;
-            }
-            let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-            cx.spawn(async move |michelle, cx| {
-                let captured = cx
-                    .background_executor()
-                    .spawn({
-                        let project_path = project_path.clone();
-                        async move {
-                            match workspace.request(
-                                michelle_client::WorkspaceOperation::CaptureTurn {
-                                    cwd: project_path,
-                                    session_id,
-                                    turn_count,
-                                },
-                            )? {
-                                michelle_client::WorkspaceResult::Checkpoint { checkpoint } => {
-                                    Ok(checkpoint)
-                                }
-                                _ => anyhow::bail!(
-                                    "the daemon returned an invalid checkpoint response"
-                                ),
-                            }
-                        }
-                    })
-                    .await;
-                michelle
-                    .update(cx, |michelle, cx| {
-                        michelle
-                            .checkpoint_captures_in_flight
-                            .remove(&(session_id, turn_count));
-                        let selected = michelle.state.selected_session == Some(session_id);
-                        if selected {
-                            michelle.sync_transcript_rows();
-                        }
-                        let previous_kinds = if selected {
-                            michelle.transcript_row_kinds.borrow().clone()
-                        } else {
-                            Vec::new()
-                        };
-                        let checkpoint = match captured {
-                            Ok(checkpoint) => checkpoint,
-                            Err(error) => {
-                                michelle.show_toast(tr!(
-                                    "errors.capture_turn_checkpoint",
-                                    error = error
-                                ));
-                                Checkpoint {
-                                    turn_count,
-                                    git_ref: checkpoint::checkpoint_ref(session_id, turn_count),
-                                    status: CheckpointStatus::Error,
-                                    files: Vec::new(),
-                                    additions: 0,
-                                    deletions: 0,
-                                    created_at: unix_time(),
-                                }
-                            }
-                        };
-                        michelle.invalidate_checkpoint_refs();
-                        let mut attached_turn_id = None;
-                        if let Some(session) = michelle.state.session_mut(session_id)
-                            && let Some(turn) = session
-                                .turns
-                                .iter_mut()
-                                .find(|turn| turn.turn_count == turn_count)
-                        {
-                            turn.checkpoint = Some(checkpoint);
-                            attached_turn_id = Some(turn.id);
-                        }
-                        if let Some(turn_id) = attached_turn_id
-                            && selected
-                        {
-                            // Reconcile a standalone card by row identity, then
-                            // remeasure the terminal response when the card is
-                            // hosted inline before its footer.
-                            michelle
-                                .splice_transcript_rows_after_visibility_change(&previous_kinds);
-                            michelle.remeasure_changed_files(turn_id);
-                        }
-                        let resume_queue = michelle.pending_queue_drains.contains(&session_id);
-                        if resume_queue {
-                            michelle.pending_queue_drains.retain(|id| *id != session_id);
-                            michelle.drain_queued_message(session_id, cx);
-                        }
-                        cx.notify();
-                        if attached_turn_id.is_some() {
-                            // Let the new transcript row paint before SQLite work.
-                            // Without this save, a checkpoint that lands after the
-                            // turn's final stream save can disappear on relaunch.
-                            cx.spawn(async move |michelle, cx| {
-                                cx.background_executor().timer(STREAM_FRAME_INTERVAL).await;
-                                let _ = michelle.update(cx, |michelle, _| michelle.save());
-                            })
-                            .detach();
-                        }
-                    })
-                    .ok();
-            })
-            .detach();
+            self.sessions.runtime.stream_state_dirty = false;
         }
     }
 
@@ -1770,8 +1375,16 @@ impl Michelle {
         turn_count: usize,
         cx: &mut Context<Self>,
     ) {
-        if self.response_fork_preparations.contains_key(&session_id)
-            || self.submission_preparations.contains(&session_id)
+        if self
+            .sessions
+            .runtime
+            .response_fork_preparations
+            .contains_key(&session_id)
+            || self
+                .sessions
+                .runtime
+                .submission_preparations
+                .contains(&session_id)
         {
             self.show_toast(tr!("session.response_cannot_fork"));
             cx.notify();
@@ -1827,6 +1440,8 @@ impl Michelle {
             .count();
         let turns_to_remove = source.provider_turns_after(turn_count);
         let driver = self
+            .sessions
+            .runtime
             .runtimes
             .get(&session_id)
             .map(|runtime| runtime.driver.clone());
@@ -1837,7 +1452,9 @@ impl Michelle {
             _ => None,
         };
         let binary = binary_provider.and_then(|_| {
-            self.probes
+            self.settings
+                .providers
+                .probes
                 .iter()
                 .find(|probe| probe.provider == provider)
                 .and_then(|probe| probe.path.clone())
@@ -1881,7 +1498,9 @@ impl Michelle {
             driver_start,
         };
 
-        self.response_fork_preparations
+        self.sessions
+            .runtime
+            .response_fork_preparations
             .insert(session_id, turn_count);
         self.hide_toast();
         cx.notify();
@@ -1906,10 +1525,19 @@ impl Michelle {
         result: Result<PreparedResponseFork, String>,
         cx: &mut Context<Self>,
     ) {
-        if self.response_fork_preparations.get(&session_id) != Some(&turn_count) {
+        if self
+            .sessions
+            .runtime
+            .response_fork_preparations
+            .get(&session_id)
+            != Some(&turn_count)
+        {
             return;
         }
-        self.response_fork_preparations.remove(&session_id);
+        self.sessions
+            .runtime
+            .response_fork_preparations
+            .remove(&session_id);
 
         let PreparedResponseFork {
             forked,
@@ -1922,7 +1550,7 @@ impl Michelle {
                     // A failed restore after one of these creates a fork can
                     // leave the resident RPC process on that fork. Recreate it
                     // lazily from the source cursor on its next prompt.
-                    if let Some(runtime) = self.runtimes.remove(&session_id) {
+                    if let Some(runtime) = self.sessions.runtime.runtimes.remove(&session_id) {
                         runtime.driver.close();
                     }
                 }
@@ -1934,7 +1562,7 @@ impl Michelle {
         };
 
         if let Some(prepared) = prepared_driver
-            && !self.runtimes.contains_key(&session_id)
+            && !self.sessions.runtime.runtimes.contains_key(&session_id)
         {
             self.install_prepared_driver(session_id, prepared);
         }
@@ -1962,7 +1590,7 @@ impl Michelle {
         prompt: String,
         cx: &mut Context<Self>,
     ) {
-        let composer = self.composer.clone();
+        let composer = self.composer_ui.input.clone();
         cx.spawn(async move |michelle, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(1))
@@ -2048,7 +1676,7 @@ impl Michelle {
             },
         )
         .detach();
-        self.message_edit = Some(MessageEdit {
+        self.transcript_ui.message_edit = Some(MessageEdit {
             session_id,
             message_id,
             turn_count,
@@ -2064,13 +1692,19 @@ impl Michelle {
 
     pub(super) fn cancel_message_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self
+            .transcript_ui
             .message_edit
             .as_ref()
-            .is_some_and(|edit| self.submission_preparations.contains(&edit.session_id))
+            .is_some_and(|edit| {
+                self.sessions
+                    .runtime
+                    .submission_preparations
+                    .contains(&edit.session_id)
+            })
         {
             return;
         }
-        let Some(edit) = self.message_edit.take() else {
+        let Some(edit) = self.transcript_ui.message_edit.take() else {
             return;
         };
         let message_index = self.selected_session().and_then(|session| {
@@ -2089,6 +1723,7 @@ impl Michelle {
 
     pub(super) fn submit_message_edit(&mut self, cx: &mut Context<Self>) {
         let prompt = self
+            .transcript_ui
             .message_edit
             .as_ref()
             .map(|edit| edit.input.read(cx).content(cx).to_owned())
@@ -2097,10 +1732,15 @@ impl Michelle {
     }
 
     fn submit_message_edit_prompt(&mut self, prompt: String, cx: &mut Context<Self>) {
-        let Some(edit) = self.message_edit.clone() else {
+        let Some(edit) = self.transcript_ui.message_edit.clone() else {
             return;
         };
-        if self.submission_preparations.contains(&edit.session_id) {
+        if self
+            .sessions
+            .runtime
+            .submission_preparations
+            .contains(&edit.session_id)
+        {
             return;
         }
         // Keyboard submission clears ComposerInput after emitting its event.
@@ -2117,7 +1757,7 @@ impl Michelle {
             .iter()
             .map(|attachment| attachment.mention.clone())
             .collect::<Vec<_>>();
-        let provider_prompt = composer::merged_submission(&prompt, &mentions)
+        let provider_prompt = composer::model::merged_submission(&prompt, &mentions)
             .expect("edited text or retained attachments always form a submission");
         let display_content = (!edit.attachments.is_empty()).then_some(prompt);
         self.start_message_rewind(
@@ -2196,6 +1836,8 @@ impl Michelle {
             .and_then(|index| source.turns.get(index))
             .and_then(|turn| turn.provider_resume_at.clone());
         let driver = self
+            .sessions
+            .runtime
             .runtimes
             .get(&session_id)
             .map(|runtime| runtime.driver.clone());
@@ -2205,7 +1847,9 @@ impl Michelle {
                 || (source.provider == ProviderKind::Grok && retained_turn_count > 0));
         let binary = needs_binary
             .then(|| {
-                self.probes
+                self.settings
+                    .providers
+                    .probes
                     .iter()
                     .find(|probe| probe.provider == source.provider)
                     .and_then(|probe| probe.path.clone())
@@ -2304,8 +1948,11 @@ impl Michelle {
             cx.notify();
             return;
         };
-        self.message_edit = None;
-        self.submission_preparations.insert(session_id);
+        self.transcript_ui.message_edit = None;
+        self.sessions
+            .runtime
+            .submission_preparations
+            .insert(session_id);
         self.hide_toast();
         self.remeasure_transcript_message(edited_message_index);
         cx.notify();
@@ -2342,7 +1989,12 @@ impl Michelle {
     ) {
         let session_id = edit.session_id;
         let turn_count = edit.turn_count;
-        if !self.submission_preparations.remove(&session_id) {
+        if !self
+            .sessions
+            .runtime
+            .submission_preparations
+            .remove(&session_id)
+        {
             return;
         }
         let selected = self.state.selected_session == Some(session_id);
@@ -2361,8 +2013,8 @@ impl Michelle {
                         session.status = previous_status;
                     }
                 }
-                if selected && self.message_edit.is_none() {
-                    self.message_edit = Some(edit.clone());
+                if selected && self.transcript_ui.message_edit.is_none() {
+                    self.transcript_ui.message_edit = Some(edit.clone());
                 }
                 if selected
                     && let Some(message_index) = self.selected_session().and_then(|session| {
@@ -2400,7 +2052,7 @@ impl Michelle {
             self.sync_transcript_rows();
         }
         let previous_kinds = if selected {
-            self.transcript_row_kinds.borrow().clone()
+            self.transcript_model.row_kinds.borrow().clone()
         } else {
             Vec::new()
         };
@@ -2448,11 +2100,11 @@ impl Michelle {
         {
             // Headless drivers retain their original native session ID. Recreate
             // them lazily so the next prompt resumes the fork instead.
-            if let Some(runtime) = self.runtimes.remove(&session_id) {
+            if let Some(runtime) = self.sessions.runtime.runtimes.remove(&session_id) {
                 runtime.driver.close();
             }
             self.mark_background_work_lost(session_id);
-        } else if let Some(runtime) = self.runtimes.get_mut(&session_id) {
+        } else if let Some(runtime) = self.sessions.runtime.runtimes.get_mut(&session_id) {
             runtime
                 .pending_events
                 .retain(|event| matches!(event, DriverEvent::BackgroundWork(_)));
@@ -2464,18 +2116,19 @@ impl Michelle {
         }
         self.invalidate_checkpoint_refs();
         if self
+            .transcript_ui
             .message_edit
             .as_ref()
             .is_some_and(|current| current.session_id == session_id)
         {
-            self.message_edit = None;
+            self.transcript_ui.message_edit = None;
         }
         if selected {
-            self.activities_expanded.clear();
-            self.expanded_activity_items.clear();
-            self.expanded_turns.clear();
-            self.expanded_changed_files.clear();
-            self.transcript_control_focuses.borrow_mut().clear();
+            self.transcript_ui.activities_expanded.clear();
+            self.transcript_ui.expanded_activity_items.clear();
+            self.transcript_ui.expanded_turns.clear();
+            self.transcript_ui.expanded_changed_files.clear();
+            self.transcript_ui.control_focuses.borrow_mut().clear();
             self.splice_transcript_rows_after_visibility_change(&previous_kinds);
             self.show_toast(match cleanup_error {
                 None => tr!("session.rewound", turn = turn_count),
@@ -2580,11 +2233,13 @@ impl Michelle {
     /// work the next prompt already does after Stop, and the resume cursor is
     /// persisted, so the conversation survives.
     pub(super) fn reap_idle_sessions(&mut self) {
-        if self.last_idle_session_sweep.elapsed() < IDLE_SESSION_SWEEP_INTERVAL {
+        if self.sessions.runtime.last_idle_session_sweep.elapsed() < IDLE_SESSION_SWEEP_INTERVAL {
             return;
         }
-        self.last_idle_session_sweep = Instant::now();
+        self.sessions.runtime.last_idle_session_sweep = Instant::now();
         let idle = self
+            .sessions
+            .runtime
             .runtimes
             .iter()
             .filter(|(session_id, runtime)| {
@@ -2605,7 +2260,7 @@ impl Michelle {
             // Idle reaping is an explicit daemon-runtime release. Merely
             // dropping a client attachment must not stop work observed by a
             // second desktop or browser client.
-            if let Some(runtime) = self.runtimes.remove(&session_id) {
+            if let Some(runtime) = self.sessions.runtime.runtimes.remove(&session_id) {
                 runtime.driver.close();
             }
         }
@@ -2624,7 +2279,7 @@ impl Michelle {
         else {
             return;
         };
-        let Some(runtime) = self.runtimes.get_mut(&session_id) else {
+        let Some(runtime) = self.sessions.runtime.runtimes.get_mut(&session_id) else {
             return;
         };
         runtime.options_generation = runtime.options_generation.wrapping_add(1);
@@ -2637,6 +2292,8 @@ impl Michelle {
                 .await;
             let _ = michelle.update(cx, |michelle, cx| {
                 let is_current = michelle
+                    .sessions
+                    .runtime
                     .runtimes
                     .get(&session_id)
                     .is_some_and(|runtime| runtime.options_generation == generation);
@@ -2655,6 +2312,8 @@ impl Michelle {
         cwd: PathBuf,
     ) -> anyhow::Result<DriverStartRequest> {
         let binary = self
+            .settings
+            .providers
             .probes
             .iter()
             .find(|probe| probe.provider == session.provider)
@@ -2688,7 +2347,7 @@ impl Michelle {
                 computer_use_enabled: self.state.computer_use_enabled,
                 provider_cursor: session.provider_cursor.clone(),
             },
-            event_wake: self.event_wake_tx.clone(),
+            event_wake: self.sessions.runtime.event_wake_tx.clone(),
             daemon: self.daemon.clone(),
         })
     }
@@ -2700,10 +2359,14 @@ impl Michelle {
     /// drain once the runtime installs. The session stays `Idle` throughout —
     /// no turn begins and nothing lands in the transcript.
     pub(super) fn start_goal_runtime(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.runtimes.contains_key(&session_id)
-            || self.goal_runtime_starts.contains(&session_id)
-            || self.submission_preparations.contains(&session_id)
-            || self.sidebar_session_moves.contains(&session_id)
+        if self.sessions.runtime.runtimes.contains_key(&session_id)
+            || self.goal_model.runtime_starts.contains(&session_id)
+            || self
+                .sessions
+                .runtime
+                .submission_preparations
+                .contains(&session_id)
+            || self.sidebar_model.session_moves.contains(&session_id)
         {
             // An installed or installing runtime picks the queue up when the
             // install path drains pending goal operations.
@@ -2715,7 +2378,7 @@ impl Michelle {
             .iter()
             .find(|session| session.id == session_id)
         else {
-            self.pending_goal_operations.remove(&session_id);
+            self.goal_model.pending_operations.remove(&session_id);
             return;
         };
         let project_id = session.project_id;
@@ -2733,7 +2396,7 @@ impl Michelle {
             .find(|project| project.id == project_id)
             .cloned()
         else {
-            self.pending_goal_operations.remove(&session_id);
+            self.goal_model.pending_operations.remove(&session_id);
             self.show_toast(tr!("errors.prepare_task_project_not_found"));
             cx.notify();
             return;
@@ -2741,7 +2404,8 @@ impl Michelle {
         // A fresh worktree task names its branch after the first prompt; when
         // the goal arrives first, the objective is that intent.
         let naming_prompt = self
-            .pending_goal_operations
+            .goal_model
+            .pending_operations
             .get(&session_id)
             .into_iter()
             .flatten()
@@ -2754,7 +2418,7 @@ impl Michelle {
                 _ => None,
             })
             .unwrap_or_else(|| tr!("goal.title"));
-        self.goal_runtime_starts.insert(session_id);
+        self.goal_model.runtime_starts.insert(session_id);
         cx.notify();
         let workspace_client = michelle_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |michelle, cx| {
@@ -2785,7 +2449,7 @@ impl Michelle {
         prepared: anyhow::Result<PreparedSubmission>,
         cx: &mut Context<Self>,
     ) {
-        if !self.goal_runtime_starts.remove(&session_id) {
+        if !self.goal_model.runtime_starts.remove(&session_id) {
             return;
         }
         let prepared = match prepared {
@@ -2794,7 +2458,7 @@ impl Michelle {
                 // The goal is lost but nothing else is: messages queued
                 // behind this start resubmit through the ordinary path,
                 // which starts its own runtime.
-                self.pending_goal_operations.remove(&session_id);
+                self.goal_model.pending_operations.remove(&session_id);
                 self.unwind_unconfirmed_pursuit_turn(session_id);
                 self.show_toast(error.to_string());
                 self.drain_queued_message(session_id, cx);
@@ -2814,7 +2478,7 @@ impl Michelle {
             .any(|session| session.id == session_id)
         {
             // The task was removed while its provider was starting.
-            self.pending_goal_operations.remove(&session_id);
+            self.goal_model.pending_operations.remove(&session_id);
             if let Some(Ok(prepared)) = driver {
                 prepared.handle.close();
             }
@@ -2832,7 +2496,7 @@ impl Michelle {
         }
         match driver {
             Some(Ok(prepared)) => {
-                if self.runtimes.contains_key(&session_id) {
+                if self.sessions.runtime.runtimes.contains_key(&session_id) {
                     // Another path installed a runtime meanwhile; that thread
                     // is the session's, so the goal routes there instead.
                     prepared.handle.close();
@@ -2844,7 +2508,7 @@ impl Michelle {
             }
             None => self.drain_pending_goal_operations(session_id),
             Some(Err(error)) => {
-                self.pending_goal_operations.remove(&session_id);
+                self.goal_model.pending_operations.remove(&session_id);
                 self.unwind_unconfirmed_pursuit_turn(session_id);
                 self.show_toast(error.to_string());
                 self.drain_queued_message(session_id, cx);
@@ -2863,7 +2527,7 @@ impl Michelle {
         prepared: PreparedDriver,
     ) -> DriverHandle {
         let handle = prepared.handle.clone();
-        self.runtimes.insert(
+        self.sessions.runtime.runtimes.insert(
             session_id,
             SessionRuntime {
                 driver: prepared.handle,
@@ -2889,7 +2553,7 @@ impl Michelle {
         // Startup can emit before the background task hands this receiver to
         // the runtime map. Wake once after installation so those buffered
         // events cannot be stranded behind an already-consumed edge.
-        signal_event_pump(&self.event_wake_tx);
+        signal_event_pump(&self.sessions.runtime.event_wake_tx);
         // Goal operations accepted while no runtime existed ride the first
         // install, whichever path performed it. The driver applies them once
         // its thread opens, before any queued prompt.
@@ -2905,7 +2569,12 @@ impl Michelle {
         let Some(session) = self.selected_session() else {
             return;
         };
-        if self.response_fork_preparations.contains_key(&session.id) {
+        if self
+            .sessions
+            .runtime
+            .response_fork_preparations
+            .contains_key(&session.id)
+        {
             return;
         }
         if session.status == SessionStatus::Background {
@@ -2947,7 +2616,7 @@ impl Michelle {
             return;
         }
         let provider_prompt = self.resolve_skill_submission(session.provider, &submission.prompt);
-        if let Some(runtime) = self.runtimes.get_mut(&session.id) {
+        if let Some(runtime) = self.sessions.runtime.runtimes.get_mut(&session.id) {
             runtime.driver.steer(provider_prompt);
             runtime.pending_steers.push_back(submission);
         } else {
@@ -2959,6 +2628,8 @@ impl Michelle {
     pub(super) fn session_can_steer(&self, session: &AgentSession) -> bool {
         session_has_active_provider_turn(session)
             && self
+                .sessions
+                .runtime
                 .runtimes
                 .get(&session.id)
                 .is_some_and(|runtime| runtime.driver.supports_steer())
@@ -2967,8 +2638,12 @@ impl Michelle {
     /// Resolve presentation-preserving composer syntax immediately before a
     /// prompt crosses into a provider transport.
     fn resolve_provider_submission(&self, provider: ProviderKind, prompt: &str) -> String {
-        crate::composer_complete::resolved_submission(provider, prompt, &self.slash_command_index)
-            .unwrap_or_else(|| prompt.to_owned())
+        crate::composer_complete::resolved_submission(
+            provider,
+            prompt,
+            &self.composer_model.sources.slash_command_index,
+        )
+        .unwrap_or_else(|| prompt.to_owned())
     }
 
     /// Resolve only provider-native skill syntax for a live steering message.
@@ -2976,154 +2651,23 @@ impl Michelle {
         crate::composer_complete::resolved_skill_submission(
             provider,
             prompt,
-            &self.slash_command_index,
+            &self.composer_model.sources.slash_command_index,
         )
         .unwrap_or_else(|| prompt.to_owned())
     }
 
-    pub(super) fn enqueue_follow_up_submission(
-        &mut self,
-        session_id: Uuid,
-        mut submission: ComposerSubmission,
-        cx: &mut Context<Self>,
-    ) {
-        submission.prompt = submission.prompt.trim().to_owned();
-        if submission.prompt.is_empty() {
-            return;
-        }
-        if let Some(session) = self.state.session_mut(session_id) {
-            session
-                .queued_messages
-                .push(submission.into_queued_message());
-            session.updated_at = unix_time();
-        }
-        self.save();
-        cx.notify();
-    }
-
-    pub(super) fn remove_queued_message(
-        &mut self,
-        session_id: Uuid,
-        message_id: Uuid,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(session) = self.state.session_mut(session_id) {
-            session
-                .queued_messages
-                .retain(|message| message.id != message_id);
-        }
-        self.save();
-        cx.notify();
-    }
-
-    /// Pop a queued message back into the composer so the user can edit and
-    /// resubmit it.
-    pub(super) fn edit_queued_message(
-        &mut self,
-        session_id: Uuid,
-        message_id: Uuid,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(message) = self.state.session_mut(session_id).and_then(|session| {
-            let index = session
-                .queued_messages
-                .iter()
-                .position(|message| message.id == message_id)?;
-            Some(session.queued_messages.remove(index))
-        }) else {
-            return;
-        };
-        self.restore_composer_submission(ComposerSubmission::from_queued_message(message), cx);
-        let focus_handle = self.composer_focus(cx);
-        window.focus(&focus_handle, cx);
-        self.save();
-        cx.notify();
-    }
-
-    /// Deliver a queued follow-up into the running turn right away instead of
-    /// waiting for the turn to settle. Falls through the same paths as a
-    /// composer steer: an idle session starts a fresh turn, an unsteerable
-    /// one re-queues the message.
-    pub(super) fn steer_queued_message(
-        &mut self,
-        session_id: Uuid,
-        message_id: Uuid,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(message) = self.state.session_mut(session_id).and_then(|session| {
-            let index = session
-                .queued_messages
-                .iter()
-                .position(|message| message.id == message_id)?;
-            Some(session.queued_messages.remove(index))
-        }) else {
-            return;
-        };
-        self.save();
-        self.steer_composer_submission(ComposerSubmission::from_queued_message(message), cx);
-    }
-
-    /// Activate the same action as the oldest queued row's Steer control.
-    /// When that control is unavailable, leave the queue untouched rather
-    /// than removing and re-queueing its first message at the back.
-    pub(super) fn steer_oldest_queued_message(&mut self, cx: &mut Context<Self>) {
-        let Some((session_id, message_id)) = self.selected_session().and_then(|session| {
-            if !self.session_can_steer(session) {
-                return None;
-            }
-            Some((session.id, session.queued_messages.first()?.id))
-        }) else {
-            return;
-        };
-        self.steer_queued_message(session_id, message_id, cx);
-    }
-
-    /// Start the next queued follow-up as a fresh turn. Only called once a
-    /// settled turn has been fully closed, so the session is Idle.
-    fn drain_queued_message(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.response_fork_preparations.contains_key(&session_id) {
-            return;
-        }
-        let Some(session) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-        else {
-            return;
-        };
-        if session.is_busy()
-            || session.queued_messages.is_empty()
-            || self.ending_checkpoint_pending(session_id)
-            // Messages parked behind a goal-initiated provider start stay
-            // queued until that runtime installs.
-            || self.goal_runtime_starts.contains(&session_id)
-        {
-            return;
-        }
-        let Some(message) = self
-            .state
-            .session_mut(session_id)
-            .map(|session| session.queued_messages.remove(0))
-        else {
-            return;
-        };
-        self.submit_submission_for_session(
-            session_id,
-            ComposerSubmission::from_queued_message(message),
-            cx,
-        );
-    }
-
-    fn submit_submission_for_session(
+    pub(super) fn submit_submission_for_session(
         &mut self,
         session_id: Uuid,
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
-        if self.response_fork_preparations.contains_key(&session_id)
-            || self.sidebar_session_moves.contains(&session_id)
+        if self
+            .sessions
+            .runtime
+            .response_fork_preparations
+            .contains_key(&session_id)
+            || self.sidebar_model.session_moves.contains(&session_id)
         {
             return;
         }
@@ -3144,7 +2688,7 @@ impl Michelle {
         // A goal operation is already starting this session's provider.
         // Queue the message so it lands on that thread — after the goal —
         // instead of racing a second provider process into existence.
-        if self.goal_runtime_starts.contains(&session_id) {
+        if self.goal_model.runtime_starts.contains(&session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
             return;
@@ -3158,7 +2702,7 @@ impl Michelle {
         let next_turn_count = session.turns.len() + 1;
         let project_id = session.project_id;
         let workspace = session.workspace.clone();
-        let driver_start = (!self.runtimes.contains_key(&session_id)).then(|| {
+        let driver_start = (!self.sessions.runtime.runtimes.contains_key(&session_id)).then(|| {
             let provisional_cwd = self
                 .workspace_path_for_session(session)
                 .map(std::path::Path::to_path_buf)
@@ -3192,7 +2736,7 @@ impl Michelle {
             self.sync_transcript_rows();
         }
         let previous_kinds = if selected {
-            self.transcript_row_kinds.borrow().clone()
+            self.transcript_model.row_kinds.borrow().clone()
         } else {
             Vec::new()
         };
@@ -3212,16 +2756,19 @@ impl Michelle {
         } else {
             None
         };
-        self.submission_preparations.insert(session_id);
+        self.sessions
+            .runtime
+            .submission_preparations
+            .insert(session_id);
         if selected {
-            self.activities_expanded.clear();
-            self.expanded_activity_items.clear();
-            self.expanded_turns.clear();
-            self.expanded_changed_files.clear();
-            self.transcript_control_focuses.borrow_mut().clear();
-            self.message_edit = None;
+            self.transcript_ui.activities_expanded.clear();
+            self.transcript_ui.expanded_activity_items.clear();
+            self.transcript_ui.expanded_turns.clear();
+            self.transcript_ui.expanded_changed_files.clear();
+            self.transcript_ui.control_focuses.borrow_mut().clear();
+            self.transcript_ui.message_edit = None;
             self.hide_toast();
-            self.transcript_anchor.set(transcript_anchor);
+            self.transcript_ui.anchor.set(transcript_anchor);
             // Provisional reservation: the anchored list has no measured
             // bounds until its first paint, and a zero end space cannot hold
             // the sent row at the viewport top — without scroll room past the
@@ -3229,12 +2776,17 @@ impl Michelle {
             // at the bottom before the first measured frame lifts it. Seed a
             // full viewport of end space instead; the overshoot is invisible
             // under the top anchor and the first measured frame trues it up.
-            let mut provisional = self.transcript_rows.viewport_bounds().size.height;
+            let mut provisional = self.transcript_ui.rows.viewport_bounds().size.height;
             if provisional <= Pixels::ZERO {
-                provisional = self.anchored_transcript_rows.viewport_bounds().size.height;
+                provisional = self
+                    .transcript_ui
+                    .anchored_transcript_rows
+                    .viewport_bounds()
+                    .size
+                    .height;
             }
-            self.transcript_anchor_end_space.set(provisional);
-            self.transcript_anchor_following.set(true);
+            self.transcript_ui.anchor_end_space.set(provisional);
+            self.transcript_ui.anchor_following.set(true);
             self.splice_transcript_rows_after_visibility_change(&previous_kinds);
             self.scroll_transcript_to_anchor();
         }
@@ -3271,19 +2823,27 @@ impl Michelle {
         prepared: anyhow::Result<PreparedSubmission>,
         cx: &mut Context<Self>,
     ) {
-        if !self.submission_preparations.contains(&session_id) {
+        if !self
+            .sessions
+            .runtime
+            .submission_preparations
+            .contains(&session_id)
+        {
             return;
         }
         let selected = self.state.selected_session == Some(session_id);
         let prepared = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
-                self.submission_preparations.remove(&session_id);
+                self.sessions
+                    .runtime
+                    .submission_preparations
+                    .remove(&session_id);
                 if selected {
                     self.sync_transcript_rows();
                 }
                 let previous_kinds = if selected {
-                    self.transcript_row_kinds.borrow().clone()
+                    self.transcript_model.row_kinds.borrow().clone()
                 } else {
                     Vec::new()
                 };
@@ -3300,12 +2860,13 @@ impl Michelle {
                 }
                 if selected {
                     if self
-                        .transcript_anchor
+                        .transcript_ui
+                        .anchor
                         .get()
                         .is_some_and(|anchor| anchor.session_id == session_id)
                     {
-                        self.transcript_anchor.set(None);
-                        self.transcript_anchor_following.set(false);
+                        self.transcript_ui.anchor.set(None);
+                        self.transcript_ui.anchor_following.set(false);
                     }
                     self.splice_transcript_rows_after_visibility_change(&previous_kinds);
                     self.restore_composer_submission(submission, cx);
@@ -3336,7 +2897,10 @@ impl Michelle {
                     })
             });
         if !can_start {
-            self.submission_preparations.remove(&session_id);
+            self.sessions
+                .runtime
+                .submission_preparations
+                .remove(&session_id);
             cx.notify();
             return;
         }
@@ -3353,6 +2917,8 @@ impl Michelle {
         }
         let driver = match prepared_driver {
             None => self
+                .sessions
+                .runtime
                 .runtimes
                 .get(&session_id)
                 .map(|runtime| runtime.driver.clone())
@@ -3361,7 +2927,7 @@ impl Michelle {
             Some(Err(error)) => Err(error),
         };
         self.invalidate_checkpoint_refs();
-        if let Some(runtime) = self.runtimes.get_mut(&session_id) {
+        if let Some(runtime) = self.sessions.runtime.runtimes.get_mut(&session_id) {
             runtime
                 .pending_events
                 .retain(|event| matches!(event, DriverEvent::BackgroundWork(_)));
@@ -3418,7 +2984,10 @@ impl Michelle {
         // From this point onward `cancel_turn` has either a live driver to
         // cancel or a settled startup failure. The next frame must therefore
         // show Stop (or Send after failure), never the preparation spinner.
-        self.submission_preparations.remove(&session_id);
+        self.sessions
+            .runtime
+            .submission_preparations
+            .remove(&session_id);
         if failed_to_start {
             self.capture_latest_turn_checkpoint_for(session_id);
             self.start_pending_checkpoint_captures(cx);
@@ -3453,10 +3022,10 @@ impl Michelle {
         {
             cx.notify();
         }
-        if std::mem::take(&mut self.workspace_queries_stale) {
+        if std::mem::take(&mut self.right_panel_model.workspace_queries_stale) {
             self.invalidate_workspace_queries(cx);
         }
-        if std::mem::take(&mut self.composer_sources_stale) {
+        if std::mem::take(&mut self.composer_model.sources.stale) {
             self.refresh_composer_sources(cx);
         }
         self.maybe_refresh_background_work(cx);
@@ -3465,6 +3034,8 @@ impl Michelle {
         self.start_pending_checkpoint_captures(cx);
 
         if self
+            .sessions
+            .runtime
             .runtimes
             .values()
             .any(|runtime| !runtime.pending_events.is_empty() || runtime.stream_remeasure_pending)
@@ -3477,46 +3048,20 @@ impl Michelle {
         }
     }
 
-    pub(super) fn drain_provider_probe_events(&mut self) -> bool {
-        let mut changed = false;
-        while let Ok(probe) = self.provider_probe_events.try_recv() {
-            self.provider_model_discoveries_pending
-                .remove(&probe.provider);
-            if let Some(existing) = self
-                .probes
-                .iter_mut()
-                .find(|existing| existing.provider == probe.provider)
-            {
-                *existing = probe;
-            } else {
-                self.probes.push(probe);
-            }
-            changed = true;
-        }
-        changed
-    }
-
-    pub(super) fn drain_computer_permission_events(&mut self) -> bool {
-        let mut changed = false;
-        while let Ok(result) = self.computer_permission_events.try_recv() {
-            self.computer_permission_request_pending = false;
-            match result {
-                Ok(permissions) => self.computer_permissions = permissions,
-                Err(error) => self.show_toast(error),
-            }
-            changed = true;
-        }
-        changed
-    }
-
     pub(super) fn drain_driver_events(&mut self, cx: &mut Context<Self>) -> bool {
-        let session_ids = self.runtimes.keys().copied().collect::<Vec<_>>();
+        let session_ids = self
+            .sessions
+            .runtime
+            .runtimes
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
         let mut changed = false;
         let mut persisted_state_changed = false;
         let mut force_save = false;
         let mut selected_changed = false;
         for session_id in session_ids {
-            let Some(mut runtime) = self.runtimes.remove(&session_id) else {
+            let Some(mut runtime) = self.sessions.runtime.runtimes.remove(&session_id) else {
                 continue;
             };
             let follow_up_remeasure = std::mem::take(&mut runtime.stream_remeasure_pending);
@@ -3579,7 +3124,7 @@ impl Michelle {
             }
             runtime.stream_remeasure_pending = markdown_changed;
             if keep_runtime {
-                self.runtimes.insert(session_id, runtime);
+                self.sessions.runtime.runtimes.insert(session_id, runtime);
             }
             changed |= runtime_changed || background_changed;
             persisted_state_changed |= runtime_changed;
@@ -3590,8 +3135,8 @@ impl Michelle {
             }
         }
 
-        if !self.pending_queue_drains.is_empty() {
-            let drains = std::mem::take(&mut self.pending_queue_drains);
+        if !self.sessions.runtime.pending_queue_drains.is_empty() {
+            let drains = std::mem::take(&mut self.sessions.runtime.pending_queue_drains);
             for session_id in drains {
                 if self.ending_checkpoint_pending(session_id) {
                     self.defer_queue_drain(session_id);
@@ -3603,13 +3148,14 @@ impl Michelle {
         }
 
         if persisted_state_changed {
-            self.stream_state_dirty = true;
+            self.sessions.runtime.stream_state_dirty = true;
         }
         if selected_changed {
             self.remeasure_transcript_tail();
         }
-        if self.stream_state_dirty
-            && (force_save || self.last_stream_save.elapsed() >= STREAM_SAVE_INTERVAL)
+        if self.sessions.runtime.stream_state_dirty
+            && (force_save
+                || self.sessions.runtime.last_stream_save.elapsed() >= STREAM_SAVE_INTERVAL)
         {
             self.save();
         }

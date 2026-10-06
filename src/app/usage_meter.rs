@@ -6,135 +6,16 @@
 //! OpenCode Go's usage endpoint, and Codex's own rate-limit
 //! notifications. Frames read only snapshots stored on the entity.
 
-use gpui::{PathBuilder, relative};
-
 use super::*;
+use crate::ui::squircle::{SquircleStyled, squircle};
+use crate::ui::{InlineNotice, ProgressBar, ProgressRing, Skeleton, StyledTypography, TextStyle};
 use crate::usage::{PlanUsage, format_tokens, reset_label};
 
 const USAGE_METER_MENU_ID: &str = "usage-meter";
 
-/// Providers with an account-level plan fetcher. Codex additionally refreshes
-/// live from its own stream notifications.
-pub(super) const PLAN_USAGE_PROVIDERS: [ProviderKind; 4] = [
-    ProviderKind::Claude,
-    ProviderKind::Codex,
-    ProviderKind::OpenCode,
-    ProviderKind::Grok,
-];
-
-/// Refresh cadences for the plan snapshots. Quota moves only when turns run,
-/// so idle refreshes stay rare; a settled turn or a just-opened panel asks
-/// sooner. Grok's fetch spawns a probe process, so its idle cadence is wider.
-const PLAN_USAGE_REFRESH: Duration = Duration::from_secs(300);
-const PLAN_USAGE_REFRESH_GROK: Duration = Duration::from_secs(600);
-const PLAN_USAGE_REFRESH_STALE: Duration = Duration::from_secs(30);
-const PLAN_USAGE_RETRY: Duration = Duration::from_secs(90);
+use super::settings::plan_usage::PLAN_USAGE_PROVIDERS;
 
 impl Michelle {
-    /// Start background fetches of any plan meters whose snapshot is due.
-    /// The slow maintenance clock and explicit panel-open requests call this;
-    /// guards keep it to one in-flight fetch per provider.
-    pub(super) fn maybe_refresh_plan_usage(&mut self, cx: &mut Context<Self>) {
-        // Disabling a provider only stops it backing new sessions; a session
-        // already locked to it keeps running, and while one is selected its
-        // usage panel still owes the account meters. Without this the panel
-        // would show its loading skeleton forever: fetchable provider, no
-        // snapshot, and no fetch ever allowed to start.
-        let selected_provider = self.selected_session().map(|session| session.provider);
-        for provider in PLAN_USAGE_PROVIDERS {
-            if self.plan_usage_pending.contains(&provider)
-                || (!self.provider_enabled(provider) && selected_provider != Some(provider))
-            {
-                continue;
-            }
-            let interval = if self.plan_usage_error.contains_key(&provider) {
-                PLAN_USAGE_RETRY
-            } else if self.plan_usage_stale.contains(&provider) {
-                PLAN_USAGE_REFRESH_STALE
-            } else if provider == ProviderKind::Grok {
-                PLAN_USAGE_REFRESH_GROK
-            } else {
-                PLAN_USAGE_REFRESH
-            };
-            if self
-                .plan_usage_checked_at
-                .get(&provider)
-                .is_some_and(|checked| checked.elapsed() < interval)
-            {
-                continue;
-            }
-            self.plan_usage_pending.insert(provider);
-            let tx = self.plan_usage_tx.clone();
-            let event_wake = self.event_wake_tx.clone();
-            let claude_version = self
-                .provider_versions
-                .get(&ProviderKind::Claude)
-                .cloned()
-                .flatten();
-            let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
-            let daemon = self.daemon.client();
-            cx.background_executor()
-                .spawn(async move {
-                    let result = match daemon.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        michelle_client::Command::FetchPlanUsage {
-                            provider,
-                            binary_override,
-                            cli_version: claude_version,
-                        },
-                    ) {
-                        Ok(michelle_client::ResponsePayload::PlanUsage { usage }) => Ok(usage),
-                        Ok(_) => Err(anyhow::anyhow!(
-                            "the daemon returned an invalid plan usage response"
-                        )),
-                        Err(error) => Err(error),
-                    };
-                    if tx
-                        .send((provider, result.map_err(|error| format!("{error:#}"))))
-                        .is_ok()
-                    {
-                        signal_event_pump(&event_wake);
-                    }
-                })
-                .detach();
-        }
-    }
-
-    pub(super) fn drain_plan_usage_events(&mut self) -> bool {
-        let mut changed = false;
-        while let Ok((provider, result)) = self.plan_usage_events.try_recv() {
-            self.plan_usage_pending.remove(&provider);
-            self.plan_usage_stale.remove(&provider);
-            self.plan_usage_checked_at.insert(provider, Instant::now());
-            match result {
-                Ok(Some(usage)) => {
-                    changed |= self.plan_usage.get(&provider) != Some(&usage)
-                        || self.plan_usage_error.contains_key(&provider)
-                        || self.plan_usage_unconfigured.contains(&provider);
-                    self.plan_usage.insert(provider, usage);
-                    self.plan_usage_error.remove(&provider);
-                    self.plan_usage_unconfigured.remove(&provider);
-                }
-                Ok(None) => {
-                    let had_usage = self.plan_usage.remove(&provider).is_some();
-                    let had_error = self.plan_usage_error.remove(&provider).is_some();
-                    let newly_unconfigured = self.plan_usage_unconfigured.insert(provider);
-                    changed |= had_usage || had_error || newly_unconfigured;
-                }
-                Err(error) => {
-                    let was_unconfigured = self.plan_usage_unconfigured.remove(&provider);
-                    changed |=
-                        self.plan_usage_error.get(&provider) != Some(&error) || was_unconfigured;
-                    // Keep any previous snapshot; stale meters with reset
-                    // times still self-correct visually.
-                    self.plan_usage_error.insert(provider, error);
-                }
-            }
-        }
-        changed
-    }
-
     /// Whether the footer shows the gauge. Always true with a session
     /// selected — an empty ring is the honest "nothing measured yet" state,
     /// and hiding it would make the control feel intermittent.
@@ -149,10 +30,10 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_page.is_some() || !self.usage_meter_available() {
+        if self.settings_ui.page.is_some() || !self.usage_meter_available() {
             return;
         }
-        let menus = self.menus.borrow();
+        let menus = self.shell_ui.menus.borrow();
         let Some(handle) = menus.get(USAGE_METER_MENU_ID).cloned() else {
             return;
         };
@@ -182,13 +63,13 @@ impl Michelle {
         let provider = session.provider;
         let context = session.context_usage;
         let theme = Theme::current(cx);
-        let plan = self.plan_usage.get(&provider).cloned();
-        let error = self.plan_usage_error.get(&provider).cloned();
+        let plan = self.settings.plan.snapshots.get(&provider).cloned();
+        let error = self.settings.plan.errors.get(&provider).cloned();
         // Fetchable but nothing cached yet: the panel shows a skeleton
         // whether the fetch is already in flight or lands on the next tick.
         let plan_loading = plan.is_none()
             && error.is_none()
-            && !self.plan_usage_unconfigured.contains(&provider)
+            && !self.settings.plan.unconfigured.contains(&provider)
             && PLAN_USAGE_PROVIDERS.contains(&provider);
 
         let weak = cx.entity().downgrade();
@@ -203,10 +84,11 @@ impl Michelle {
                         .map(|session| session.provider)
                         .filter(|provider| PLAN_USAGE_PROVIDERS.contains(provider))
                     {
-                        this.plan_usage_stale.insert(provider);
+                        this.settings.plan.stale.insert(provider);
                     }
                     this.maybe_refresh_plan_usage(cx);
                     card_focus = this
+                        .shell_ui
                         .menus
                         .borrow()
                         .get(USAGE_METER_MENU_ID)
@@ -225,7 +107,7 @@ impl Michelle {
             } else {
                 let mut composer_focus = None;
                 let _ = weak.update(cx, |this, cx| {
-                    composer_focus = Some(this.composer.read(cx).focus());
+                    composer_focus = Some(this.composer_ui.input.read(cx).focus());
                     cx.notify();
                 });
                 if let Some(focus) = composer_focus {
@@ -255,17 +137,26 @@ impl Michelle {
 
         let trigger = div()
             .id("usage-meter")
-            .h(px(20.0))
+            .h(px(26.0))
             .px(px(5.0))
             .rounded(px(5.0))
             .flex()
             .items_center()
+            .gap(px(6.0))
             .flex_none()
+            .text_style(TextStyle::Caption)
+            .text_color(theme.text_secondary)
             .cursor_default()
             .hover(|element| element.bg(theme.overlay))
             .when(handle.is_open(), |element| element.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tooltip))
-            .child(context_gauge(percent, theme.border_strong, fill));
+            .child(
+                ProgressRing::new(percent.map(|percent| percent / 100.0))
+                    .track_color(theme.border_strong)
+                    .fill_color(fill)
+                    .minimum_fill(0.05),
+            )
+            .child(SharedString::from(context_usage_label(context)));
 
         Some(popover(
             trigger,
@@ -297,78 +188,15 @@ fn context_percent(usage: ContextUsage) -> Option<f64> {
         .map(|window| (usage.tokens as f64 * 100.0 / window as f64).min(100.0))
 }
 
-/// The trigger glyph: a ring whose arc fills clockwise from 12 o'clock as the
-/// context window does, over a faint full ring. An unknown fraction draws the
-/// track alone. This is Zed's `CircularProgress` drawing sized for the footer
-/// — `PathBuilder::stroke` arcs, which lyon tessellates correctly where a
-/// hand-built annulus fill does not survive GPUI's fill rule.
-fn context_gauge(percent: Option<f64>, track: Hsla, fill: Hsla) -> impl IntoElement {
-    const SIZE: f32 = 13.0;
-    const STROKE: f32 = 2.5;
-    canvas(
-        |_, _, _| (),
-        move |bounds, _, window, _| {
-            let center = bounds.center();
-            let radius = px((SIZE - STROKE) / 2.0);
-
-            // A full circle is two 180° arcs; lyon rejects a single
-            // zero-length one.
-            let full_circle = |builder: &mut PathBuilder| {
-                builder.move_to(point(center.x + radius, center.y));
-                builder.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    false,
-                    true,
-                    point(center.x - radius, center.y),
-                );
-                builder.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    false,
-                    true,
-                    point(center.x + radius, center.y),
-                );
-                builder.close();
-            };
-
-            let mut track_builder = PathBuilder::stroke(px(STROKE));
-            full_circle(&mut track_builder);
-            if let Ok(path) = track_builder.build() {
-                window.paint_path(path, track);
-            }
-
-            let Some(percent) = percent else {
-                return;
-            };
-            // Keep a visible sliver for a nearly-empty context.
-            let fraction = ((percent / 100.0) as f32).clamp(0.0, 1.0).max(0.05);
-            let mut arc_builder = PathBuilder::stroke(px(STROKE));
-            if fraction >= 0.999 {
-                full_circle(&mut arc_builder);
-            } else {
-                let start = -std::f32::consts::FRAC_PI_2;
-                let angle = start + fraction * std::f32::consts::TAU;
-                arc_builder.move_to(point(center.x, center.y - radius));
-                arc_builder.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    fraction > 0.5,
-                    true,
-                    point(
-                        center.x + radius * angle.cos(),
-                        center.y + radius * angle.sin(),
-                    ),
-                );
-            }
-            if let Ok(path) = arc_builder.build() {
-                window.paint_path(path, fill);
-            }
+fn context_usage_label(usage: Option<ContextUsage>) -> String {
+    match usage {
+        Some(usage) => match context_percent(usage) {
+            Some(percent) => format!("{percent:.0}%"),
+            None if usage.tokens > 0 => "—".to_owned(),
+            None => "0%".to_owned(),
         },
-    )
-    .w(px(SIZE))
-    .h(px(SIZE))
-    .flex_none()
+        None => "0%".to_owned(),
+    }
 }
 
 fn usage_panel(
@@ -387,10 +215,15 @@ fn usage_panel(
         .track_focus(handle.focus_handle())
         .w(px(320.0))
         .p(px(14.0))
-        .rounded(px(10.0))
-        .border_1()
-        .border_color(theme.border_strong)
-        .bg(theme.raised)
+        .child(
+            squircle()
+                .rounded(px(12.0))
+                .bg(theme.raised)
+                .border(px(0.5))
+                .border_color(theme.border_strong)
+                .border_inside()
+                .absolute_expand(),
+        )
         .shadow_lg()
         .flex()
         .flex_col()
@@ -433,7 +266,7 @@ fn usage_panel(
                             .child(SharedString::from(value)),
                     ),
             )
-            .child(meter_bar(&theme, percent.unwrap_or(0.0))),
+            .child(meter_bar(&theme, percent)),
     );
     if plan.is_some() || error.is_some() || plan_loading {
         panel = panel.child(div().h(px(1.0)).flex_none().bg(theme.border));
@@ -506,7 +339,7 @@ fn usage_panel(
                                     .child(SharedString::from(format!("{:.0}%", window.percent))),
                             ),
                     )
-                    .child(meter_bar(&theme, window.percent)),
+                    .child(meter_bar(&theme, Some(window.percent))),
             );
         }
     } else if plan_loading {
@@ -524,10 +357,10 @@ fn usage_panel(
                         .child(tr!("usage.plan_limits")),
                 )
                 .child(
-                    div()
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_secondary)
-                        .child(SharedString::from(tr!("usage.unavailable", error = error))),
+                    InlineNotice::new(tr!("usage.unavailable", error = error))
+                        .p(px(0.0))
+                        .border_0()
+                        .text_color(theme.text_secondary),
                 ),
         );
     }
@@ -535,20 +368,10 @@ fn usage_panel(
     panel.into_any_element()
 }
 
-/// Placeholder for the plan section while its first fetch is in flight:
-/// a header bar and two quota rows, pulsing gently. `with_animation` honors
-/// the system's reduce-motion setting on its own.
+/// The owner keeps the plan silhouette; one shared pulse animates its blocks.
 fn plan_skeleton(theme: &Theme) -> AnyElement {
-    let theme = *theme;
-    let bar = move |width: f32| {
-        div()
-            .h(px(9.0))
-            .w(px(width))
-            .flex_none()
-            .rounded(px(4.5))
-            .bg(theme.overlay_strong)
-    };
-    let row = move |label_width: f32, value_width: f32| {
+    let bar = |width: f32| Skeleton::new().w(px(width)).bg(theme.overlay_strong);
+    let row = |label_width: f32, value_width: f32| {
         div()
             .flex()
             .flex_col()
@@ -562,57 +385,126 @@ fn plan_skeleton(theme: &Theme) -> AnyElement {
                     .child(bar(value_width)),
             )
             .child(
-                div()
+                Skeleton::new()
                     .h(px(3.0))
-                    .w_full()
-                    .flex_none()
                     .rounded_full()
                     .bg(theme.overlay_strong),
             )
     };
-    motion::pulse(Duration::from_millis(1400), move |phase| {
+    Skeleton::pulse(
         div()
             .flex()
             .flex_col()
             .gap(px(12.0))
             .child(bar(132.0))
             .child(row(96.0, 64.0))
-            .child(row(120.0, 64.0))
-            .opacity(pulsating_between(0.45, 0.9)(phase))
-            .into_any_element()
-    })
-    .every(2)
+            .child(row(120.0, 64.0)),
+    )
     .into_any_element()
 }
 
-/// A quota bar: full-width track, fill proportional to `percent`. A lane in
-/// use keeps a visible sliver even under one percent.
-fn meter_bar(theme: &Theme, percent: f64) -> Div {
-    let fraction = (percent / 100.0).clamp(0.0, 1.0) as f32;
-    let fraction = if fraction > 0.0 {
-        fraction.max(0.015)
-    } else {
-        0.0
+/// Quota thresholds and the minimum visible sliver remain presentation policy.
+fn meter_bar(theme: &Theme, percent: Option<f64>) -> ProgressBar {
+    let fill = match percent {
+        Some(percent) if percent >= 95.0 => theme.danger,
+        Some(percent) if percent >= 80.0 => theme.warning,
+        _ => theme.gauge,
     };
-    let fill = if percent >= 95.0 {
-        theme.danger
-    } else if percent >= 80.0 {
-        theme.warning
-    } else {
-        theme.gauge
-    };
-    div()
-        .h(px(3.0))
-        .w_full()
-        .flex_none()
-        .rounded_full()
-        .bg(theme.overlay_strong)
-        .child(div().h_full().w(relative(fraction)).rounded_full().bg(fill))
+    ProgressBar::new(percent.map(|percent| percent / 100.0))
+        .track_color(theme.overlay_strong)
+        .fill_color(fill)
+        .minimum_fill(if percent.is_some_and(|percent| percent > 0.0) {
+            0.015
+        } else {
+            0.0
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn quota_bars_keep_thresholds_and_the_minimum_visible_positive_fill(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        struct Harness {
+            percent: Option<f64>,
+        }
+        impl Render for Harness {
+            fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                crate::ui::squircle::test_support::clear(window, cx);
+                div()
+                    .w(px(100.0))
+                    .child(meter_bar(&Theme::dark(), self.percent))
+            }
+        }
+        let theme = Theme::dark();
+        let (view, cx) = cx.add_window_view(|_, _| Harness { percent: None });
+        for (percent, color, width) in [
+            (Some(0.1), theme.gauge, 1.5),
+            (Some(79.0), theme.gauge, 79.0),
+            (Some(80.0), theme.warning, 80.0),
+            (Some(95.0), theme.danger, 95.0),
+            (Some(120.0), theme.danger, 100.0),
+        ] {
+            view.update(cx, |view, cx| {
+                view.percent = percent;
+                cx.notify();
+            });
+            cx.update(|window, cx| {
+                let quad = crate::ui::squircle::test_support::painted_surfaces(window, cx)
+                    .into_iter()
+                    .find(|quad| quad.background.as_solid() == Some(color))
+                    .unwrap();
+                assert!((quad.bounds.size.width.0 / window.scale_factor() - width).abs() < 0.01);
+            });
+        }
+        for percent in [
+            None,
+            Some(0.0),
+            Some(-1.0),
+            Some(f64::NAN),
+            Some(f64::INFINITY),
+        ] {
+            view.update(cx, |view, cx| {
+                view.percent = percent;
+                cx.notify();
+            });
+            cx.update(|window, cx| {
+                assert!(
+                    !crate::ui::squircle::test_support::painted_surfaces(window, cx)
+                        .iter()
+                        .any(|quad| {
+                            quad.bounds.size.width.0 > 0.0
+                                && quad.background.as_solid().is_some_and(|color| {
+                                    [theme.gauge, theme.warning, theme.danger].contains(&color)
+                                })
+                        })
+                )
+            });
+        }
+    }
+
+    #[test]
+    fn context_usage_label_distinguishes_empty_unknown_and_measured_context() {
+        assert_eq!(context_usage_label(None), "0%");
+        assert_eq!(context_usage_label(Some(ContextUsage::default())), "0%");
+        assert_eq!(
+            context_usage_label(Some(ContextUsage {
+                tokens: 250_000,
+                window: None,
+            })),
+            "—"
+        );
+        assert_eq!(
+            context_usage_label(Some(ContextUsage {
+                tokens: 250_000,
+                window: Some(1_000_000),
+            })),
+            "25%"
+        );
+    }
 
     #[test]
     fn context_percent_caps_at_full_when_provider_over_reports() {

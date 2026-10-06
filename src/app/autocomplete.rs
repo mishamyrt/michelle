@@ -22,13 +22,13 @@ use gpui::{
 use nucleo_matcher::Matcher;
 
 use crate::composer_complete::{
-    self, FILE_INDEX_CAP, FileEntry, Scored, SlashCommand, Trigger, TriggerKind,
-    highlight_byte_ranges,
+    self, FileEntry, Scored, SlashCommand, Trigger, TriggerKind, highlight_byte_ranges,
 };
 use crate::ui::menu::{ConfirmEntry, DismissMenu, SelectNextEntry, SelectPreviousEntry};
+use crate::ui::{StyledTypography, TextStyle};
 
-use super::composer::next_picker_highlight;
 use super::*;
+use crate::ui::primitives::navigation::next_picker_highlight;
 
 /// Key context the composer card declares while the popup is open.
 const AUTOCOMPLETE_CONTEXT: &str = "ComposerAutocomplete > TextInput";
@@ -106,172 +106,17 @@ impl AutocompleteUi {
 }
 
 impl Michelle {
-    /// Refresh the drawn command and file indexes for the selected session.
-    ///
-    /// A cache hit lands immediately; a miss starts discovery on the
-    /// background executor and re-runs this when it arrives. Nothing here may
-    /// touch the filesystem directly.
-    pub(super) fn refresh_composer_sources(&mut self, cx: &mut Context<Self>) {
-        let Some(project_path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
-            self.slash_command_index = Rc::new(Vec::new());
-            self.slash_command_index_key = None;
-            self.slash_command_index_loading = false;
-            self.mention_file_index = Rc::new(Vec::new());
-            self.mention_file_index_path = None;
-            self.mention_file_index_loading = false;
-            return;
-        };
-        let provider = self
-            .selected_session()
-            .map(|session| session.provider)
-            .unwrap_or(self.state.last_provider);
-        let reported = self
-            .selected_session()
-            .map(|session| session.available_commands.clone())
-            .unwrap_or_default();
-        let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
-
-        let command_key = (provider, project_path.clone(), binary_override.clone());
-        match self.slash_commands.read(&command_key) {
-            Query::Ready(commands) => {
-                self.slash_command_index = Rc::new(composer_complete::merge_reported_commands(
-                    &commands, &reported,
-                ));
-                self.slash_command_index_key = Some(command_key);
-                self.slash_command_index_loading = false;
-            }
-            Query::Pending => {
-                self.slash_command_index_loading = true;
-                // A scan for this exact key is in flight; anything drawn
-                // meanwhile must not be another provider's list.
-                if self.slash_command_index_key.as_ref() != Some(&command_key) {
-                    self.slash_command_index = Rc::new(Vec::new());
-                    self.slash_command_index_key = None;
-                }
-            }
-            Query::Missing(token) => {
-                self.slash_command_index_loading = true;
-                if self.slash_command_index_key.as_ref() != Some(&command_key) {
-                    self.slash_command_index = Rc::new(Vec::new());
-                    self.slash_command_index_key = None;
-                }
-                let path = project_path.clone();
-                let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-                cx.spawn(async move |michelle, cx| {
-                    let commands = cx
-                        .background_executor()
-                        .spawn(async move {
-                            match workspace.request(
-                                michelle_client::WorkspaceOperation::DiscoverSlashCommands {
-                                    provider,
-                                    project_root: path,
-                                    binary_override,
-                                },
-                            ) {
-                                Ok(michelle_client::WorkspaceResult::SlashCommands {
-                                    commands,
-                                }) => commands,
-                                Ok(_) | Err(_) => Vec::new(),
-                            }
-                        })
-                        .await;
-                    michelle
-                        .update(cx, |michelle, cx| {
-                            if michelle.slash_commands.fulfill(token, commands) {
-                                michelle.refresh_composer_sources(cx);
-                                cx.notify();
-                            }
-                        })
-                        .ok();
-                })
-                .detach();
-            }
-        }
-
-        match self.mention_files.read(&project_path) {
-            Query::Ready(files) => {
-                self.mention_file_index = files.as_ref().clone().into();
-                self.mention_file_index_path = Some(project_path);
-                self.mention_file_index_loading = false;
-            }
-            Query::Pending => {
-                self.mention_file_index_loading = true;
-                if self.mention_file_index_path.as_ref() != Some(&project_path) {
-                    self.mention_file_index = Rc::new(Vec::new());
-                    self.mention_file_index_path = None;
-                }
-            }
-            Query::Missing(token) => {
-                self.mention_file_index_loading = true;
-                if self.mention_file_index_path.as_ref() != Some(&project_path) {
-                    self.mention_file_index = Rc::new(Vec::new());
-                    self.mention_file_index_path = None;
-                }
-                let path = project_path.clone();
-                let workspace = michelle_client::WorkspaceClient::new(self.daemon.client());
-                cx.spawn(async move |michelle, cx| {
-                    let files = cx
-                        .background_executor()
-                        .spawn(async move {
-                            match workspace.request(
-                                michelle_client::WorkspaceOperation::ListProjectFiles {
-                                    root: path,
-                                    cap: FILE_INDEX_CAP,
-                                },
-                            ) {
-                                Ok(michelle_client::WorkspaceResult::ProjectFiles { entries }) => {
-                                    entries
-                                }
-                                Ok(_) | Err(_) => Vec::new(),
-                            }
-                        })
-                        .await;
-                    michelle
-                        .update(cx, |michelle, cx| {
-                            if michelle.mention_files.fulfill(token, files) {
-                                michelle.refresh_composer_sources(cx);
-                                cx.notify();
-                            }
-                        })
-                        .ok();
-                })
-                .detach();
-            }
-        }
-    }
-
-    /// Invalidate and re-request both indexes for the selected workspace.
-    pub(super) fn invalidate_composer_sources(&mut self, cx: &mut Context<Self>) {
-        if let Some(path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        {
-            let provider = self
-                .selected_session()
-                .map(|session| session.provider)
-                .unwrap_or(self.state.last_provider);
-            let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
-            self.slash_commands
-                .invalidate(&(provider, path.clone(), binary_override));
-            self.mention_files.invalidate(&path);
-        }
-        self.refresh_composer_sources(cx);
-    }
-
     /// The trigger under the composer's caret, reconciled with the popup's
     /// cross-frame state. `None` while the composer is unfocused, the token is
     /// dismissed, or there is nothing to complete.
     fn composer_trigger(&self, window: &Window, cx: &App) -> Option<Trigger> {
-        let input = self.composer.read(cx);
+        let input = self.composer_ui.input.read(cx);
         let trigger = if input.focus().is_focused(window) {
             composer_complete::detect_trigger(input.content(cx), input.cursor(cx))
         } else {
             None
         };
-        let ui = &self.composer_autocomplete;
+        let ui = &self.composer_ui.autocomplete;
         if *ui.token.borrow() != trigger {
             *ui.token.borrow_mut() = trigger.clone();
             // A different token renumbers the rows: the keyboard cursor and a
@@ -290,21 +135,25 @@ impl Michelle {
     /// cursor and `enter` so an index always means the same row everywhere.
     fn autocomplete_rows(&self, trigger: &Trigger) -> Rc<Vec<AutocompleteRow>> {
         let source = match trigger.kind {
-            TriggerKind::Command => Rc::as_ptr(&self.slash_command_index) as usize,
-            TriggerKind::File => Rc::as_ptr(&self.mention_file_index) as usize,
+            TriggerKind::Command => {
+                Rc::as_ptr(&self.composer_model.sources.slash_command_index) as usize
+            }
+            TriggerKind::File => {
+                Rc::as_ptr(&self.composer_model.sources.mention_file_index) as usize
+            }
         };
         {
-            let memo = self.composer_autocomplete.results.borrow();
+            let memo = self.composer_ui.autocomplete.results.borrow();
             if let Some(memo) = memo.as_ref().filter(|memo| {
                 memo.kind == trigger.kind && memo.query == trigger.query && memo.source == source
             }) {
                 return memo.rows.clone();
             }
         }
-        let mut matcher = self.composer_autocomplete.matcher.borrow_mut();
+        let mut matcher = self.composer_ui.autocomplete.matcher.borrow_mut();
         let rows = match trigger.kind {
             TriggerKind::Command => composer_complete::filter_commands(
-                &self.slash_command_index,
+                &self.composer_model.sources.slash_command_index,
                 &trigger.query,
                 &mut matcher,
             )
@@ -312,7 +161,7 @@ impl Michelle {
             .map(AutocompleteRow::Command)
             .collect::<Vec<_>>(),
             TriggerKind::File => composer_complete::filter_files(
-                &self.mention_file_index,
+                &self.composer_model.sources.mention_file_index,
                 &trigger.query,
                 &mut matcher,
             )
@@ -321,7 +170,7 @@ impl Michelle {
             .collect(),
         };
         let rows = Rc::new(rows);
-        *self.composer_autocomplete.results.borrow_mut() = Some(ResultsMemo {
+        *self.composer_ui.autocomplete.results.borrow_mut() = Some(ResultsMemo {
             kind: trigger.kind,
             query: trigger.query.clone(),
             source,
@@ -340,7 +189,7 @@ impl Michelle {
             return;
         };
         let rows = self.autocomplete_rows(&trigger);
-        let ui = &self.composer_autocomplete;
+        let ui = &self.composer_ui.autocomplete;
         let current = ui.highlight.get().min(rows.len().saturating_sub(1));
         let Some(next) = next_picker_highlight(Some(current), rows.len(), key) else {
             return;
@@ -364,7 +213,8 @@ impl Michelle {
         };
         let rows = self.autocomplete_rows(&trigger);
         let index = index.unwrap_or_else(|| {
-            self.composer_autocomplete
+            self.composer_ui
+                .autocomplete
                 .highlight
                 .get()
                 .min(rows.len().saturating_sub(1))
@@ -380,20 +230,20 @@ impl Michelle {
             AutocompleteRow::File(scored) => format!("@{} ", scored.item.path),
         };
         if matches!(row, AutocompleteRow::Command(_)) {
-            let mut submission = self.composer.read(cx).content(cx).to_owned();
+            let mut submission = self.composer_ui.input.read(cx).content(cx).to_owned();
             submission.replace_range(trigger.range.clone(), &insert);
             if self.execute_local_composer_command(&submission, cx) {
                 return;
             }
         }
-        self.composer.update(cx, |input, cx| {
+        self.composer_ui.input.update(cx, |input, cx| {
             input.replace_range(trigger.range.clone(), &insert, cx);
         });
         cx.notify();
     }
 
     pub(super) fn dismiss_autocomplete(&mut self, cx: &mut Context<Self>) {
-        self.composer_autocomplete.dismissed.set(true);
+        self.composer_ui.autocomplete.dismissed.set(true);
         cx.notify();
     }
 
@@ -408,18 +258,19 @@ impl Michelle {
         let trigger = self.composer_trigger(window, cx)?;
         let rows = self.autocomplete_rows(&trigger);
         let loading = match trigger.kind {
-            TriggerKind::Command => self.slash_command_index_loading,
-            TriggerKind::File => self.mention_file_index_loading,
+            TriggerKind::Command => self.composer_model.sources.slash_command_index_loading,
+            TriggerKind::File => self.composer_model.sources.mention_file_index_loading,
         };
         if rows.is_empty() && !loading {
             return None;
         }
         // The probe records during paint, so the first frame a composer ever
         // draws has no bounds yet; the popup appears one frame later.
-        let card_bounds = self.composer_autocomplete.card_bounds.get()?;
+        let card_bounds = self.composer_ui.autocomplete.card_bounds.get()?;
         let theme = Theme::current(cx);
         let highlight = self
-            .composer_autocomplete
+            .composer_ui
+            .autocomplete
             .highlight
             .get()
             .min(rows.len().saturating_sub(1));
@@ -429,7 +280,7 @@ impl Michelle {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .track_scroll(&self.composer_autocomplete.scroll)
+            .track_scroll(&self.composer_ui.autocomplete.scroll)
             .p(px(4.0));
         if rows.is_empty() {
             list = list.child(
@@ -439,13 +290,9 @@ impl Michelle {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .text_size(sp(12.5))
+                    .text_style(TextStyle::Body)
                     .text_color(theme.text_tertiary)
-                    .child(crate::ui::motion::spin(icon(
-                        "arrow.clockwise",
-                        12.0,
-                        theme.text_tertiary,
-                    )))
+                    .child(crate::ui::motion::spinner(12.0, theme.text_tertiary))
                     .child(tr!("composer.loading_suggestions")),
             );
         } else {

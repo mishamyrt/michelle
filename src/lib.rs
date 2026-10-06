@@ -42,7 +42,7 @@ mod query;
 mod review_diff;
 mod terminal;
 mod theme;
-mod ui;
+pub mod ui;
 
 pub use michelle_client::{
     checkpoint, command_env, composer_complete, git_branch, git_commit, i18n, identity, model,
@@ -68,6 +68,7 @@ actions!(
         OpenSettings,
         ToggleSidebar,
         ToggleRightPanel,
+        OpenTerminal,
         ToggleCommandPalette,
         OpenResumePicker,
         ToggleFpsCounter,
@@ -97,6 +98,10 @@ actions!(
         ReplaceAllMatches
     ]
 );
+
+fn terminal_key_bindings() -> [KeyBinding; 2] {
+    ["ctrl-ё", "ctrl-`"].map(|key| KeyBinding::new(key, OpenTerminal, Some("Michelle")))
+}
 
 const DEFAULT_WINDOW_WIDTH: f32 = 1380.0;
 const DEFAULT_WINDOW_HEIGHT: f32 = 880.0;
@@ -274,6 +279,7 @@ pub fn run() {
                 KeyBinding::new("shift-enter", FindPrevious, Some("FindBar")),
                 KeyBinding::new("secondary-alt-enter", ReplaceAllMatches, Some("FindBar")),
             ]);
+            cx.bind_keys(terminal_key_bindings());
 
             cx.on_action(|_: &Quit, cx| cx.quit());
 
@@ -307,7 +313,7 @@ pub fn run() {
                                         target_os = "windows"
                                     )),
                                     traffic_light_position: cfg!(target_os = "macos")
-                                        .then(|| point(px(16.0), px(17.0))),
+                                        .then(|| point(px(19.0), px(19.0))),
                                 }),
                                 // Michelle moves its custom macOS titlebar explicitly. Keep
                                 // the NSWindow movable so native controls and Window-menu
@@ -423,6 +429,7 @@ pub(crate) fn set_app_menus(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action(tr!("menu.toggle_sidebar"), ToggleSidebar),
                 MenuItem::action(tr!("menu.toggle_right_panel"), ToggleRightPanel),
+                MenuItem::action(tr!("menu.open_terminal"), OpenTerminal),
                 MenuItem::action(tr!("menu.focus_composer"), FocusComposer),
                 MenuItem::action(tr!("menu.toggle_model_picker"), ToggleModelPicker),
                 MenuItem::action(tr!("menu.toggle_usage_panel"), ToggleUsagePanel),

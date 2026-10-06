@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::{ActivationExt, IconButton};
 
 use chrono::{Datelike, Days};
 use std::path::Path;
@@ -145,43 +146,31 @@ fn format_message_time_at(created_at: u64, now: DateTime<Local>, locale: &str) -
 }
 
 impl Michelle {
-    pub(super) fn control_was_copied(&self, control_id: &str) -> bool {
-        self.copied_control_feedback.contains_key(control_id)
-    }
-
-    pub(super) fn show_control_copied(
-        &mut self,
-        control_id: impl Into<String>,
-        cx: &mut Context<Self>,
-    ) {
-        let control_id = control_id.into();
-        self.copied_control_generation = self.copied_control_generation.wrapping_add(1);
-        let generation = self.copied_control_generation;
-        self.copied_control_feedback
-            .insert(control_id.clone(), generation);
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(2)).await;
-            let _ = this.update(cx, |this, cx| {
-                if this.copied_control_feedback.get(&control_id) == Some(&generation) {
-                    this.copied_control_feedback.remove(&control_id);
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+    pub(super) fn message_footer_focuses(
+        &self,
+        message_id: Uuid,
+        cx: &mut App,
+    ) -> [FocusHandle; 3] {
+        ["copy-message", "fork-response", "user-message-action"]
+            .map(|action| self.transcript_control_focus(format!("{action}-{message_id}"), cx))
     }
 
     fn show_message_copied(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
-        self.copied_message_generation = self.copied_message_generation.wrapping_add(1);
-        let generation = self.copied_message_generation;
-        self.copied_message_feedback.insert(message_id, generation);
+        self.transcript_ui.copied_message_generation =
+            self.transcript_ui.copied_message_generation.wrapping_add(1);
+        let generation = self.transcript_ui.copied_message_generation;
+        self.transcript_ui
+            .copied_message_feedback
+            .insert(message_id, generation);
         cx.notify();
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(2)).await;
             let _ = this.update(cx, |this, cx| {
-                if this.copied_message_feedback.get(&message_id) == Some(&generation) {
-                    this.copied_message_feedback.remove(&message_id);
+                if this.transcript_ui.copied_message_feedback.get(&message_id) == Some(&generation)
+                {
+                    this.transcript_ui
+                        .copied_message_feedback
+                        .remove(&message_id);
                     cx.notify();
                 }
             });
@@ -197,16 +186,13 @@ pub(super) fn render_message_footer(
     footer_time: u64,
     copy_content: SharedString,
     copied: bool,
-    group_name: SharedString,
-    force_visible: bool,
     align_right: bool,
     assistant_message_action: Option<AssistantMessageAction>,
     user_message_action: Option<UserMessageAction>,
-    michelle: gpui::WeakEntity<Michelle>,
+    focuses: &[FocusHandle; 3],
+    cx: &mut Context<Michelle>,
 ) -> AnyElement {
-    let theme = *theme;
     let message_id = message.id;
-    let copy_michelle = michelle.clone();
     let footer_color = if theme.is_dark {
         gpui::hsla(126.93 / 360.0, 0.000_000_1, 0.543_95, 1.0)
     } else {
@@ -221,119 +207,87 @@ pub(super) fn render_message_footer(
         .line_height(sp(14.0))
         .text_color(footer_color)
         .child(format_message_time(footer_time));
-    let copy_button = div()
-        .id(SharedString::from(format!("copy-message-{message_id}")))
-        .w(px(27.0))
-        .h(px(27.0))
-        .rounded(px(8.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_default()
-        .hover(|element| element.bg(theme.overlay_strong))
-        .child(icon(
+    let copy_button = IconButton::new(
+        SharedString::from(format!("copy-message-{message_id}")),
+        icon(
             if copied { "checkmark" } else { "doc.on.doc" },
             14.0,
             footer_color,
-        ))
-        .tooltip(Tooltip::text(if copied {
-            tr!("common.copied")
-        } else {
-            tr!("common.copy_message")
-        }))
-        .on_click(move |_, _, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(copy_content.to_string()));
-            let _ = copy_michelle.update(cx, |this, cx| {
-                this.show_message_copied(message_id, cx);
-            });
-        });
+        ),
+    )
+    .track_focus(&focuses[0])
+    .size(px(27.0))
+    .rounded(px(8.0))
+    .hover(|element| element.bg(theme.overlay_strong))
+    .tooltip(if copied {
+        tr!("common.copied")
+    } else {
+        tr!("common.copy_message")
+    })
+    .on_activation(cx, move |this, _, cx| {
+        cx.write_to_clipboard(ClipboardItem::new_string(copy_content.to_string()));
+        this.show_message_copied(message_id, cx);
+    });
+    // Keep actions visible so keyboard access does not depend on row hover.
     let mut footer = div()
         .w_full()
         .h(px(27.0))
         .flex()
         .items_center()
         .gap(px(1.0))
-        .when(!force_visible, |element| {
-            element
-                .invisible()
-                .group_hover(group_name, |element| element.visible())
-        })
+        .tab_index(0)
+        .tab_group()
+        .tab_stop(false)
         .when(!align_right, |element| element.ml(-px(7.0)))
         .when(align_right, |element| element.justify_end());
-
     if align_right {
         footer = footer.child(timestamp).child(copy_button);
     } else {
         footer = footer.child(copy_button);
         if let Some(action) = assistant_message_action {
-            let fork_michelle = michelle.clone();
             let fork_icon = if action.preparing {
-                motion::spin(icon("arrow.clockwise", 14.0, footer_color))
+                motion::spinner(14.0, footer_color)
             } else {
                 icon("arrow.triangle.branch", 14.0, footer_color).into_any_element()
             };
-            let fork_button = div()
-                .id(SharedString::from(format!("fork-response-{message_id}")))
-                .w(px(27.0))
-                .h(px(27.0))
+            footer = footer.child(
+                IconButton::new(
+                    SharedString::from(format!("fork-response-{message_id}")),
+                    fork_icon,
+                )
+                .track_focus(&focuses[1])
+                .size(px(27.0))
                 .rounded(px(8.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .when(!action.enabled && !action.preparing, |element| {
-                    element.opacity(0.45)
-                })
-                .child(fork_icon)
-                .tooltip(Tooltip::text(if action.enabled {
-                    tr_cow!("session.fork_task")
+                .disabled(!action.enabled)
+                .hover(|element| element.bg(theme.overlay_strong))
+                .tooltip(if action.enabled {
+                    tr!("session.fork_task")
                 } else {
-                    tr_cow!("session.forking_task")
-                }));
-            footer = footer.child(if action.enabled {
-                fork_button
-                    .hover(|element| element.bg(theme.overlay_strong))
-                    .on_click(move |_, _, cx| {
-                        let _ = fork_michelle.update(cx, |this, cx| {
-                            this.fork_session_from_response(
-                                action.session_id,
-                                action.turn_count,
-                                cx,
-                            );
-                        });
-                    })
-            } else {
-                fork_button
-            });
+                    tr!("session.forking_task")
+                })
+                .on_activation(cx, move |this, _, cx| {
+                    this.fork_session_from_response(action.session_id, action.turn_count, cx);
+                }),
+            );
         }
         footer = footer.child(timestamp);
     }
-
     if let Some(action) = user_message_action {
-        let edit_michelle = michelle;
         footer = footer.child(
-            div()
-                .id(SharedString::from(format!(
-                    "user-message-action-{message_id}"
-                )))
-                .w(px(27.0))
-                .h(px(27.0))
-                .rounded(px(8.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .hover(|element| element.bg(theme.overlay_strong))
-                .child(icon("backward.end", 14.0, footer_color))
-                .tooltip(Tooltip::text(tr_cow!("session.revert_to_here")))
-                .on_click(move |_, window, cx| {
-                    let _ = edit_michelle.update(cx, |this, cx| {
-                        this.begin_message_edit(action, window, cx);
-                    });
-                }),
+            IconButton::new(
+                SharedString::from(format!("user-message-action-{message_id}")),
+                icon("backward.end", 14.0, footer_color),
+            )
+            .track_focus(&focuses[2])
+            .size(px(27.0))
+            .rounded(px(8.0))
+            .hover(|element| element.bg(theme.overlay_strong))
+            .tooltip(tr!("session.revert_to_here"))
+            .on_activation(cx, move |this, window, cx| {
+                this.begin_message_edit(action, window, cx)
+            }),
         );
     }
-
     footer.into_any_element()
 }
 
@@ -345,12 +299,13 @@ pub(super) struct MessageRender<'a> {
     pub(super) assistant_footer_copy_content: Option<SharedString>,
     pub(super) assistant_footer_time: Option<u64>,
     pub(super) copied: bool,
+    pub(super) footer_focuses: [FocusHandle; 3],
     pub(super) assistant_message_action: Option<AssistantMessageAction>,
     pub(super) user_message_action: Option<UserMessageAction>,
     pub(super) user_message_viewport: Option<&'a UserMessageScrollViewport>,
     pub(super) message_edit_input: Option<Entity<ComposerInput>>,
     pub(super) attachment_menus: Vec<ContextMenuHandle>,
-    pub(super) attachment_images: Vec<Option<Arc<gpui::Image>>>,
+    pub(super) attachment_images: Vec<Option<Arc<image_preview::model::CachedImage>>>,
     /// Captured from the selected daemon before the virtualized row is built.
     /// A row is laid out while the root `Michelle` entity is already updating, so
     /// it must not read that entity again just to decide whether Finder reveal
@@ -368,7 +323,7 @@ fn render_sent_message_attachments(
     message_id: Uuid,
     attachments: &[MessageAttachment],
     attachment_menus: &[ContextMenuHandle],
-    attachment_images: &[Option<Arc<gpui::Image>>],
+    attachment_images: &[Option<Arc<image_preview::model::CachedImage>>],
     can_reveal: bool,
     michelle: &gpui::WeakEntity<Michelle>,
     theme: &Theme,
@@ -435,7 +390,7 @@ fn render_sent_message_attachments(
                             cx.stop_propagation();
                         })
                         .child(
-                            img(attachment_image.clone())
+                            img(attachment_image.image())
                                 .size_full()
                                 .object_fit(ObjectFit::Cover),
                         ),
@@ -515,7 +470,7 @@ fn render_sent_message_attachments(
 }
 
 fn render_markdown_message_body<'a>(
-    content: &str,
+    content: &SharedString,
     markdown: Option<&'a MarkdownView>,
     theme: &Theme,
     ctx: &MarkdownCtx<'a>,
@@ -525,7 +480,7 @@ fn render_markdown_message_body<'a>(
         // Empty or not-yet-parsed content still needs a selectable fallback.
         .unwrap_or_else(|| {
             md::render::plain_text(
-                content.to_owned(),
+                content.clone(),
                 md::render::SANS_FAMILY,
                 FontWeight::NORMAL,
                 theme.text,
@@ -534,13 +489,14 @@ fn render_markdown_message_body<'a>(
         })
 }
 
-pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement {
+pub(super) fn render_message(params: MessageRender, cx: &mut Context<Michelle>) -> AnyElement {
     let MessageRender {
         theme,
         message,
         assistant_footer_copy_content,
         assistant_footer_time,
         copied,
+        footer_focuses,
         assistant_message_action,
         user_message_action,
         user_message_viewport,
@@ -555,14 +511,17 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         composer,
     } = params;
 
-    let content = message.visible_content().to_owned();
+    let content = markdown.map_or_else(
+        || SharedString::from(message.visible_content()),
+        MarkdownView::shared_source,
+    );
     // "Copy Message" must match what the row presents. The terminal part of a
     // settled response stands in for the whole visible answer, so its menu
     // shares the footer's copy content — parts hidden behind "Worked for X"
     // stay out — rather than copying the final part alone.
     let menu_copy_content = assistant_footer_copy_content
         .clone()
-        .unwrap_or_else(|| SharedString::from(content.clone()));
+        .unwrap_or_else(|| content.clone());
     let message_id = message.id;
     let role = message.role;
     let element = match role {
@@ -794,14 +753,13 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     theme,
                     message,
                     message.created_at,
-                    SharedString::from(content.clone()),
+                    content.clone(),
                     copied,
-                    group_name,
-                    false,
                     true,
                     None,
                     user_message_action,
-                    michelle.clone(),
+                    &footer_focuses,
+                    cx,
                 ));
             }
             column
@@ -830,12 +788,11 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     assistant_footer_time.unwrap_or(message.created_at),
                     copy_content,
                     copied,
-                    group_name,
-                    false,
                     false,
                     assistant_message_action,
                     None,
-                    michelle.clone(),
+                    &footer_focuses,
+                    cx,
                 ));
             }
             column
