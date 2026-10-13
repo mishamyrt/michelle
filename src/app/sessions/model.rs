@@ -89,32 +89,12 @@ impl Michelle {
             .workspace_path_for_session(&self.state.sessions[index])
             .map(std::path::Path::to_path_buf);
         let was_selected = self.state.selected_session == Some(session_id);
-        self.sessions
-            .runtime
-            .submission_preparations
-            .remove(&session_id);
-        self.goal_model.runtime_starts.remove(&session_id);
-        self.goal_model.pending_operations.remove(&session_id);
-        self.goal_model.observed_at.remove(&session_id);
-        self.reset_session_runtime(session_id);
-        self.sessions.runtime.background_work.remove(&session_id);
-        self.remove_right_panel_session_state(session_id);
-        self.remove_composer_draft(composer_draft_key, cx);
+        self.remove_session_local_state(session_id, composer_draft_key, cx);
         self.state.sessions.remove(index);
         self.image_model.clear();
         if let Err(error) = self.store.remove_session(session_id) {
             self.show_toast(tr!("errors.save_local_state", error = error));
         }
-        if self
-            .sessions
-            .activation
-            .pending
-            .is_some_and(|pending| pending.session_id == session_id)
-        {
-            self.sessions.activation.pending = None;
-        }
-        self.sessions.activation.navigation.remove(session_id);
-        self.task_switcher.remove(session_id);
         let project_still_used = self
             .state
             .sessions
@@ -174,6 +154,109 @@ impl Michelle {
         cx.background_executor()
             .spawn(async move { sweep() })
             .detach();
+    }
+
+    fn remove_session_local_state(
+        &mut self,
+        session_id: Uuid,
+        composer_draft_key: crate::persistence::ComposerDraftKey,
+        cx: &mut Context<Self>,
+    ) {
+        self.sessions
+            .runtime
+            .submission_preparations
+            .remove(&session_id);
+        self.goal_model.runtime_starts.remove(&session_id);
+        self.goal_model.pending_operations.remove(&session_id);
+        self.goal_model.observed_at.remove(&session_id);
+        self.reset_session_runtime(session_id);
+        self.sessions.runtime.background_work.remove(&session_id);
+        self.remove_right_panel_session_state(session_id);
+        self.remove_composer_draft(composer_draft_key, cx);
+        if self
+            .sessions
+            .activation
+            .pending
+            .is_some_and(|pending| pending.session_id == session_id)
+        {
+            self.sessions.activation.pending = None;
+        }
+        self.sessions.activation.navigation.remove(session_id);
+        self.task_switcher.remove(session_id);
+    }
+
+    pub(in crate::app) fn remove_project(
+        &mut self,
+        project_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self
+            .state
+            .projects
+            .iter()
+            .any(|project| project.id == project_id && !project.is_projectless())
+        {
+            return false;
+        }
+        let sessions = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| session.project_id == project_id)
+            .map(|session| {
+                (
+                    session.id,
+                    crate::persistence::ComposerDraftKey::for_session(session),
+                )
+            })
+            .collect::<Vec<_>>();
+        if sessions.iter().any(|(id, _)| {
+            self.sessions
+                .runtime
+                .response_fork_preparations
+                .contains_key(id)
+        }) {
+            self.show_toast(tr!("session.response_fork_in_progress"));
+            cx.notify();
+            return false;
+        }
+        if let Err(error) = self.store.remove_project(project_id) {
+            self.show_toast(tr!("errors.save_local_state", error = error));
+            cx.notify();
+            return false;
+        }
+        let was_selected = self.state.selected_project == Some(project_id);
+        for (session_id, key) in sessions {
+            self.remove_session_local_state(session_id, key, cx);
+        }
+        self.remove_composer_draft(
+            crate::persistence::ComposerDraftKey::NewSession(project_id),
+            cx,
+        );
+        self.state.remove_sidebar_project(project_id);
+        self.image_model.clear();
+        self.invalidate_checkpoint_refs();
+        if was_selected {
+            let next = self
+                .state
+                .sessions
+                .iter()
+                .max_by_key(|session| session.updated_at)
+                .map(|session| session.id);
+            if let Some(next) = next {
+                self.select_session(next, cx);
+            } else {
+                self.restore_selected_composer_draft(cx);
+                self.create_projectless_session(cx);
+            }
+        }
+        self.save();
+        let sweep = self.store.blob_sweep();
+        cx.background_executor()
+            .spawn(async move { sweep() })
+            .detach();
+        cx.notify();
+        true
     }
 
     pub(in crate::app) fn reset_session_runtime(&mut self, session_id: Uuid) {

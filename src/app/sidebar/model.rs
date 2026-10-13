@@ -231,10 +231,10 @@ impl Michelle {
         id: Uuid,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.state.remove_sidebar_project(id) {
+        if !self.remove_project(id, cx) {
             return false;
         }
-        self.save_sidebar_presentation(cx);
+        self.sidebar_model.rows_fingerprint.set(None);
         true
     }
 

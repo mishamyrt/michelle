@@ -83,6 +83,10 @@ pub struct EventSink {
 }
 
 impl EventSink {
+    pub(crate) fn end_session(&self, session_id: Uuid) {
+        self.hub.end_runtime(session_id, None);
+    }
+
     pub fn send(&self, event: WireDriverEvent) -> anyhow::Result<()> {
         self.hub.emit(self.session_id, self.runtime_id, event, true);
         Ok(())
@@ -1010,6 +1014,7 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
             projects: projects.clone(),
         },
         Command::RemoveSession
+        | Command::RemoveProject { .. }
         | Command::MoveSessionToProject { .. }
         | Command::ForkSessionFromResponse { .. }
         | Command::RewindSessionToMessage { .. } => TaskCatalogAction::Changed,
@@ -1375,6 +1380,185 @@ mod tests {
 
         stale_client.shutdown();
         server.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn removing_a_project_deletes_history_without_touching_its_folder() {
+        let root = std::env::temp_dir().join(format!("michelle-remove-project-{}", Uuid::new_v4()));
+        let project = Project::from_path(root.join("repo"));
+        std::fs::create_dir_all(&project.path).unwrap();
+        let file = project.path.join("keep.txt");
+        std::fs::write(&file, "keep workspace files").unwrap();
+        let database = root.join("app.db");
+        let backend = MichelleBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(database.clone()),
+        )
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(backend),
+                shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+        let stale = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let remover = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let other = Project::from_path(root.join("other"));
+        let mut first = AgentSession::new(project.id, ProviderKind::Codex);
+        first.begin_turn("deleted-project-needle");
+        let mut second = AgentSession::new(project.id, ProviderKind::Claude);
+        second.begin_turn("deleted-project-needle");
+        let mut kept = AgentSession::new(other.id, ProviderKind::Codex);
+        kept.begin_turn("keep this chat");
+        let sessions = vec![first.clone(), second.clone(), kept.clone()];
+        stale
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: vec![project.clone(), other.clone()],
+                    live_session_ids: sessions.iter().map(|session| session.id).collect(),
+                    sessions: sessions.clone(),
+                },
+            )
+            .unwrap();
+        let draft = crate::persistence::ComposerDraft {
+            text: "draft".into(),
+            ..Default::default()
+        };
+        let mut drafts = crate::persistence::ComposerDrafts::default();
+        drafts.new_sessions.insert(project.id, draft.clone());
+        drafts.sessions.insert(first.id, draft.clone());
+        drafts.sessions.insert(kept.id, draft);
+        stale
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveComposerDrafts {
+                    drafts,
+                    generation: 1,
+                },
+            )
+            .unwrap();
+        remover
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::RemoveProject {
+                    project_id: project.id,
+                },
+            )
+            .unwrap();
+        // Includes a new chat from a client that still thinks the project exists.
+        let mut late = AgentSession::new(project.id, ProviderKind::Codex);
+        late.begin_turn("deleted-project-needle");
+        let ResponsePayload::TaskStateSaved { sessions: saved } = stale
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: vec![project.clone(), other.clone()],
+                    live_session_ids: sessions.iter().map(|session| session.id).collect(),
+                    sessions: sessions.into_iter().chain([late]).collect(),
+                },
+            )
+            .unwrap()
+        else {
+            panic!("expected save response")
+        };
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].id, kept.id);
+        let ResponsePayload::TaskState {
+            projects, sessions, ..
+        } = stale
+            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+            .unwrap()
+        else {
+            panic!("expected task state")
+        };
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].id, other.id);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, kept.id);
+        let ResponsePayload::Session { session, .. } = stale
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::HydrateSession {
+                    session_id: first.id,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("expected session response")
+        };
+        assert!(session.is_none());
+        let ResponsePayload::SessionMessageMatches { matches } = stale
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SearchSessionMessages {
+                    query: "deleted-project-needle".into(),
+                    limit: 10,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("expected search response")
+        };
+        assert!(matches.is_empty());
+        let drafts = crate::persistence::ComposerDraftStore::for_state_path(&database)
+            .load()
+            .unwrap();
+        assert!(!drafts.new_sessions.contains_key(&project.id));
+        assert!(!drafts.sessions.contains_key(&first.id));
+        assert!(drafts.sessions.contains_key(&kept.id));
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "keep workspace files"
+        );
+        // Re-adding the folder creates a fresh project without its old history.
+        let readded = Project::from_path(project.path);
+        stale
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: vec![readded.clone()],
+                    live_session_ids: vec![kept.id],
+                    sessions: Vec::new(),
+                },
+            )
+            .unwrap();
+        stale.shutdown();
+        server.join().unwrap();
+        let restored = StateStore::daemon(database).load().unwrap();
+        assert_eq!(restored.projects.len(), 2);
+        assert!(
+            restored
+                .projects
+                .iter()
+                .any(|project| project.id == readded.id)
+        );
+        assert!(!restored.projects.iter().any(|item| item.id == project.id));
+        assert_eq!(restored.sessions.len(), 1);
+        assert_eq!(restored.sessions[0].id, kept.id);
+        assert_eq!(
+            std::fs::read_to_string(file).unwrap(),
+            "keep workspace files"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

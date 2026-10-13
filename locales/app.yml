@@ -485,6 +485,10 @@ sidebar.move_to_group:
   en: Move to Group
 sidebar.move_to_project:
   en: Move to Project
+sidebar.remove_project_title:
+  en: Remove project “%{name}”?
+sidebar.remove_project_description:
+  en: The project and all its tasks will be removed from Michelle. Project files will remain on disk.
 sidebar.show_more:
   en: Show More
 sidebar.working:

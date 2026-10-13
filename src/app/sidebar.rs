@@ -12,6 +12,7 @@ use crate::ui::{
 use super::*;
 use model::*;
 pub(super) mod model;
+mod remove_project;
 
 pub(super) struct SidebarUi {
     pub(in crate::app) onboarding_add_project_focus: FocusHandle,
@@ -19,6 +20,7 @@ pub(super) struct SidebarUi {
 
     pub(in crate::app) session_rename: Option<Uuid>,
     pub(in crate::app) project_group_rename: Option<Uuid>,
+    pub(in crate::app) remove_project_dialog: Option<remove_project::RemoveProjectDialog>,
     pub(in crate::app) session_rename_input: Entity<TextInput>,
     pub(in crate::app) collapsed_groups: HashSet<SidebarGroup>,
     pub(in crate::app) project_reveal_counts: HashMap<SidebarGroup, usize>,
@@ -31,7 +33,10 @@ pub(super) struct SidebarUi {
     pub(in crate::app) reorder_animation: RefCell<Option<sidebar::SidebarReorderAnimation>>,
 }
 
-actions!(michelle_sidebar, [CancelSessionRename, FocusSidebar]);
+actions!(
+    michelle_sidebar,
+    [CancelSessionRename, FocusSidebar, DismissProjectRemoval]
+);
 
 const SESSION_RENAME_PARENT_CONTEXT: &str = "SessionRename";
 const SESSION_RENAME_FIELD_CONTEXT: &str = "SessionRename > TextInput";
@@ -40,6 +45,7 @@ const SESSION_RENAME_FIELD_CONTEXT: &str = "SessionRename > TextInput";
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("secondary-shift-e", FocusSidebar, None),
+        KeyBinding::new("escape", DismissProjectRemoval, Some("RemoveProjectDialog")),
         KeyBinding::new(
             "escape",
             FocusComposer,
@@ -1397,10 +1403,7 @@ impl Michelle {
         items.push(MenuItem::Separator);
         items.push(MenuItem::new(tr!("common.remove"), move |window, cx| {
             let _ = remove.update(cx, |this, cx| {
-                let collection = this.state.sidebar_group_for_project(project);
-                if this.remove_sidebar_project(project, cx) {
-                    this.focus_sidebar_row(SidebarRow::Collection(collection), window, cx);
-                }
+                this.open_remove_project_dialog(project, window, cx);
             });
         }));
         items

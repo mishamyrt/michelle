@@ -437,12 +437,43 @@ pub struct PersistedState {
 }
 
 impl PersistedState {
-    /// Keep the project and its chats available for reopening.
+    /// Remove the project, its chats, and their sidebar presentation.
     pub fn remove_sidebar_project(&mut self, id: Uuid) -> bool {
-        self.projects
+        if !self
+            .projects
             .iter()
             .any(|project| project.id == id && !project.is_projectless())
-            && self.sidebar_hidden_projects.insert(id)
+        {
+            return false;
+        }
+        let removed = self
+            .sessions
+            .iter()
+            .filter(|session| session.project_id == id)
+            .map(|session| session.id)
+            .collect::<HashSet<_>>();
+        self.projects.retain(|project| project.id != id);
+        self.sessions.retain(|session| session.project_id != id);
+        self.dirty_sessions
+            .retain(|session| !removed.contains(session));
+        self.sidebar_session_order
+            .retain(|session| !removed.contains(session));
+        self.sidebar_project_order.retain(|project| *project != id);
+        self.sidebar_hidden_projects.remove(&id);
+        self.sidebar_collapsed_projects.remove(&id);
+        for group in &mut self.sidebar_project_groups {
+            group.projects.retain(|project| *project != id);
+        }
+        if self.selected_project == Some(id) {
+            self.selected_project = None;
+        }
+        if self
+            .selected_session
+            .is_some_and(|session| removed.contains(&session))
+        {
+            self.selected_session = None;
+        }
+        true
     }
 
     pub fn sidebar_group_for_project(&self, project: Uuid) -> Option<Uuid> {
@@ -1210,6 +1241,18 @@ impl StateStore {
             .map_err(to_io_error)
     }
 
+    pub fn remove_project(&self, project_id: Uuid) -> io::Result<()> {
+        self.daemon
+            .client()
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::RemoveProject { project_id },
+            )
+            .map(|_| ())
+            .map_err(to_io_error)
+    }
+
     pub fn blob_sweep(&self) -> impl FnOnce() + Send + 'static {
         let daemon = self.daemon.clone();
         move || {
@@ -1487,24 +1530,42 @@ mod tests {
     }
 
     #[test]
-    fn removed_sidebar_projects_survive_restart_without_losing_chats() {
+    fn removing_a_project_deletes_chats_and_sidebar_membership() {
         let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
         let project = state.projects[0].id;
-        let chats = serde_json::to_value(&state.sessions).unwrap();
+        let other = Project::from_path(PathBuf::from("/tmp/other"));
+        let chat = state.sessions[0].id;
+        let other_chat = AgentSession::new(other.id, ProviderKind::Codex);
+        state.projects.push(other.clone());
+        state.sessions.push(other_chat.clone());
+        state.selected_project = Some(project);
+        state.selected_session = Some(chat);
+        state.sidebar_hidden_projects.insert(project);
+        state.sidebar_collapsed_projects.insert(project);
+        state.sidebar_project_order = vec![project, other.id];
+        state.sidebar_session_order = vec![chat, other_chat.id];
+        let group = state.create_sidebar_project_group("Work").unwrap();
+        state.move_project_to_sidebar_group(project, Some(group));
+        state.move_project_to_sidebar_group(other.id, Some(group));
         assert!(!state.remove_sidebar_project(Uuid::nil()));
         assert!(state.remove_sidebar_project(project));
         assert!(!state.remove_sidebar_project(project));
         assert_eq!(state.projects.len(), 1);
-        assert_eq!(serde_json::to_value(&state.sessions).unwrap(), chats);
+        assert_eq!(state.projects[0].id, other.id);
+        assert_eq!(state.sessions.len(), 1);
+        assert_eq!(state.sessions[0].id, other_chat.id);
+        assert_eq!(state.selected_project, None);
+        assert_eq!(state.selected_session, None);
+        assert_eq!(state.sidebar_project_order, vec![other.id]);
+        assert_eq!(state.sidebar_session_order, vec![other_chat.id]);
+        assert_eq!(state.sidebar_project_groups[0].projects, vec![other.id]);
+        assert!(state.sidebar_hidden_projects.is_empty());
+        assert!(state.sidebar_collapsed_projects.is_empty());
 
         let saved = serde_json::to_vec(&state.app_state()).unwrap();
         let mut restored = PersistedState::empty();
         restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
-        assert_eq!(restored.sidebar_hidden_projects, HashSet::from([project]));
-
-        restored.sidebar_hidden_projects.remove(&project);
-        let saved = serde_json::to_vec(&restored.app_state()).unwrap();
-        restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
+        assert_eq!(restored.sidebar_project_groups[0].projects, vec![other.id]);
         assert!(restored.sidebar_hidden_projects.is_empty());
     }
 

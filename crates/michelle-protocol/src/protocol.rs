@@ -178,6 +178,10 @@ pub enum Command {
     /// merge-only so a stale client snapshot cannot delete tasks another
     /// client just created.
     RemoveSession,
+    /// Remove a project and all its chats without changing its workspace files.
+    RemoveProject {
+        project_id: Uuid,
+    },
     /// Move an idle chat into another project's checkout, or a new private
     /// workspace in the general Chats group when no project is supplied.
     MoveSessionToProject {

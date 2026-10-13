@@ -51,6 +51,7 @@ pub struct MichelleBackend {
     task_store: StateStore,
     task_state: Mutex<PersistedState>,
     removed_session_ids: Mutex<HashSet<Uuid>>,
+    removed_project_ids: Mutex<HashSet<Uuid>>,
     composer_drafts: ComposerDraftStore,
     attachments: AttachmentStore,
     usage_scan_cache: Mutex<crate::usage_history::ScanCache>,
@@ -164,6 +165,7 @@ impl MichelleBackend {
             task_store,
             task_state: Mutex::new(task_state),
             removed_session_ids: Mutex::new(HashSet::new()),
+            removed_project_ids: Mutex::new(HashSet::new()),
             composer_drafts,
             attachments,
             usage_scan_cache: Mutex::new(HashMap::new()),
@@ -440,7 +442,11 @@ impl Backend for MichelleBackend {
                     .collect::<HashMap<_, _>>();
                 let mut state = self.task_state.lock();
                 let removed_session_ids = self.removed_session_ids.lock();
-                for project in projects {
+                let removed_project_ids = self.removed_project_ids.lock();
+                for project in projects
+                    .into_iter()
+                    .filter(|project| !removed_project_ids.contains(&project.id))
+                {
                     if let Some(existing) = state
                         .projects
                         .iter_mut()
@@ -453,9 +459,13 @@ impl Backend for MichelleBackend {
                 }
                 let sessions = sessions
                     .into_iter()
-                    .filter(|session| !removed_session_ids.contains(&session.id))
+                    .filter(|session| {
+                        !removed_session_ids.contains(&session.id)
+                            && !removed_project_ids.contains(&session.project_id)
+                    })
                     .collect::<Vec<_>>();
                 drop(removed_session_ids);
+                drop(removed_project_ids);
                 let saved_ids = sessions
                     .iter()
                     .map(|session| session.id)
@@ -507,6 +517,43 @@ impl Backend for MichelleBackend {
                 // the echoed clones above still carry the saved detail.
                 trim_resident_transcripts(&mut state, &active_runtimes.keys().copied().collect());
                 Ok(ResponsePayload::TaskStateSaved { sessions })
+            }
+            Command::RemoveProject { project_id } => {
+                let mut state = self.task_state.lock();
+                let removed = state
+                    .sessions
+                    .iter()
+                    .filter(|session| session.project_id == project_id)
+                    .map(|session| session.id)
+                    .collect::<HashSet<_>>();
+                let changes =
+                    std::iter::once(crate::persistence::ComposerDraftKey::NewSession(project_id))
+                        .chain(
+                            removed
+                                .iter()
+                                .copied()
+                                .map(crate::persistence::ComposerDraftKey::Session),
+                        )
+                        .map(|key| crate::persistence::ComposerDraftChange {
+                            target: key.into(),
+                            draft: None,
+                        })
+                        .collect();
+                self.composer_drafts.apply_changes(changes)?;
+                self.removed_project_ids.lock().insert(project_id);
+                self.removed_session_ids.lock().extend(&removed);
+                state.projects.retain(|project| project.id != project_id);
+                state
+                    .sessions
+                    .retain(|session| session.project_id != project_id);
+                self.task_store.save(&mut state)?;
+                drop(state);
+                for id in &removed {
+                    events.end_session(*id);
+                }
+                self.sessions.lock().retain(|id, _| !removed.contains(id));
+                self.terminals.lock().retain(|id, _| !removed.contains(id));
+                Ok(ResponsePayload::Ack)
             }
             Command::RemoveSession => {
                 {
@@ -1877,6 +1924,7 @@ fn handle_driver_command(
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
+        | Command::RemoveProject { .. }
         | Command::MoveSessionToProject { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }

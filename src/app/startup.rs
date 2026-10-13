@@ -827,6 +827,7 @@ impl Michelle {
 
                     session_rename: None,
                     project_group_rename: None,
+                    remove_project_dialog: None,
                     session_rename_input: session_rename_input,
                     collapsed_groups: sidebar_collapsed_groups,
                     project_reveal_counts: HashMap::new(),

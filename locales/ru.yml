@@ -242,6 +242,8 @@ sidebar.new_group: Новая группа
 sidebar.new_group_name: Новая группа
 sidebar.move_to_group: Переместить в группу
 sidebar.move_to_project: Переместить в проект
+sidebar.remove_project_title: Удалить проект «%{name}»?
+sidebar.remove_project_description: Проект и все его задачи будут удалены из Michelle. Файлы проекта останутся на диске.
 sidebar.show_more: Показать ещё
 sidebar.working: "Работает %{elapsed}"
 sidebar.just_now: только что

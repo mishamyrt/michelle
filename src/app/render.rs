@@ -219,6 +219,7 @@ impl Render for Michelle {
         }
         let image_preview = self.render_image_preview(cx);
         let task_switcher = self.render_task_switcher(window, cx);
+        let remove_project_dialog = self.render_remove_project_dialog(cx);
         if self.settings_ui.page.is_some() {
             let command_palette = self.render_command_palette(window, cx);
             let commit_dialog = self.render_commit_dialog(cx);
@@ -241,6 +242,7 @@ impl Render for Michelle {
                 .children(command_palette)
                 .children(commit_dialog)
                 .children(goal_dialog)
+                .children(remove_project_dialog)
                 .children(image_preview)
                 .children(task_switcher)
                 .into_any_element();
@@ -398,6 +400,7 @@ impl Render for Michelle {
             .children(command_palette)
             .children(commit_dialog)
             .children(goal_dialog)
+            .children(remove_project_dialog)
             .children(image_preview)
             .children(task_switcher)
             .into_any_element();
