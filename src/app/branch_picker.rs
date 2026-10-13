@@ -117,7 +117,7 @@ impl Michelle {
         };
 
         let trigger = MenuChip::new("workspace-branch")
-            .text_style(TextStyle::Caption)
+            .text_style(TextStyle::CAPTION_2)
             .icon("arrow.triangle.branch", theme.text_secondary)
             .label(if self.branches.operation_pending {
                 tr!("branches.switching")

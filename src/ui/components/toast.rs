@@ -76,7 +76,7 @@ impl RenderOnce for Toast {
                 .flex_row()
                 .items_center()
                 .gap(px(8.0))
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(colors.text)
         })
         .on_click(|_, _, cx| cx.stop_propagation())

@@ -1,12 +1,12 @@
 use crate::ui::squircle::SquircleExt;
 use gpui::{
-    AnyElement, App, BoxShadow, Context, Div, ElementId, FocusHandle, FontWeight, Interactivity,
-    IntoElement, RenderOnce, Stateful, StyleRefinement, Window, div, prelude::*, px,
+    AnyElement, App, BoxShadow, Context, Div, ElementId, FocusHandle, Interactivity, IntoElement,
+    RenderOnce, Stateful, StyleRefinement, Window, div, prelude::*, px,
 };
 
 use super::control::with_defaults;
 use crate::ui::primitives::activation::{ActivationHandler, activation_listener, with_activation};
-use crate::ui::{ActivationExt, IconSize, TextStyle, UiColors};
+use crate::ui::{ActivationExt, IconSize, StyledTypography, TextStyle, UiColors};
 use crate::ui::{
     SfSymbolWeight, sf_icon,
     squircle::{SquircleStyled, squircle},
@@ -198,12 +198,11 @@ fn build_sidebar_item<E: Styled + StatefulInteractiveElement + ParentElement + I
         .items_center()
         .gap(px(4.0))
         .cursor_default()
-        .text_size(TextStyle::Body.size())
         .text_color(theme.text)
-        .font_weight(if props.selected {
-            FontWeight::SEMIBOLD
+        .text_style(if props.selected {
+            TextStyle::BODY.bold()
         } else {
-            FontWeight::NORMAL
+            TextStyle::BODY
         })
         .when(props.selected, |item| {
             item.child(
@@ -236,9 +235,7 @@ pub fn sidebar_section_header(
         .flex()
         .items_center()
         .gap(px(8.0))
-        .text_size(TextStyle::Caption.size())
-        .line_height(px(SIDEBAR_SECTION_HEADER_HEIGHT))
-        .font_weight(FontWeight::SEMIBOLD)
+        .text_style(TextStyle::SUBHEADLINE.bold())
         .text_color(theme.text_secondary)
         .child(div().flex_1().min_w_0().truncate().child(content))
         .squircle()

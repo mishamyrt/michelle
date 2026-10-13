@@ -166,7 +166,7 @@ impl RenderOnce for Button {
                 .gap(px(spacing::SM))
                 .cursor_default()
                 .text_color(foreground)
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
         });
         let background = background_color(&mut button, background);
         let foreground = button.style().text.color.unwrap_or(foreground);

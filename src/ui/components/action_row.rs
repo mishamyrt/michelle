@@ -99,7 +99,7 @@ impl RenderOnce for ActionRow {
                 .items_center()
                 .gap(px(10.0))
                 .cursor_default()
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(foreground)
         })
         .focus_visible(|style| style.border_1().border_color(colors.accent))

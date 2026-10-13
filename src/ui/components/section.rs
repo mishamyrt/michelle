@@ -48,7 +48,7 @@ impl RenderOnce for Section {
         with_defaults(self.base, |base| base.flex().flex_col().gap(px(5.0)))
             .child(
                 Label::new(self.title)
-                    .text_style(TextStyle::Headline)
+                    .text_style(TextStyle::HEADLINE)
                     .text_color(colors.text),
             )
             .when_some(self.description, |base, description| {

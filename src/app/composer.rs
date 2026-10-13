@@ -911,7 +911,7 @@ impl Michelle {
         let handle = self.menu_handle("runtime-mode", cx);
         dropdown_menu(
             MenuChip::new("runtime-mode")
-                .text_style(TextStyle::Caption)
+                .text_style(TextStyle::CAPTION_2)
                 .icon(selected_mode.icon(), theme.text_secondary)
                 .label(selected_mode.label())
                 .caret(false)
@@ -966,7 +966,7 @@ impl Michelle {
                 .items_center()
                 .gap(px(6.0))
                 .cursor_default()
-                .text_style(TextStyle::Caption)
+                .text_style(TextStyle::CAPTION_2)
                 .text_color(color)
                 .child(chip_icon("scope", color))
                 .child(div().max_w(px(220.0)).truncate().child(label))
@@ -1654,7 +1654,7 @@ impl Michelle {
         };
         let worktree_handle = self.menu_handle("workspace-worktree", cx);
         let worktree_trigger = MenuChip::new("workspace-worktree")
-            .text_style(TextStyle::Caption)
+            .text_style(TextStyle::CAPTION_2)
             .icon(workspace_icon, theme.text_secondary)
             .label(workspace_label)
             .caret(false)
@@ -1720,7 +1720,7 @@ impl Michelle {
                     .tab_index(0)
                     .tab_group()
                     .tab_stop(false)
-                    .text_style(TextStyle::Caption)
+                    .text_style(TextStyle::CAPTION_2)
                     .child(worktree_selector)
                     .children(branch_selector)
                     .child(div().flex_1())

@@ -5,13 +5,11 @@
 //! and presentation; session, workspace, and right-panel operations stay with
 //! their existing owners.
 
-use crate::ui::TextStyle::BodyEmphasized;
+use crate::ui::TextStyle;
 use crate::ui::primitives::timing::TOOLTIP_SHOW_DELAY_MS;
 use crate::ui::squircle::{SquircleStyled, squircle};
 use crate::ui::toolbar::{ToolbarButton, toolbar_button_segment, toolbar_split_button};
-use crate::ui::{
-    ActivationExt, IconButton, IconSize, StyledTypography, TabBar, TabItem, TextStyle, sf_icon,
-};
+use crate::ui::{ActivationExt, IconButton, IconSize, StyledTypography, TabBar, TabItem, sf_icon};
 use michelle_client::persistence::SidebarProjectGroup;
 
 use super::background_work::{rendered_work_status_icon, work_status_icon};
@@ -162,7 +160,7 @@ impl Michelle {
                                     div()
                                         .min_w_0()
                                         .truncate()
-                                        .text_style(BodyEmphasized)
+                                        .text_style(TextStyle::BODY.bold())
                                         .text_color(theme.text)
                                         .child(SharedString::from(title)),
                                 )
@@ -170,8 +168,7 @@ impl Michelle {
                                     div()
                                         .min_w_0()
                                         .truncate()
-                                        .text_size(TextStyle::Caption.size())
-                                        .line_height(TextStyle::Caption.line_height())
+                                        .text_style(TextStyle::SUBHEADLINE)
                                         .text_color(theme.text_secondary)
                                         .child(SharedString::from(name))
                                 })),
@@ -573,13 +570,6 @@ impl Michelle {
                 self.selected_project()
                     .map(|project| project.path.as_path())
             });
-        let snapshot = workspace_path.and_then(|path| {
-            self.branches
-                .visible_snapshot
-                .as_ref()
-                .filter(|(snapshot_path, _)| snapshot_path == path)
-                .map(|(_, snapshot)| snapshot)
-        });
         let environment = Some(EnvironmentSummary {
             commit_status: self.commit_operation_status_label(),
             commit_focus: self.transcript_control_focus("environment-summary-commit", cx),
@@ -1231,7 +1221,7 @@ fn render_environment_summary_section(
                 .px(px(8.0))
                 .flex()
                 .items_center()
-                .text_style(TextStyle::CaptionEmphasized)
+                .text_style(TextStyle::CAPTION_2.bold())
                 .text_color(theme.text_tertiary)
                 .child(tr!("environment.title")),
         )
@@ -1333,7 +1323,7 @@ fn render_background_summary_section(
         .child(
             div()
                 .px(px(8.0))
-                .text_style(TextStyle::Caption)
+                .text_style(TextStyle::CAPTION_2)
                 .text_color(theme.text_tertiary)
                 .child(label),
         )

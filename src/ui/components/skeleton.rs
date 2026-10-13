@@ -9,9 +9,15 @@ pub struct Skeleton {
     base: Div,
 }
 
+impl Default for Skeleton {
+    fn default() -> Self {
+        Self { base: div() }
+    }
+}
+
 impl Skeleton {
     pub fn new() -> Self {
-        Self { base: div() }
+        Self::default()
     }
 
     /// Pulse the prepared group, keeping one clock lease for all its blocks.

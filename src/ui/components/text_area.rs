@@ -37,7 +37,7 @@ impl RenderOnce for TextArea {
             base.h(px(112.0))
                 .px(px(16.0))
                 .py(px(10.0))
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(UiColors::current(cx).text)
         })
         .child(self.input)

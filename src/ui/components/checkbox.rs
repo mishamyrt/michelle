@@ -87,7 +87,7 @@ impl RenderOnce for Checkbox {
                 .items_center()
                 .gap(px(10.0))
                 .cursor_default()
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(if self.disabled {
                     colors.text_ghost
                 } else {

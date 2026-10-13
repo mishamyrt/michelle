@@ -145,7 +145,7 @@ impl Michelle {
 
         popover(
             trigger
-                .text_style(TextStyle::Caption)
+                .text_style(TextStyle::CAPTION_2)
                 .caret(false)
                 .selected(handle.is_open()),
             &handle,
@@ -165,7 +165,7 @@ impl Michelle {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_style(TextStyle::Caption)
+                        .text_style(TextStyle::CAPTION_2)
                         .text_color(theme.text_ghost)
                         .child(if searching {
                             tr!("models.none_found")
@@ -197,8 +197,7 @@ impl Michelle {
                                         .h(px(ROW_HEIGHT))
                                         .flex()
                                         .items_center()
-                                        .text_style(TextStyle::Caption)
-                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_style(TextStyle::CAPTION_2)
                                         .text_color(theme.text_tertiary)
                                         .child(
                                             kind.map(|kind| SharedString::from(kind.short_name()))
@@ -261,8 +260,7 @@ impl Michelle {
                     .relative()
                     .p(px(5.0))
                     .rounded(px(12.0))
-                    .text_style(TextStyle::Body)
-                    .font_weight(FontWeight::MEDIUM)
+                    .text_style(TextStyle::BODY)
                     .shadow_lg()
                     .flex()
                     .flex_col()

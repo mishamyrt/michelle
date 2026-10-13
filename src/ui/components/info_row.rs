@@ -49,7 +49,7 @@ impl RenderOnce for InfoRow {
             div()
                 .w(self.label_width)
                 .flex_none()
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(colors.text_tertiary)
                 .child(self.label),
         )

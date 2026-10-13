@@ -237,7 +237,7 @@ impl Render for Michelle {
                 .on_action(cx.listener(Self::confirm_task_switch_action))
                 .on_action(cx.listener(Self::cancel_task_switch_action))
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
-                .child(self.render_settings(window, cx))
+                .child(self.render_settings(cx))
                 .children(toast)
                 .children(command_palette)
                 .children(commit_dialog)
@@ -310,7 +310,7 @@ impl Render for Michelle {
             .flex()
             .text_color(theme.text)
             .font_family(".SystemUIFont")
-            .text_style(TextStyle::Body)
+            .text_style(TextStyle::BODY)
             // Both panels slide through a container that narrows while their
             // content keeps its full width and is clipped: the sidebar list
             // and the right panel's surfaces never reflow on the way in or

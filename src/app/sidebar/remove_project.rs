@@ -92,7 +92,7 @@ impl Michelle {
                         .px(px(20.0))
                         .pt(px(20.0))
                         .pb(px(8.0))
-                        .text_style(TextStyle::Headline)
+                        .text_style(TextStyle::HEADLINE)
                         .text_color(theme.text)
                         .child(tr!(
                             "sidebar.remove_project_title",
@@ -103,7 +103,7 @@ impl Michelle {
                     div()
                         .px(px(20.0))
                         .pb(px(20.0))
-                        .text_style(TextStyle::Body)
+                        .text_style(TextStyle::BODY)
                         .text_color(theme.text_secondary)
                         .child(tr!("sidebar.remove_project_description")),
                 )

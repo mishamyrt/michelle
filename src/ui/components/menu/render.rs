@@ -239,7 +239,7 @@ fn render_menu_item(
             .px(px(16.5))
             .pt(px(6.0))
             .pb(px(2.0))
-            .text_style(TextStyle::CaptionEmphasized)
+            .text_style(TextStyle::SUBHEADLINE)
             .text_color(theme.text_tertiary)
             .child(label)
             .into_any_element(),
@@ -444,7 +444,7 @@ fn row(
         .flex()
         .items_center()
         .gap(px(4.0))
-        .text_style(TextStyle::Body)
+        .text_style(TextStyle::BODY)
         .text_color(theme.text)
         .when(highlighted, |element| {
             element

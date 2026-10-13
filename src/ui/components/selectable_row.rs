@@ -119,7 +119,7 @@ impl RenderOnce for SelectableRow {
                 .items_center()
                 .gap(px(8.0))
                 .cursor_default()
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(if self.state.disabled {
                     colors.text_ghost
                 } else {

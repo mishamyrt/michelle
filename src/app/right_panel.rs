@@ -7,7 +7,7 @@ use crate::ui::{ActivationExt, EmptyState, IconButton};
 pub(super) mod files;
 pub(super) mod model;
 mod review;
-use review::{review_diff_directory_paths, review_diff_tree_rows};
+use review::review_diff_tree_rows;
 pub(super) mod session_state;
 mod terminals;
 mod workspace;
@@ -877,6 +877,8 @@ pub(super) fn reusable_surface_index(
 #[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
+    use crate::app::right_panel::review::review_diff_directory_paths;
+
     use super::*;
 
     #[test]

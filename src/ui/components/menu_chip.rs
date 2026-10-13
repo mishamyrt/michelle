@@ -143,7 +143,7 @@ impl RenderOnce for MenuChip {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = UiColors::current(cx);
         let base = with_defaults(self.base, |base| {
-            base.text_style(TextStyle::Body)
+            base.text_style(TextStyle::BODY)
                 .text_color(theme.text_secondary)
                 .h(self
                     .height

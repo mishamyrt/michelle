@@ -185,8 +185,8 @@ impl Render for ToastHarness {
             "toast",
             &palette,
             MarkdownMetrics {
-                text_size: TextStyle::Body.size().into(),
-                line_height: TextStyle::Body.line_height().into(),
+                text_size: TextStyle::BODY.size().into(),
+                line_height: TextStyle::BODY.line_height().into(),
                 ..MarkdownMetrics::COMPACT
             },
             self.selection.clone(),

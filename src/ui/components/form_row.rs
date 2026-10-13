@@ -69,7 +69,7 @@ impl RenderOnce for FormRow {
         let colors = UiColors::current(cx);
         let label = self.label_content.unwrap_or_else(|| {
             Label::new(self.label)
-                .text_style(TextStyle::Headline)
+                .text_style(TextStyle::HEADLINE)
                 .text_color(colors.text)
                 .into_any_element()
         });

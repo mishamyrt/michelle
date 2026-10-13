@@ -11,9 +11,15 @@ pub struct Surface {
     base: Div,
 }
 
+impl Default for Surface {
+    fn default() -> Self {
+        Self { base: gpui::div() }
+    }
+}
+
 impl Surface {
     pub fn new() -> Self {
-        Self { base: gpui::div() }
+        Self::default()
     }
 }
 

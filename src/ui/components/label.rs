@@ -12,7 +12,7 @@ pub struct Label {
 impl Label {
     pub fn new(text: impl Into<SharedString>) -> Self {
         Self {
-            base: div().text_style(TextStyle::Body),
+            base: div().text_style(TextStyle::BODY),
             text: text.into(),
         }
     }

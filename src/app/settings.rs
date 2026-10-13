@@ -169,7 +169,7 @@ impl Michelle {
         cx.notify();
     }
 
-    pub(super) fn render_settings(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
 
         div()
@@ -195,13 +195,13 @@ impl Michelle {
             .bg(theme.canvas)
             .text_color(theme.text)
             .font_family(".SystemUIFont")
-            .text_style(TextStyle::Body)
-            .child(self.render_settings_sidebar(window, cx))
-            .child(self.render_settings_content(window, cx))
+            .text_style(TextStyle::BODY)
+            .child(self.render_settings_sidebar(cx))
+            .child(self.render_settings_content(cx))
             .into_any_element()
     }
 
-    fn render_settings_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    fn render_settings_sidebar(&self, cx: &mut Context<Self>) -> Div {
         let current_page = self.settings_ui.page.unwrap_or(SettingsPage::General);
         let query = self.settings_search_query(cx);
         let mut navigation = div().flex().flex_col().gap(px(3.0));
@@ -264,7 +264,7 @@ impl Michelle {
             .flex()
             .flex_col()
             .bg(transparent_black())
-            .child(self.render_settings_sidebar_titlebar(window, cx))
+            .child(self.render_settings_sidebar_titlebar(cx))
             .child(
                 div().px(px(12.0)).child(
                     SidebarItem::new("settings-back", "arrow.left", tr!("settings.back"))
@@ -312,11 +312,7 @@ impl Michelle {
         self.open_settings_page(next, cx);
     }
 
-    fn render_settings_sidebar_titlebar(
-        &self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    fn render_settings_sidebar_titlebar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         div()
             .id("settings-sidebar-titlebar")
             .h(px(TOOLBAR_HEIGHT))
@@ -339,7 +335,7 @@ impl Michelle {
             )
     }
 
-    fn render_settings_content(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    fn render_settings_content(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let page = self.settings_ui.page.unwrap_or(SettingsPage::General);
         // The Skills page is a mail-style split that owns the whole content
@@ -624,7 +620,7 @@ impl Michelle {
                                 .gap(px(7.0))
                                 .child(
                                     Label::new(tr!("daemon.expose_title"))
-                                        .text_style(TextStyle::Headline),
+                                        .text_style(TextStyle::HEADLINE),
                                 )
                                 .child(
                                     Badge::new(if pending {

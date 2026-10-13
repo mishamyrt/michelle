@@ -50,7 +50,7 @@ impl RenderOnce for Badge {
                 .py(px(2.0))
                 .rounded_full()
                 .bg(colors.overlay)
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(self.tone.color(colors))
         })
         .children(self.icon)

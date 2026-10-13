@@ -45,12 +45,13 @@ impl Michelle {
             ToastTone::Success => ("checkmark", theme.success),
         };
         let palette = MarkdownPalette::from_theme(&theme);
+        let text_style = TextStyle::BODY;
         let text_ctx = MarkdownCtx::new(
             format!("toast-{generation}"),
             &palette,
             MarkdownMetrics {
-                text_size: TextStyle::Body.size().into(),
-                line_height: TextStyle::Body.line_height().into(),
+                text_size: text_style.size().into(),
+                line_height: text_style.line_height().into(),
                 ..MarkdownMetrics::COMPACT
             },
             self.notifications_ui.selection.clone(),

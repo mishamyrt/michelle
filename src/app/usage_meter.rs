@@ -144,7 +144,7 @@ impl Michelle {
             .items_center()
             .gap(px(6.0))
             .flex_none()
-            .text_style(TextStyle::Caption)
+            .text_style(TextStyle::CAPTION_1)
             .text_color(theme.text_secondary)
             .cursor_default()
             .hover(|element| element.bg(theme.overlay))

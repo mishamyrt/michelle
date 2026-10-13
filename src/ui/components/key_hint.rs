@@ -38,7 +38,7 @@ impl RenderOnce for KeyHint {
                 .items_center()
                 .justify_center()
                 .bg(colors.overlay_strong)
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(colors.text_secondary)
         })
         .child(self.label)

@@ -19,7 +19,7 @@ impl EmptyState {
         Self {
             base: div(),
             title: title.into(),
-            title_style: TextStyle::Headline,
+            title_style: TextStyle::HEADLINE,
             description: None,
             icon: None,
             action: None,

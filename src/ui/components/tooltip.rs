@@ -63,7 +63,7 @@ impl Render for Tooltip {
                 .flex()
                 .items_center()
                 .gap(px(6.0))
-                .text_style(TextStyle::Caption)
+                .text_style(TextStyle::SUBHEADLINE)
                 .text_color(theme.text)
                 .child(self.label.clone()),
         )

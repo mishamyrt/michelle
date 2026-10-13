@@ -86,7 +86,7 @@ impl RenderOnce for TabItem {
                 .items_center()
                 .gap(px(6.0))
                 .cursor_default()
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(if self.selected {
                     colors.text
                 } else {

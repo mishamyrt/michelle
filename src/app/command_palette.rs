@@ -2032,8 +2032,7 @@ impl Michelle {
                                             div()
                                                 .min_w_0()
                                                 .truncate()
-                                                .text_size(TextStyle::Body.size())
-                                                .font_weight(FontWeight::NORMAL)
+                                                .text_style(TextStyle::BODY)
                                                 .text_color(if highlighted {
                                                     gpui::white()
                                                 } else {
@@ -2046,7 +2045,7 @@ impl Michelle {
                                                 div()
                                                     .min_w_0()
                                                     .truncate()
-                                                    .text_style(TextStyle::Body)
+                                                    .text_style(TextStyle::BODY)
                                                     .text_color(if highlighted {
                                                         gpui::white().opacity(0.8)
                                                     } else {
@@ -2063,7 +2062,7 @@ impl Michelle {
                                             .w_full()
                                             .overflow_hidden()
                                             .whitespace_nowrap()
-                                            .text_style(TextStyle::Body)
+                                            .text_style(TextStyle::BODY)
                                             .child(palette_content_match_text(
                                                 &matched,
                                                 &search_query,
@@ -2080,7 +2079,7 @@ impl Michelle {
                                     .flex_none()
                                     .ml(px(12.0))
                                     .mr(px(9.0))
-                                    .text_style(TextStyle::Body)
+                                    .text_style(TextStyle::BODY)
                                     .text_color(if highlighted {
                                         gpui::white().opacity(0.85)
                                     } else {

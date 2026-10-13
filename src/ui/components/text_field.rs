@@ -5,7 +5,7 @@ use gpui::{
 };
 
 pub use crate::input::{FieldMode, InputEvent, MediaPaste, TextInput};
-use crate::ui::{TextStyle, UiColors};
+use crate::ui::{StyledTypography, TextStyle, UiColors};
 
 use super::control::with_defaults;
 use crate::ui::tokens::metrics::{radius, spacing};
@@ -82,8 +82,7 @@ impl RenderOnce for TextField {
                 .flex()
                 .items_center()
                 .gap(px(spacing::SM))
-                .text_size(TextStyle::Caption.size())
-                .line_height(TextStyle::Caption.line_height())
+                .text_style(TextStyle::BODY)
         })
         // Focus remains visible even with an explicit border color.
         .when(focused, |element| element.border_color(theme.accent))

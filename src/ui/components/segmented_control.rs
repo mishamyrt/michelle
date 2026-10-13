@@ -120,7 +120,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for SegmentedControl<T> {
                 .flex()
                 .items_center()
                 .cursor_default()
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(if selected {
                     colors.text
                 } else {

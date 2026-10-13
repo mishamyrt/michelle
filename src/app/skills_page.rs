@@ -246,7 +246,7 @@ impl Michelle {
                 .into_any_element()
         } else {
             EmptyState::new(tr!("skills.select_placeholder"))
-                .title_style(TextStyle::Body)
+                .title_style(TextStyle::BODY)
                 .text_color(theme.text_ghost)
                 .p(px(0.0))
                 .gap(px(8.0))

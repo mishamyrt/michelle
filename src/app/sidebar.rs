@@ -1669,7 +1669,7 @@ impl Michelle {
             .items_center()
             .gap(px(4.0))
             .cursor_default()
-            .text_style(TextStyle::Body)
+            .text_style(TextStyle::BODY)
             .text_color(theme.text_secondary)
             .focus_visible(|style| style.text_color(theme.text))
             .child(

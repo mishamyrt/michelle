@@ -290,7 +290,7 @@ impl Michelle {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .text_style(TextStyle::Body)
+                    .text_style(TextStyle::BODY)
                     .text_color(theme.text_tertiary)
                     .child(crate::ui::motion::spinner(12.0, theme.text_tertiary))
                     .child(tr!("composer.loading_suggestions")),

@@ -54,7 +54,7 @@ impl RenderOnce for InlineNotice {
                 .flex()
                 .items_start()
                 .gap(px(8.0))
-                .text_style(TextStyle::Body)
+                .text_style(TextStyle::BODY)
                 .text_color(self.tone.color(colors))
         })
         .children(self.icon)

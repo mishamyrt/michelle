@@ -1,8 +1,5 @@
 use super::*;
-use crate::ui::{
-    ActivationExt, IconButton,
-    squircle::{SquircleExt, SquircleStyled, squircle},
-};
+use crate::ui::{ActivationExt, IconButton, squircle::SquircleExt};
 
 use chrono::{Datelike, Days};
 use std::path::Path;
