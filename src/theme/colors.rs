@@ -22,6 +22,7 @@ pub struct Theme {
     pub terminal: Hsla,
     pub overlay: Hsla,
     pub overlay_strong: Hsla,
+    pub message_bubble_background: Hsla,
 
     pub border: Hsla,
     pub border_strong: Hsla,

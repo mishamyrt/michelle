@@ -1,5 +1,8 @@
 use super::*;
-use crate::ui::{ActivationExt, IconButton};
+use crate::ui::{
+    ActivationExt, IconButton,
+    squircle::{SquircleExt, SquircleStyled, squircle},
+};
 
 use chrono::{Datelike, Days};
 use std::path::Path;
@@ -193,11 +196,7 @@ pub(super) fn render_message_footer(
     cx: &mut Context<Michelle>,
 ) -> AnyElement {
     let message_id = message.id;
-    let footer_color = if theme.is_dark {
-        gpui::hsla(126.93 / 360.0, 0.000_000_1, 0.543_95, 1.0)
-    } else {
-        theme.text_ghost
-    };
+    let footer_color = theme.text_tertiary;
     let timestamp = div()
         .h(px(27.0))
         .px(px(4.0))
@@ -555,7 +554,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut Context<Michelle>) 
                         .w_full()
                         .max_w(px(540.0))
                         .rounded(px(12.0))
-                        .bg(theme.raised)
+                        .bg(theme.message_bubble_background)
                         .pt(px(9.0))
                         .pb(px(8.0))
                         .child(edit_input)
@@ -642,9 +641,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut Context<Michelle>) 
                             .relative()
                             .overflow_hidden()
                             .rounded(px(12.0))
-                            .border_1()
-                            .border_color(theme.raised)
-                            .bg(theme.raised)
+                            .bg(theme.message_bubble_background)
+                            .squircle()
                             .px(px(11.0))
                             .py(px(7.0))
                             .text_size(sp(14.0))

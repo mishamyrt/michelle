@@ -1,4 +1,4 @@
-use gpui::{Hsla, hsla, rgb};
+use gpui::{Hsla, black, hsla, rgb};
 
 use super::Theme;
 use crate::ui::Palette;
@@ -18,6 +18,7 @@ pub(super) fn theme() -> Theme {
         terminal: rgb(0xFFFFFF).into(),
         overlay: palette.fills.quaternary,
         overlay_strong: palette.fills.primary,
+        message_bubble_background: black().alpha(0.1),
 
         border: palette.separators.standard,
         border_strong: palette.separators.strong,
