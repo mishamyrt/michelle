@@ -21,6 +21,15 @@ pub(super) fn background_color(element: &mut impl Styled, fallback: Hsla) -> Hsl
         .unwrap_or(fallback)
 }
 
+pub(super) fn overlay_color(background: Hsla, overlay: Hsla) -> Hsla {
+    // GPUI's blend preserves the base alpha, so a transparent base needs the overlay itself.
+    if background.is_transparent() {
+        overlay
+    } else {
+        background.blend(overlay)
+    }
+}
+
 #[derive(Default)]
 pub(super) struct ControlState {
     pub disabled: bool,

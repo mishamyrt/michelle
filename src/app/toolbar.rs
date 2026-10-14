@@ -450,7 +450,7 @@ impl Michelle {
             .items_center()
             .gap(px(6.0))
             .pl(px(10.0))
-            .pr(px(14.0))
+            .pr(px(8.0))
             .child(
                 div()
                     .relative()

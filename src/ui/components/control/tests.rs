@@ -8,6 +8,23 @@ use crate::ui::{
     TextInput, Toggle, ToolbarButton,
 };
 
+#[test]
+fn hover_and_active_overlays_stay_visible_on_transparent_controls() {
+    for theme in [crate::ui::UiColors::light(), crate::ui::UiColors::dark()] {
+        for overlay in [theme.overlay, theme.overlay_strong] {
+            let color = super::overlay_color(gpui::transparent_black(), overlay);
+            assert!(!color.is_transparent());
+            assert_eq!(color, overlay);
+            for background in [theme.control_fill, rgb(0x123456).into()] {
+                assert_eq!(
+                    super::overlay_color(background, overlay),
+                    background.blend(overlay)
+                );
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Kind {
     Button,

@@ -1,4 +1,6 @@
-use super::control::{ControlState, background_color, control_style_methods, with_defaults};
+use super::control::{
+    ControlState, background_color, control_style_methods, overlay_color, with_defaults,
+};
 use crate::ui::primitives::activation::activation_listener;
 use crate::ui::primitives::timing::TOOLTIP_SHOW_DELAY_MS;
 use crate::ui::squircle::SquircleExt;
@@ -173,8 +175,8 @@ impl RenderOnce for Button {
         let button = self.state.apply(
             button,
             palette,
-            StyleRefinement::default().bg(background.blend(palette.overlay)),
-            StyleRefinement::default().bg(background.blend(palette.overlay_strong)),
+            StyleRefinement::default().bg(overlay_color(background, palette.overlay)),
+            StyleRefinement::default().bg(overlay_color(background, palette.overlay_strong)),
         );
         button
             .when_some(self.tooltip, |button, text| {
@@ -287,8 +289,8 @@ impl RenderOnce for IconButton {
             .apply(
                 button,
                 theme,
-                StyleRefinement::default().bg(background.blend(theme.overlay)),
-                StyleRefinement::default().bg(background.blend(theme.overlay_strong)),
+                StyleRefinement::default().bg(overlay_color(background, theme.overlay)),
+                StyleRefinement::default().bg(overlay_color(background, theme.overlay_strong)),
             )
             .when_some(self.tooltip, |button, text| {
                 button

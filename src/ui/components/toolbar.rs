@@ -1,15 +1,18 @@
 use crate::ui::squircle::SquircleExt;
 use gpui::{
     AnyElement, App, BoxShadow, Context, Div, ElementId, InteractiveElement, Interactivity,
-    ParentElement, RenderOnce, SharedString, Stateful, StyleRefinement, Styled, Window, div, hsla,
-    point, prelude::*, px,
+    ParentElement, RenderOnce, SharedString, Stateful, StyleRefinement, Styled, Window, div,
+    prelude::*, px, transparent_black,
 };
 
-use super::control::{ControlState, background_color, control_style_methods, with_defaults};
+use super::control::{
+    ControlState, background_color, control_style_methods, overlay_color, with_defaults,
+};
 use super::tooltip::Tooltip;
 use crate::ui::UiColors;
 use crate::ui::primitives::activation::activation_listener;
 use crate::ui::primitives::timing::TOOLTIP_SHOW_DELAY_MS;
+use crate::ui::tokens::metrics::radius;
 use crate::ui::{ActivationExt, ControlSize, IconSize, motion, sf_icon};
 
 #[derive(IntoElement)]
@@ -99,28 +102,25 @@ impl RenderOnce for ToolbarButton {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = UiColors::current(cx);
         let mut button = with_defaults(self.base, |base| {
-            toolbar_surface(base, theme)
-                .size(self.size.height())
-                .rounded(self.size.height() / 2.0)
+            base.size(self.size.height())
+                .rounded(px(radius::CONTROL))
                 .flex_none()
                 .flex()
                 .items_center()
                 .justify_center()
                 .text_color(theme.text)
                 .cursor_default()
-                .when(self.selected, |button| {
-                    button.bg(theme.control_fill.blend(theme.overlay_strong))
-                })
+                .when(self.selected, |button| button.bg(theme.overlay_strong))
         });
-        let background = background_color(&mut button, theme.control_fill);
+        let background = background_color(&mut button, transparent_black());
         let foreground = button.style().text.color.unwrap_or(theme.text);
         let button = self
             .state
             .apply(
                 button,
                 theme,
-                StyleRefinement::default().bg(background.blend(theme.overlay)),
-                StyleRefinement::default().bg(background.blend(theme.overlay_strong)),
+                StyleRefinement::default().bg(overlay_color(background, theme.overlay)),
+                StyleRefinement::default().bg(overlay_color(background, theme.overlay_strong)),
             )
             .child(if self.loading {
                 motion::spinner(IconSize::Regular.font_size(), foreground)
@@ -140,7 +140,7 @@ impl RenderOnce for ToolbarButton {
     }
 }
 
-/// Two independent actions sharing the circular toolbar button's surface.
+/// Two independent toolbar actions sharing a capsule border.
 /// Build each half with `toolbar_button_segment` before attaching its handlers
 /// or dropdown, so menus remain free to paint outside the capsule.
 pub fn toolbar_split_button(
@@ -148,7 +148,9 @@ pub fn toolbar_split_button(
     secondary: impl IntoElement,
     theme: UiColors,
 ) -> crate::ui::squircle::SquircleElement<Div> {
-    toolbar_surface(div(), theme)
+    div()
+        .border(px(0.5))
+        .border_color(theme.control_border)
         .h(ControlSize::Large.height())
         .rounded(ControlSize::Large.height() / 2.0)
         .flex_none()
@@ -186,20 +188,6 @@ fn toolbar_control(button: Stateful<Div>, theme: UiColors) -> Stateful<Div> {
                     .inset(),
             ])
         })
-        .hover(|style| style.bg(theme.control_fill.blend(theme.overlay)))
-        .active(|style| style.bg(theme.control_fill.blend(theme.overlay_strong)))
-}
-
-fn toolbar_surface<E: Styled>(element: E, theme: UiColors) -> E {
-    element
-        .bg(theme.control_fill)
-        .border(px(0.5))
-        .border_color(theme.control_border)
-        .shadow(vec![BoxShadow {
-            color: hsla(0.0, 0.0, 0.0, 0.05),
-            offset: point(px(0.0), px(8.0)),
-            blur_radius: px(15.0),
-            spread_radius: px(0.0),
-            inset: false,
-        }])
+        .hover(|style| style.bg(theme.overlay))
+        .active(|style| style.bg(theme.overlay_strong))
 }
