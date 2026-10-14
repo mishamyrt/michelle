@@ -18,7 +18,7 @@ pub(super) fn theme() -> Theme {
         terminal: rgb(0xFFFFFF).into(),
         overlay: palette.fills.quaternary,
         overlay_strong: palette.fills.primary,
-        message_bubble_background: black().alpha(0.1),
+        message_bubble_background: black().alpha(0.07),
 
         border: palette.separators.standard,
         border_strong: palette.separators.strong,
