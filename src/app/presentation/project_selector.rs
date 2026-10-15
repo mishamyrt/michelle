@@ -74,7 +74,7 @@ impl RenderOnce for ProjectNameSelector {
                 canvas(
                     |_, _, _| {},
                     move |bounds, _, window, _| {
-                        let y = bounds.origin.y + bounds.size.height - px(0.5);
+                        let y = bounds.origin.y + bounds.size.height + px(6.0);
                         let mut builder =
                             PathBuilder::stroke(px(1.0)).dash_array(&[px(1.0), px(2.0)]);
                         builder.move_to(point(bounds.origin.x, y));

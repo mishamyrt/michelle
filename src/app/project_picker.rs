@@ -8,6 +8,7 @@
 //! a panel is open; a closed picker costs what any other closed menu does.
 
 use crate::ui::SelectableRow;
+use crate::ui::squircle::SquircleExt;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 
@@ -312,9 +313,10 @@ impl Michelle {
                     .line_height(sp(15.0))
                     .font_weight(FontWeight::NORMAL)
                     .rounded(px(13.0))
+                    .squircle()
                     .overflow_hidden()
-                    .border_1()
-                    .border_color(theme.border_strong)
+                    .border(px(0.5))
+                    .border_color(theme.border)
                     .bg(theme.raised)
                     .shadow_lg()
                     .flex()
