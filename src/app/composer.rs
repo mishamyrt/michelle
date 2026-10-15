@@ -911,7 +911,7 @@ impl Michelle {
         let handle = self.menu_handle("runtime-mode", cx);
         dropdown_menu(
             MenuChip::new("runtime-mode")
-                .text_style(TextStyle::CAPTION_2)
+                .text_style(TextStyle::SUBHEADLINE)
                 .icon(selected_mode.icon(), theme.text_secondary)
                 .label(selected_mode.label())
                 .caret(false)

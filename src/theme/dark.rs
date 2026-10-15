@@ -19,6 +19,8 @@ pub(super) fn theme() -> Theme {
         overlay: palette.fills.quaternary,
         overlay_strong: palette.fills.primary,
         message_bubble_background: white().alpha(0.1),
+        transcript_background: white().alpha(0.02),
+        transcript_header_background: white().alpha(0.04),
 
         border: palette.separators.standard,
         border_strong: palette.separators.strong,

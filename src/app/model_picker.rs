@@ -169,7 +169,7 @@ impl Michelle {
         let handle = self.menu_handle("model-traits", cx);
         Some(dropdown_menu(
             MenuChip::new("model-traits")
-                .text_style(TextStyle::CAPTION_2)
+                .text_style(TextStyle::SUBHEADLINE)
                 .when(fast, |trigger| trigger.icon("bolt", theme.text_secondary))
                 .label(trigger_label)
                 .caret(false)

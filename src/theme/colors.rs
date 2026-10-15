@@ -23,6 +23,8 @@ pub struct Theme {
     pub overlay: Hsla,
     pub overlay_strong: Hsla,
     pub message_bubble_background: Hsla,
+    pub transcript_background: Hsla,
+    pub transcript_header_background: Hsla,
 
     pub border: Hsla,
     pub border_strong: Hsla,

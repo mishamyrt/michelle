@@ -929,7 +929,7 @@ transcript.you_stopped_after: "Вы остановили работу через
 transcript.working_for: "Работает %{duration}"
 transcript.thinking: Рассуждает
 transcript.thought_for: "Время рассуждений: %{duration}"
-transcript.changed_file: "Изменено файлов: %{count}"
+transcript.changed_file: "Изменен %{count} файл"
 transcript.changed_files: "Изменено файлов: %{count}"
 transcript.review_changes: Изменения
 transcript.show_more_files: "Показать ещё файлов: %{count}"

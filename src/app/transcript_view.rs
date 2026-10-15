@@ -1,5 +1,6 @@
 use super::right_panel::{DiffRowStyle, render_diff_code_row};
 use super::*;
+use crate::ui::squircle::SquircleExt;
 use crate::ui::{ActivationExt, DisclosureGroup, IconButton};
 
 mod list;
@@ -1468,15 +1469,12 @@ impl Michelle {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let Some(checkpoint) = self
+        let checkpoint = self
             .selected_session()
             .and_then(|session| session.turns.iter().find(|turn| turn.id == turn_id))
             .and_then(|turn| turn.checkpoint.as_ref())
             .filter(|checkpoint| checkpoint.status == CheckpointStatus::Ready)
-            .filter(|checkpoint| !checkpoint.files.is_empty())
-        else {
-            return None;
-        };
+            .filter(|checkpoint| !checkpoint.files.is_empty())?;
 
         let files = checkpoint.files.as_slice();
         let additions = checkpoint.additions;
@@ -1499,22 +1497,19 @@ impl Michelle {
             )))
             .track_focus(&review_focus)
             .tab_index(0)
-            .h(px(28.0))
+            .mr(px(-8.0))
+            .h(px(22.0))
             .px(px(10.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
+            .rounded(px(11.0))
+            .squircle()
             .flex()
             .items_center()
             .gap(px(5.0))
             .cursor_default()
-            .text_size(sp(12.5))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(theme.text_secondary)
+            .bg(theme.overlay_strong)
+            .text_style(TextStyle::SUBHEADLINE)
+            .text_color(theme.text)
             .focus_visible(|style| style.border_color(theme.accent))
-            .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
-            .active(|style| style.bg(theme.overlay))
-            .child(icon("doc.text", 12.0, theme.text_tertiary))
             .child(tr_cow!("transcript.review_changes"))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.open_turn_diff(turn_id, cx);
@@ -1535,33 +1530,26 @@ impl Michelle {
             .id(SharedString::from(format!("changed-files-card-{turn_id}")))
             .w_full()
             .min_w_0()
-            .rounded(px(12.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .bg(theme.overlay)
+            .rounded(px(15.0))
+            .squircle()
+            .border(px(0.5))
+            .border_color(theme.border)
+            .bg(theme.transcript_background)
             .tab_index(0)
             .tab_group()
             .tab_stop(false)
             .overflow_hidden()
             .child(
                 div()
-                    .min_h(px(58.0))
-                    .px(px(12.0))
-                    .py(px(9.0))
+                    .min_h(px(25.0))
+                    .px(px(16.0))
+                    .py(px(8.0))
+                    .rounded_t(px(15.0))
+                    .squircle()
+                    .bg(theme.transcript_header_background)
                     .flex()
                     .items_center()
                     .gap(px(10.0))
-                    .child(
-                        div()
-                            .size(px(36.0))
-                            .flex_none()
-                            .rounded(px(9.0))
-                            .bg(theme.overlay_strong)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(icon("doc.text", 16.0, theme.text_tertiary)),
-                    )
                     .child(
                         div()
                             .min_w_0()
@@ -1572,28 +1560,9 @@ impl Michelle {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_style(TextStyle::SUBHEADLINE)
                                     .text_color(theme.text)
                                     .child(title),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(14.0))
-                                    .child(
-                                        div()
-                                            .text_color(theme.success)
-                                            .child(format!("+{additions}")),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_color(theme.danger)
-                                            .child(format!("-{deletions}")),
-                                    ),
                             ),
                     )
                     .child(review),
@@ -1604,13 +1573,13 @@ impl Michelle {
             .min_w_0()
             .flex()
             .flex_col()
-            .border_t_1()
+            .border_t(px(0.5))
             .border_color(theme.border);
         for file in files.iter().take(visible_count) {
             file_rows = file_rows.child(
                 div()
-                    .h(px(31.0))
-                    .px(px(12.0))
+                    .h(px(32.0))
+                    .px(px(16.0))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
@@ -1623,22 +1592,22 @@ impl Michelle {
                             .min_w_0()
                             .flex_1()
                             .truncate()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
+                            .text_style(TextStyle::BODY)
+                            .text_color(theme.text)
                             .tooltip(Tooltip::text(file.path.clone()))
                             .child(file.path.clone()),
                     )
                     .child(
                         div()
                             .flex_none()
-                            .text_size(sp(12.5))
+                            .text_style(TextStyle::BODY)
                             .text_color(theme.success)
                             .child(format!("+{}", file.additions)),
                     )
                     .child(
                         div()
                             .flex_none()
-                            .text_size(sp(12.5))
+                            .text_style(TextStyle::BODY)
                             .text_color(theme.danger)
                             .child(format!("-{}", file.deletions)),
                     ),
@@ -1664,16 +1633,17 @@ impl Michelle {
                     )))
                     .track_focus(&toggle_focus)
                     .tab_index(0)
-                    .h(px(34.0))
-                    .px(px(12.0))
-                    .border_t_1()
+                    .h(px(32.0))
+                    .px(px(16.0))
+                    .border_t(px(0.5))
+                    .rounded_b(px(15.0))
+                    .squircle()
                     .border_color(theme.border)
                     .flex()
                     .items_center()
                     .gap(px(6.0))
                     .cursor_default()
-                    .text_size(sp(12.5))
-                    .font_weight(FontWeight::MEDIUM)
+                    .text_style(TextStyle::BODY)
                     .text_color(theme.text_secondary)
                     .focus_visible(|style| style.bg(theme.overlay_strong))
                     .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
@@ -1956,8 +1926,6 @@ impl Michelle {
     ) -> AnyElement {
         // `Theme::overlay` is 5% alpha and GPUI's `opacity` multiplies it.
         let activity_surface = theme.surface.blend(theme.overlay.opacity(0.7));
-        let activity_hover_surface = theme.surface.blend(theme.overlay);
-        let activity_active_surface = theme.surface.blend(theme.overlay_strong.opacity(0.72));
         let mut items = div()
             .w_full()
             .min_w_0()
@@ -2062,48 +2030,43 @@ impl Michelle {
                 .w_full()
                 .min_w_0()
                 .overflow_hidden()
-                .rounded(px(9.0))
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(activity_surface)
+                .rounded(px(12.0))
+                .squircle()
+                .border(px(0.5))
+                .border_color(theme.border)
+                .bg(theme.transcript_header_background)
                 .flex()
                 .flex_col()
                 .child(
                     div()
                         .id(SharedString::from(format!("activity-item-{id}")))
                         // The parent owns a 1px border on each edge, so a
-                        // 28px row makes the visible activity header 30px.
-                        .h(px(28.0))
-                        .px(px(8.0))
+                        // 30px row makes the visible activity header 32px.
+                        .h(px(30.0))
+                        .px(px(10.0))
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .rounded_tl(px(8.0))
-                        .rounded_tr(px(8.0))
-                        .when(!item_expanded, |element| {
-                            element.rounded_bl(px(8.0)).rounded_br(px(8.0))
-                        })
-                        .text_size(sp(12.5))
-                        .line_height(sp(16.0))
+                        .rounded_t(px(12.0))
+                        .squircle()
+                        .when(!item_expanded, |element| element.rounded_b(px(12.0)))
+                        .text_style(TextStyle::BODY)
                         .when(has_detail, |element| {
                             element
                                 .track_focus(&item_focus)
                                 .tab_index(0)
                                 .cursor_default()
-                                .focus_visible(|element| element.bg(activity_hover_surface))
-                                .hover(|element| element.bg(activity_hover_surface))
-                                .active(|element| element.bg(activity_active_surface))
                         })
                         .child(icon(
                             activity_icon(activity.kind),
-                            12.0,
-                            theme.text_tertiary,
+                            16.0,
+                            theme.text_secondary,
                         ))
                         .child(
                             div()
                                 .flex_none()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.text_secondary)
+                                .text_style(TextStyle::BODY)
+                                .text_color(theme.text)
                                 .child(SharedString::from(action_label)),
                         )
                         .when(!row_detail.is_empty(), |element| {
@@ -2139,8 +2102,8 @@ impl Michelle {
                                 } else {
                                     "chevron.right"
                                 },
-                                10.0,
-                                theme.text_tertiary,
+                                12.0,
+                                theme.text_secondary,
                             ))
                         })
                         .when(!has_detail && reasoning.is_none(), |element| {
@@ -2226,8 +2189,8 @@ impl Michelle {
                         .relative()
                         .max_h(px(400.0))
                         .overflow_hidden()
-                        .border_t_1()
-                        .border_color(theme.border_strong)
+                        .border_t(px(0.5))
+                        .border_color(theme.border)
                         .child(
                             div()
                                 .id(SharedString::from(format!("reasoning-scroll-{id}")))
@@ -2292,8 +2255,8 @@ impl Michelle {
                 let mut detail_card = div()
                     .w_full()
                     .min_w_0()
-                    .border_t_1()
-                    .border_color(theme.border_strong)
+                    .border_t(px(0.5))
+                    .border_color(theme.border)
                     .px(px(12.0))
                     .py(px(8.0))
                     .flex()
@@ -2302,7 +2265,7 @@ impl Michelle {
                     .font_family(md::render::MONO_FAMILY)
                     .text_size(px(mono_size))
                     .line_height(px(mono_line))
-                    .text_color(theme.text_secondary)
+                    .text_color(theme.text)
                     .whitespace_normal()
                     .overflow_hidden();
                 for section in sections {
@@ -2375,8 +2338,8 @@ impl Michelle {
                                             .hover(|button| button.bg(theme.overlay_strong))
                                             .child(icon(
                                                 if copied { "checkmark" } else { "doc.on.doc" },
-                                                11.0,
-                                                theme.text_ghost,
+                                                14.0,
+                                                theme.text_secondary,
                                             ))
                                             .tooltip(Tooltip::text(copy_tooltip.clone()))
                                             .on_click(move |_, _, cx| {
