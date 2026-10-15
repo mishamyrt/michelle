@@ -16,6 +16,11 @@ required. Colors use quoted `#RRGGBB` or `#RRGGBBAA` strings; the final byte is 
 `sidebar` colors the native macOS sidebar tint, above its vibrancy material.
 `sidebar_drag_background` is the solid surface used while resizing the sidebar.
 
+The terminal uses Myrt Code Theme's Ghostty colors, with the dark palette softened
+for Michelle's neutral dark-gray surface. This includes ANSI text, the default
+foreground, cursor, and selection. `terminal` sets its screen background; the
+built-in theme uses white in light mode and `#181818` in dark.
+
 Invalid files are skipped and their errors are logged. Michelle remains available
 even if the directory cannot be read. If a selected theme disappears or becomes
 invalid, the app uses Michelle with the selected color scheme. Selection is stored

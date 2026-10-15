@@ -3,11 +3,13 @@ use gpui::{App, Global, Window, WindowAppearance};
 mod colors;
 mod dark;
 mod light;
+mod terminal;
 
 pub use crate::ui::sp;
 pub use colors::Theme;
 use serde::Deserialize;
 use std::{fs, io, path::Path};
+pub(crate) use terminal::{TerminalColors, rgb_to_hsla, terminal_rgb};
 
 pub use michelle_client::theme::ThemePreference;
 

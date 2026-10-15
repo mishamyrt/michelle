@@ -17,7 +17,7 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
 use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::tty::{self, Shell};
-use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
+use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use anyhow::{Context as _, Result};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
@@ -26,12 +26,12 @@ use gpui::{
     Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
     MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent,
     SharedString, StrikethroughStyle, Styled, StyledText, Subscription, Task, TextRun,
-    UnderlineStyle, Window, canvas, div, font, px, rgb,
+    UnderlineStyle, Window, canvas, div, font, px,
 };
 use parking_lot::Mutex;
 
 use crate::persistence::DEFAULT_RIGHT_PANEL_WIDTH;
-use crate::theme::{Theme, sp};
+use crate::theme::{TerminalColors, Theme, rgb_to_hsla, sp, terminal_rgb};
 use crate::ui::TOOLBAR_HEIGHT;
 use crate::ui::scrollbar::{self, ScrollbarState};
 
@@ -309,8 +309,7 @@ impl TerminalSession {
 
     fn snapshot(
         &self,
-        theme: Theme,
-        selection_color: Hsla,
+        theme: TerminalColors,
         cursor_style: TerminalCursorStyle,
         hovered_link: Option<&Match>,
     ) -> TerminalSnapshot {
@@ -355,8 +354,8 @@ impl TerminalSession {
                 text.extend(zerowidth);
             }
 
-            let mut foreground = resolve_color(cell.fg, content.colors, theme, true);
-            let mut background = resolve_color(cell.bg, content.colors, theme, false);
+            let mut foreground = resolve_color(cell.fg, content.colors, theme);
+            let mut background = resolve_color(cell.bg, content.colors, theme);
             if cell.flags.contains(Flags::INVERSE) {
                 std::mem::swap(&mut foreground, &mut background);
             }
@@ -371,15 +370,15 @@ impl TerminalSession {
                 }
             }
             if selection.is_some_and(|selection| selection.contains(indexed.point)) {
-                background = selection_color;
-                foreground = theme.text;
+                background = theme.selection;
+                foreground = theme.foreground;
             }
             if cursor_style == TerminalCursorStyle::Solid
                 && row == cursor_row
                 && column == cursor_column
             {
-                background = theme.text;
-                foreground = theme.terminal;
+                background = theme.cursor;
+                foreground = theme.background;
             }
 
             cells[row as usize * columns + column] = TerminalCell {
@@ -483,11 +482,11 @@ struct TerminalCell {
 }
 
 impl TerminalCell {
-    fn blank(theme: Theme) -> Self {
+    fn blank(theme: TerminalColors) -> Self {
         Self {
             text: " ".into(),
-            foreground: theme.text,
-            background: theme.terminal,
+            foreground: theme.foreground,
+            background: theme.background,
             bold: false,
             italic: false,
             underline: false,
@@ -1063,7 +1062,7 @@ impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.ensure_cursor_focus_tracking(window, cx);
         let theme = Theme::current(cx);
-        let selection_color = theme.selection;
+        let terminal_colors = TerminalColors::new(theme);
         let viewport = window.viewport_size();
         let panel_width = self.panel_width;
         let body_height =
@@ -1103,7 +1102,7 @@ impl Render for TerminalView {
         let snapshot = self
             .session
             .as_ref()
-            .map(|session| session.snapshot(theme, selection_color, cursor_style, hovered_link));
+            .map(|session| session.snapshot(terminal_colors, cursor_style, hovered_link));
         let title = if self.title.trim().is_empty() {
             tr!("right_panel.terminal")
         } else {
@@ -1190,7 +1189,7 @@ impl Render for TerminalView {
                         .w(px(cell_width))
                         .h(px(TERMINAL_CELL_HEIGHT))
                         .border_1()
-                        .border_color(theme.text),
+                        .border_color(terminal_colors.cursor),
                 );
             }
         } else {
@@ -1679,91 +1678,22 @@ fn tilde_sequence(number: u8, modifier: u8) -> String {
 fn resolve_color(
     color: Color,
     colors: &alacritty_terminal::term::color::Colors,
-    theme: Theme,
-    foreground: bool,
+    theme: TerminalColors,
 ) -> Hsla {
-    let rgb = match color {
-        Color::Spec(color) => Some(color),
-        Color::Indexed(index) => {
-            colors[index as usize].or_else(|| Some(terminal_rgb(index as usize, theme.is_dark)))
-        }
-        Color::Named(NamedColor::Foreground | NamedColor::BrightForeground) => None,
-        Color::Named(NamedColor::Background) => return theme.terminal,
-        Color::Named(NamedColor::Cursor) => return theme.text,
-        Color::Named(named) => {
-            colors[named as usize].or_else(|| Some(terminal_rgb(named as usize, theme.is_dark)))
-        }
-    };
-    rgb.map(rgb_to_hsla).unwrap_or(if foreground {
-        theme.text
-    } else {
-        theme.terminal
-    })
-}
-
-fn rgb_to_hsla(color: Rgb) -> Hsla {
-    rgb((u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b)).into()
-}
-
-fn terminal_rgb(index: usize, is_dark: bool) -> Rgb {
-    // Tomorrow Night on dark surfaces, Tomorrow on light — same hues tuned
-    // for the opposite background so ANSI text stays legible on white.
-    const ANSI_DARK: [u32; 16] = [
-        0x1d1f21, 0xcc6666, 0xb5bd68, 0xf0c674, 0x81a2be, 0xb294bb, 0x8abeb7, 0xc5c8c6, 0x666666,
-        0xd54e53, 0xb9ca4a, 0xe7c547, 0x7aa6da, 0xc397d8, 0x70c0b1, 0xeaeaea,
-    ];
-    const ANSI_LIGHT: [u32; 16] = [
-        0x000000, 0xc82829, 0x718c00, 0xeab700, 0x4271ae, 0x8959a8, 0x3e999f, 0xc7c7c7, 0x8e908c,
-        0xc82829, 0x718c00, 0xeab700, 0x4271ae, 0x8959a8, 0x3e999f, 0xffffff,
-    ];
-    let ansi = if is_dark { &ANSI_DARK } else { &ANSI_LIGHT };
-    let value = match index {
-        0..=15 => ansi[index],
-        16..=231 => {
-            let index = index - 16;
-            let channel = |value: usize| {
-                if value == 0 {
-                    0
-                } else {
-                    55 + value as u32 * 40
-                }
-            };
-            let red = channel(index / 36);
-            let green = channel((index / 6) % 6);
-            let blue = channel(index % 6);
-            (red << 16) | (green << 8) | blue
-        }
-        232..=255 => {
-            let value = 8 + (index as u32 - 232) * 10;
-            (value << 16) | (value << 8) | value
-        }
-        value
-            if value >= NamedColor::DimBlack as usize && value <= NamedColor::DimWhite as usize =>
-        {
-            let base = ansi[value - NamedColor::DimBlack as usize];
-            // Faint fades toward the surface: black on dark, white on light.
-            let dim = |channel: u32| {
-                if is_dark {
-                    channel * 2 / 3
-                } else {
-                    channel + (255 - channel) / 3
-                }
-            };
-            (dim((base >> 16) & 0xff) << 16) | (dim((base >> 8) & 0xff) << 8) | dim(base & 0xff)
-        }
-        _ => {
-            if is_dark {
-                0xe5e5e5
-            } else {
-                0x242424
+    let rgb =
+        match color {
+            Color::Spec(color) => color,
+            Color::Indexed(index) => colors[index as usize]
+                .unwrap_or_else(|| terminal_rgb(index as usize, theme.is_dark)),
+            Color::Named(NamedColor::Foreground | NamedColor::BrightForeground) => {
+                return theme.foreground;
             }
-        }
-    };
-    Rgb {
-        r: (value >> 16) as u8,
-        g: (value >> 8) as u8,
-        b: value as u8,
-    }
+            Color::Named(NamedColor::Background) => return theme.background,
+            Color::Named(NamedColor::Cursor) => return theme.cursor,
+            Color::Named(named) => colors[named as usize]
+                .unwrap_or_else(|| terminal_rgb(named as usize, theme.is_dark)),
+        };
+    rgb_to_hsla(rgb)
 }
 
 #[cfg(test)]
@@ -1771,7 +1701,7 @@ mod tests {
     use super::*;
     use alacritty_terminal::event::VoidListener;
     use alacritty_terminal::vte::ansi::Processor;
-    use gpui::{Modifiers, point, size};
+    use gpui::{Modifiers, point, rgb, size};
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
         Keystroke {
@@ -1800,6 +1730,59 @@ mod tests {
     fn plain_link_value(term: &Term<VoidListener>, point: TerminalPoint) -> Option<String> {
         let mut regex = RegexSearch::new(TERMINAL_LINK_REGEX).unwrap();
         plain_link_at(term, &mut regex, point).map(|(value, _)| value)
+    }
+
+    #[test]
+    fn terminal_defaults_match_color_queries_in_both_schemes() {
+        let term = parse_terminal(b"plain\x1b[31mred\x1b[0m");
+        let content = term.renderable_content();
+        for theme in [Theme::light(), Theme::dark()] {
+            let terminal = TerminalColors::new(theme);
+            for named in [
+                NamedColor::Foreground,
+                NamedColor::Background,
+                NamedColor::Cursor,
+            ] {
+                assert_eq!(
+                    resolve_color(Color::Named(named), content.colors, terminal),
+                    rgb_to_hsla(terminal_rgb(named as usize, theme.is_dark)),
+                );
+            }
+            assert_eq!(
+                TerminalCell::blank(terminal).foreground,
+                terminal.foreground
+            );
+            assert_eq!(TerminalCell::blank(terminal).background, theme.terminal);
+            assert_eq!(
+                resolve_color(Color::Named(NamedColor::Red), content.colors, terminal),
+                rgb_to_hsla(terminal_rgb(1, theme.is_dark)),
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_theme_preserves_explicit_colors_and_custom_backgrounds() {
+        let term = parse_terminal(b"\x1b]4;1;#123456\x1b\\\x1b[38;2;18;52;86mX");
+        let content = term.renderable_content();
+        let cell = content.display_iter.into_iter().next().unwrap().cell;
+        for mut theme in [Theme::light(), Theme::dark()] {
+            theme.terminal = rgb(0x182028).into();
+            let terminal = TerminalColors::new(theme);
+            for color in [cell.fg, Color::Indexed(1), Color::Named(NamedColor::Red)] {
+                assert_eq!(
+                    resolve_color(color, content.colors, terminal),
+                    rgb(0x123456).into()
+                );
+            }
+            assert_eq!(
+                resolve_color(
+                    Color::Named(NamedColor::Background),
+                    content.colors,
+                    terminal
+                ),
+                theme.terminal,
+            );
+        }
     }
 
     #[test]

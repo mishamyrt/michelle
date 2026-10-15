@@ -15,7 +15,7 @@ pub(super) fn theme() -> Theme {
         raised: rgb(0x232323).into(),
         composer: rgb(0x212121).into(),
         inset: rgb(0x151515).into(),
-        terminal: rgb(0x151515).into(),
+        terminal: rgb(0x181818).into(),
         overlay: palette.fills.quaternary,
         overlay_strong: palette.fills.primary,
         message_bubble_background: white().alpha(0.1),

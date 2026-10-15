@@ -18,7 +18,7 @@ pub struct Theme {
     pub raised: Hsla,
     pub composer: Hsla,
     pub inset: Hsla,
-    /// Terminal screen surface: paper-white in light mode, near-black in dark.
+    /// Terminal screen surface; built-in colors follow Myrt Code Theme.
     pub terminal: Hsla,
     pub overlay: Hsla,
     pub overlay_strong: Hsla,

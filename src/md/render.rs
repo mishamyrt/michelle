@@ -43,7 +43,9 @@ use super::selection::{
 use super::veil::{RowVeil, apply_veil};
 use crate::theme::Theme;
 use crate::ui::menu::{ContextMenuHandle, context_menu};
+use crate::ui::squircle::SquircleExt;
 use crate::ui::tooltip::Tooltip;
+use crate::ui::{StyledTypography, TextStyle};
 
 mod math_text;
 
@@ -206,6 +208,7 @@ pub struct Palette {
     pub tertiary: Hsla,
     pub ghost: Hsla,
     pub border: Hsla,
+    pub inset_header: Hsla,
     pub inset: Hsla,
     pub overlay: Hsla,
     pub code_text: Hsla,
@@ -239,7 +242,8 @@ impl Palette {
             tertiary: theme.text_tertiary,
             ghost: theme.text_ghost,
             border: theme.border,
-            inset: theme.inset,
+            inset_header: theme.transcript_header_background,
+            inset: theme.transcript_background,
             overlay: theme.overlay,
             code_text: theme.text,
             code_wash: theme.code_wash,
@@ -1685,17 +1689,17 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
         .tab_index(0)
         .size(px(24.0))
         .flex_none()
-        .rounded(px(5.0))
+        .rounded(px(12.0))
+        .squircle()
         .flex()
         .items_center()
         .justify_center()
         .cursor_default()
-        .focus_visible(|style| style.border_1().border_color(ctx.palette.accent))
         .hover(|style| style.bg(ctx.palette.overlay))
         .child(crate::ui::icon(
             if copied { "checkmark" } else { "doc.on.doc" },
-            11.0,
-            ctx.palette.ghost,
+            14.0,
+            ctx.palette.secondary,
         ))
         .tooltip(Tooltip::text(if copied {
             tr!("common.copied")
@@ -1727,8 +1731,9 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
         .tab_stop(false)
         .w_full()
         .min_w_0()
-        .rounded(px(8.0))
-        .border_1()
+        .rounded(px(12.0))
+        .squircle()
+        .border(px(0.5))
         .border_color(ctx.palette.border)
         .bg(ctx.palette.inset)
         .overflow_hidden()
@@ -1736,21 +1741,22 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             div()
                 .w_full()
                 .h(px(28.0))
-                .pl(px(10.0))
+                .pl(px(12.0))
                 .pr(px(2.0))
+                .rounded_t(px(12.0))
+                .squircle()
+                .bg(ctx.palette.inset_header)
                 .flex()
                 .items_center()
-                .border_b_1()
+                .border_b(px(0.5))
                 .border_color(ctx.palette.border)
                 .child(
                     div()
                         .min_w_0()
                         .flex_1()
                         .truncate()
-                        .text_size(px(12.5))
-                        .line_height(px(14.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(ctx.palette.ghost)
+                        .text_style(TextStyle::BODY)
+                        .text_color(ctx.palette.secondary)
                         .when_some(label, |element, label| {
                             element.child(SharedString::from(label))
                         }),
@@ -1765,7 +1771,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                 )))
                 .w_full()
                 .min_w_0()
-                .px(px(10.0))
+                .px(px(12.0))
                 .py(px(8.0))
                 .child(
                     div()
@@ -1774,7 +1780,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                         .whitespace_normal()
                         .text_size(px(ctx.metrics.code_text_size))
                         .line_height(px(ctx.metrics.code_line_height))
-                        .text_color(ctx.palette.secondary)
+                        .text_color(ctx.palette.text)
                         .child(text_element(&flat, key, ctx)),
                 ),
         )
