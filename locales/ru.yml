@@ -558,6 +558,7 @@ skills.details: Сведения о навыке
 skills.section_user_skills: Навыки пользователя
 skills.enable_named: "Включить %{name}"
 skills.disable_named: "Выключить %{name}"
+commands.compact_description: Сжать контекст переписки
 commands.fast_description: Переключить быстрый режим
 commands.fast_enabled: Быстрый режим включён
 commands.fast_disabled: Быстрый режим выключен

@@ -1,5 +1,6 @@
 //! Draft/attachment state and submission preparation for Composer.
 use super::*;
+use crate::composer_complete::CommandScope;
 
 pub(in crate::app) struct ComposerModel {
     pub(in crate::app) drafts: ComposerDrafts,
@@ -112,6 +113,23 @@ impl Michelle {
         // the button, and steering are all covered by this one check.
         if self.model_picker_has_no_providers() {
             return None;
+        }
+        if prompt.trim() == "/compact"
+            && self
+                .selected_session()
+                .is_some_and(|session| session.provider == ProviderKind::Codex)
+            && self
+                .composer_model
+                .sources
+                .slash_command_index
+                .iter()
+                .any(|command| command.name == "compact" && command.scope == CommandScope::Builtin)
+        {
+            // Context compaction leaves staged files for the next message.
+            self.composer_ui
+                .input
+                .update(cx, |input, cx| input.clear(cx));
+            return Some(ComposerSubmission::plain("/compact".to_owned()));
         }
         for attachment in &self.composer_model.attachments {
             if let (Some(reference), Some(image)) = (

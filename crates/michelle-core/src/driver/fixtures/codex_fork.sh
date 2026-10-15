@@ -3,6 +3,7 @@
 fixture_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 owns_fork=false
 thread_id=thread-original
+compacted=false
 
 while IFS= read -r request; do
     id=$(printf '%s' "$request" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
@@ -11,7 +12,7 @@ while IFS= read -r request; do
             printf '{"id":%s,"result":{}}\n' "$id"
             ;;
         *'"method":"initialized"'*) ;;
-        *'"method":"thread/resume"'*)
+        *'"method":"thread/start"'*|*'"method":"thread/resume"'*)
             case "$request" in
                 *'"threadId":"thread-fork"'*)
                     if [ -d "$fixture_dir/fork.writer" ]; then
@@ -38,6 +39,21 @@ while IFS= read -r request; do
             fi
             owns_fork=true
             printf '{"id":%s,"result":{"thread":{"id":"thread-fork"}}}\n' "$id"
+            ;;
+        *'"method":"experimentalFeature/list"'*|*'"method":"skills/list"'*)
+            printf '{"id":%s,"result":{"data":[]}}\n' "$id"
+            ;;
+        *'"method":"thread/compact/start"'*)
+            if [ "$compacted" = true ]; then
+                printf '{"id":%s,"error":{"message":"Compaction failed"}}\n' "$id"
+                continue
+            fi
+            compacted=true
+            printf '{"id":%s,"result":{}}\n' "$id"
+            printf '{"method":"turn/started","params":{"threadId":"%s","turn":{"id":"turn-compact"}}}\n' "$thread_id"
+            printf '{"method":"item/started","params":{"threadId":"%s","item":{"id":"compact-1","type":"contextCompaction"}}}\n' "$thread_id"
+            printf '{"method":"item/completed","params":{"threadId":"%s","item":{"id":"compact-1","type":"contextCompaction"}}}\n' "$thread_id"
+            printf '{"method":"turn/completed","params":{"threadId":"%s","turn":{"id":"turn-compact","status":"completed"}}}\n' "$thread_id"
             ;;
         *'"method":"turn/start"'*)
             printf '{"id":%s,"result":{"turn":{"id":"turn-new"}}}\n' "$id"

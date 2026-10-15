@@ -1123,6 +1123,8 @@ skills.enable_named:
 skills.disable_named:
   en: Disable %{name}
 
+commands.compact_description:
+  en: Compact conversation context
 commands.fast_description:
   en: Toggle fast mode
 commands.fast_enabled:

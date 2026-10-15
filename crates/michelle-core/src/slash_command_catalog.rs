@@ -99,7 +99,15 @@ fn discover_codex(binary: &Path, project_root: &Path) -> Option<Vec<SlashCommand
         && recv_rpc_response(&rx, 0, CLI_PROBE_TIMEOUT).is_some()
         && write_json_line(&mut stdin, &json!({"method": "initialized", "params": {}})).is_ok()
     {
-        let mut commands = Vec::new();
+        // Manual compaction is a stable app-server method, independent of
+        // the feature-gated TUI commands discovered below.
+        let mut commands = vec![SlashCommand {
+            name: "compact".to_owned(),
+            description: crate::i18n::translate("commands.compact_description"),
+            scope: CommandScope::Builtin,
+            argument_hint: None,
+            template: None,
+        }];
         // Codex does not publish a TUI command registry, but it does publish
         // the effective feature set backing the native commands Michelle bridges.
         // Availability therefore comes from the installed CLI/config rather

@@ -1,5 +1,7 @@
 //! Codex app-server transport.
 
+mod idle_compaction;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -45,6 +47,11 @@ const DISABLE_CODEX_NODE_REPL: &str = "mcp_servers.node_repl.enabled=false";
 enum CommandMessage {
     Prompt(String),
     Steer(String),
+    TurnStarted,
+    TurnFinished {
+        success: bool,
+        completed_at: Instant,
+    },
     Cancel,
     Respond {
         request_id: String,
@@ -416,47 +423,58 @@ impl CodexDriver {
                 let _ = write_json_line(&mut stdin, &open_thread);
 
                 let mut next_request_id = 10_u64;
-                while let Ok(command) = command_rx.recv() {
+                let mut idle_compaction = idle_compaction::IdleCompaction::default();
+                while let Ok(command) = idle_compaction.recv(&command_rx) {
                     let message = match command {
                         CommandMessage::Prompt(text) => {
+                            idle_compaction.prompt(text.trim() == "/compact");
                             let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
                                 let _ = writer_events.send(DriverEvent::Error(tr!(
                                     "errors.codex_thread_open_incomplete"
                                 )));
                                 continue;
                             };
-                            {
-                                let mut title = writer_title_generation.lock();
-                                if title.enabled && !title.launched && title.pending.is_none() {
-                                    title.pending = Some(CodexTitleRequest {
-                                        prompt: text.clone(),
-                                    });
-                                }
-                            }
                             next_request_id += 1;
-                            let mut params = turn_start_params(
-                                &thread_id,
-                                text,
-                                approval_policy,
-                                approvals_reviewer,
-                                sandbox,
-                            );
-                            if let Some(model) = model.as_deref() {
-                                params["model"] = json!(model);
+                            if text.trim() == "/compact" {
+                                json!({
+                                    "method": "thread/compact/start",
+                                    "id": next_request_id,
+                                    "params": {"threadId": thread_id}
+                                })
+                            } else {
+                                {
+                                    let mut title = writer_title_generation.lock();
+                                    if title.enabled && !title.launched && title.pending.is_none() {
+                                        title.pending = Some(CodexTitleRequest {
+                                            prompt: text.clone(),
+                                        });
+                                    }
+                                }
+                                let mut params = turn_start_params(
+                                    &thread_id,
+                                    text,
+                                    approval_policy,
+                                    approvals_reviewer,
+                                    sandbox,
+                                );
+                                if let Some(model) = model.as_deref() {
+                                    params["model"] = json!(model);
+                                }
+                                if let Some(reasoning_effort) = reasoning_effort.as_deref() {
+                                    params["effort"] = json!(reasoning_effort);
+                                }
+                                if let Some(service_tier) = service_tier.as_deref() {
+                                    params["serviceTier"] = json!(service_tier);
+                                }
+                                json!({
+                                    "method": "turn/start",
+                                    "id": next_request_id,
+                                    "params": params
+                                })
                             }
-                            if let Some(reasoning_effort) = reasoning_effort.as_deref() {
-                                params["effort"] = json!(reasoning_effort);
-                            }
-                            if let Some(service_tier) = service_tier.as_deref() {
-                                params["serviceTier"] = json!(service_tier);
-                            }
-                            json!({
-                                "method": "turn/start",
-                                "id": next_request_id,
-                                "params": params
-                            })
                         }
                         CommandMessage::Steer(text) => {
+                            idle_compaction.prompt(false);
                             let (thread_id, active_turn_id) = (
                                 writer_thread_id.lock().clone(),
                                 writer_turn_id.lock().clone(),
@@ -502,6 +520,7 @@ impl CodexDriver {
                             continue;
                         }
                         CommandMessage::Cancel => {
+                            idle_compaction.prompt(false);
                             let (Some(thread_id), Some(turn_id)) = (
                                 writer_thread_id.lock().clone(),
                                 writer_turn_id.lock().clone(),
@@ -514,6 +533,17 @@ impl CodexDriver {
                                 "id": next_request_id,
                                 "params": {"threadId": thread_id, "turnId": turn_id}
                             })
+                        }
+                        CommandMessage::TurnStarted => {
+                            idle_compaction.turn_started();
+                            continue;
+                        }
+                        CommandMessage::TurnFinished {
+                            success,
+                            completed_at,
+                        } => {
+                            idle_compaction.turn_finished(success, completed_at);
+                            continue;
                         }
                         CommandMessage::Respond {
                             request_id,
@@ -541,6 +571,7 @@ impl CodexDriver {
                             })
                         }
                         CommandMessage::Rollback { turns, response } => {
+                            idle_compaction.prompt(false);
                             let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
                                 let _ = response
                                     .send(Err("Codex did not finish opening its thread.".into()));
@@ -1794,6 +1825,7 @@ fn handle_codex_message(
                     turn_ids.push(id.to_owned());
                 }
             }
+            let _ = commands.send(CommandMessage::TurnStarted);
             let _ = events.send(DriverEvent::TurnStarted);
         }
         "item/agentMessage/delta" => {
@@ -1866,7 +1898,16 @@ fn handle_codex_message(
                 }
                 let kind = codex_activity_kind(item);
                 if let Some(kind) = kind {
-                    let title = codex_item_title(item);
+                    let title =
+                        if item.get("type").and_then(Value::as_str) == Some("contextCompaction") {
+                            tr!(if complete {
+                                "activity.compacted_context"
+                            } else {
+                                "activity.compacting_context"
+                            })
+                        } else {
+                            codex_item_title(item)
+                        };
                     let output = codex_item_output(item);
                     let image_urls = codex_item_image_urls(item);
                     let detail = codex_item_detail(item, output.as_deref());
@@ -1899,6 +1940,10 @@ fn handle_codex_message(
                 .pointer("/turn/error/message")
                 .and_then(Value::as_str)
                 .map(str::to_owned);
+            let _ = commands.send(CommandMessage::TurnFinished {
+                success: status == "completed",
+                completed_at: Instant::now(),
+            });
             let _ = events.send(DriverEvent::TurnFinished {
                 success: status == "completed",
                 summary: error,
@@ -2095,7 +2140,9 @@ fn codex_activity_kind(item: &Value) -> Option<ActivityKind> {
         .get("type")
         .and_then(Value::as_str)?
         .to_ascii_lowercase();
-    if item_type.contains("command") {
+    if item_type == "contextcompaction" {
+        Some(ActivityKind::Tool)
+    } else if item_type.contains("command") {
         Some(
             codex_command_action_presentation(item)
                 .map(|(kind, _)| kind)
@@ -2487,6 +2534,105 @@ fn is_visible_stderr_notice(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn compact_uses_native_rpc_and_reports_progress_and_errors() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        for automatic in [false, true] {
+            let directory =
+                std::env::temp_dir().join(format!("michelle-compact-{}", Uuid::new_v4()));
+            fs::create_dir_all(&directory).unwrap();
+            let binary = directory.join("codex");
+            fs::write(&binary, include_str!("fixtures/codex_fork.sh")).unwrap();
+            fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+            let commands = crate::composer_complete::discover_slash_commands(
+                crate::model::ProviderKind::Codex,
+                &directory,
+                Some(binary.to_str().unwrap()),
+            );
+            assert!(commands.iter().any(|command| {
+                command.name == "compact"
+                    && command.scope == michelle_protocol::composer::CommandScope::Builtin
+                    && command.template.is_none()
+                    && command.argument_hint.is_none()
+            }));
+
+            let (events, received) = crate::driver::test_event_channel();
+            let driver = CodexDriver::start(
+                DriverStartOptions {
+                    binary,
+                    cwd: directory.clone(),
+                    mode: RuntimeMode::Ask,
+                    model: None,
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                    agent_preset: None,
+                    computer_use_enabled: false,
+                    provider_cursor: None,
+                },
+                events,
+            )
+            .unwrap();
+            if automatic {
+                driver
+                    .commands
+                    .send(CommandMessage::TurnFinished {
+                        success: true,
+                        completed_at: Instant::now() - Duration::from_secs(29 * 60),
+                    })
+                    .unwrap();
+            } else {
+                driver.prompt("/compact \n".into());
+            }
+            let mut progress = Vec::new();
+            loop {
+                match received.recv_timeout(Duration::from_secs(5)).unwrap() {
+                    DriverEvent::RichActivity(activity) => progress.push(activity),
+                    DriverEvent::TurnFinished { success, .. } => {
+                        assert!(success);
+                        break;
+                    }
+                    DriverEvent::TextDelta(text) => panic!("command reached model input: {text}"),
+                    DriverEvent::Error(error) => panic!("compaction failed: {error}"),
+                    _ => {}
+                }
+            }
+            assert_eq!(progress.len(), 2);
+            assert_eq!(progress[0].source_id.as_deref(), Some("compact-1"));
+            assert_eq!(progress[0].source_id, progress[1].source_id);
+            assert!(!progress[0].complete);
+            assert!(progress[1].complete);
+            assert_eq!(progress[0].title, tr!("activity.compacting_context"));
+            assert_eq!(progress[1].title, tr!("activity.compacted_context"));
+
+            driver.prompt("/compact".into());
+            assert!(matches!(
+                received.recv_timeout(Duration::from_secs(5)).unwrap(),
+                DriverEvent::Error(error) if error == "Compaction failed"
+            ));
+            driver.prompt("Continue".into());
+            loop {
+                match received.recv_timeout(Duration::from_secs(5)).unwrap() {
+                    DriverEvent::TextDelta(text) => assert_eq!(text, "OK"),
+                    DriverEvent::TurnFinished { success, .. } => {
+                        assert!(success);
+                        break;
+                    }
+                    DriverEvent::Error(error) => panic!("next prompt failed: {error}"),
+                    _ => {}
+                }
+            }
+            drop(driver);
+            while !matches!(
+                received.recv_timeout(Duration::from_secs(5)).unwrap(),
+                DriverEvent::ProcessExited
+            ) {}
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
 
     #[cfg(unix)]
     #[test]

@@ -214,6 +214,18 @@ retained because `thread/fork` needs a `lastTurnId`.
 `approvalPolicy`, `approvalsReviewer`, `sandboxPolicy`, and optional `model`,
 `effort`, `serviceTier`.
 
+**Manual compaction** — the composer's `/compact` uses `thread/compact/start`
+with only `threadId`, without sending the command as model input. It follows
+the normal turn lifecycle and queues behind a busy turn, including when sent
+with the steering shortcut. `contextCompaction` items become one upserted
+activity row showing compaction progress.
+
+Codex also compacts once after 29 minutes without a running turn: one minute
+before the assumed 30-minute prompt-cache expiry. The daemon's writer waits
+on that deadline after a successful turn; new work cancels it, service polls
+do not postpone it, and manual or automatic compaction does not rearm it.
+Empty and failed sessions do not start an idle-compaction timer.
+
 **Inbound stream** ([driver/codex.rs:851](../crates/michelle-core/src/driver/codex.rs#L882)):
 
 | Method | Becomes |

@@ -2611,7 +2611,9 @@ impl Michelle {
         // A turn that has not reached the provider yet cannot be steered; the
         // driver reports the outcome asynchronously via SteerAccepted or
         // SteerRejected once it is handed off.
-        if !self.session_can_steer(&session) {
+        if !self.session_can_steer(&session)
+            || (session.provider == ProviderKind::Codex && submission.prompt.trim() == "/compact")
+        {
             self.enqueue_follow_up_submission(session.id, submission, cx);
             return;
         }
