@@ -99,8 +99,8 @@ actions!(
     ]
 );
 
-fn terminal_key_bindings() -> [KeyBinding; 2] {
-    ["ctrl-ё", "ctrl-`"].map(|key| KeyBinding::new(key, OpenTerminal, Some("Michelle")))
+fn terminal_key_bindings() -> [KeyBinding; 3] {
+    ["ctrl-\\", "ctrl-ё", "ctrl-`"].map(|key| KeyBinding::new(key, OpenTerminal, Some("Michelle")))
 }
 
 const DEFAULT_WINDOW_WIDTH: f32 = 1380.0;

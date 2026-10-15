@@ -225,6 +225,20 @@ impl TerminalSession {
         };
         options.env.insert("TERM".into(), "xterm-256color".into());
         options.env.insert("COLORTERM".into(), "truecolor".into());
+        options.env.insert(
+            "LANG".into(),
+            std::env::var("LANG")
+                .ok()
+                .filter(|lang| !lang.is_empty())
+                .unwrap_or_else(|| {
+                    if cfg!(target_os = "macos") {
+                        "en_US.UTF-8"
+                    } else {
+                        "C.UTF-8"
+                    }
+                    .into()
+                }),
+        );
         if let Some(path) = crate::command_env::executable_search_path() {
             options
                 .env
@@ -1560,6 +1574,11 @@ fn terminal_key_bytes(keystroke: &Keystroke, mode: TermMode) -> Option<Vec<u8>> 
     let modifiers = keystroke.modifiers;
     let key = keystroke.key.as_str();
 
+    // Reserve Ctrl+backslash for OpenTerminal instead of sending SIGQUIT.
+    if key == "\\" && modifiers == gpui::Modifiers::control() {
+        return None;
+    }
+
     if modifiers.platform {
         #[cfg(target_os = "macos")]
         return match key {
@@ -1879,10 +1898,25 @@ mod tests {
 
     #[test]
     fn terminal_shortcut_is_not_forwarded_to_the_shell() {
-        for key in ["ctrl-`", "ctrl-ё", "ctrl-`->ё"] {
+        for key in ["ctrl-`", "ctrl-ё", "ctrl-`->ё", "ctrl-\\", "ctrl-\\->ё"] {
             assert_eq!(
                 terminal_key_bytes(&Keystroke::parse(key).unwrap(), TermMode::empty()),
                 None,
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn backslash_input_is_preserved_outside_terminal_shortcut() {
+        for (key, expected) in [
+            ("\\", b"\\".as_slice()),
+            ("alt-\\", b"\x1b\\".as_slice()),
+            ("ctrl-alt-\\", b"\x1b\x1c".as_slice()),
+        ] {
+            assert_eq!(
+                terminal_key_bytes(&Keystroke::parse(key).unwrap(), TermMode::empty()),
+                Some(expected.to_vec()),
                 "{key}"
             );
         }

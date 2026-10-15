@@ -86,6 +86,23 @@ mod platform {
                     value.to_string_lossy().into_owned(),
                 );
             }
+            options.env.insert(
+                "LANG".into(),
+                options
+                    .env
+                    .get("LANG")
+                    .cloned()
+                    .or_else(|| std::env::var("LANG").ok())
+                    .filter(|lang| !lang.is_empty())
+                    .unwrap_or_else(|| {
+                        if cfg!(target_os = "macos") {
+                            "en_US.UTF-8"
+                        } else {
+                            "C.UTF-8"
+                        }
+                        .into()
+                    }),
+            );
             options.env.insert("TERM".into(), "xterm-256color".into());
             options.env.insert("COLORTERM".into(), "truecolor".into());
 

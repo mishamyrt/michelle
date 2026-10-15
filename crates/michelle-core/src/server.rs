@@ -1863,6 +1863,89 @@ mod tests {
         websocket_terminal_round_trip(false);
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn terminal_pager_displays_utf8_without_an_inherited_locale() {
+        const PROBE: &str = "MICHELLE_TERMINAL_LOCALE_PROBE";
+        if std::env::var_os(PROBE).is_none() {
+            for lang in [None, Some(""), Some("ru_RU.UTF-8")] {
+                let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+                command
+                    .args([
+                        "--exact",
+                        "server::tests::terminal_pager_displays_utf8_without_an_inherited_locale",
+                        "--nocapture",
+                    ])
+                    .env(
+                        PROBE,
+                        lang.filter(|lang| !lang.is_empty())
+                            .unwrap_or("en_US.UTF-8"),
+                    )
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null");
+                for name in [
+                    "LANG",
+                    "LC_ALL",
+                    "LC_CTYPE",
+                    "LESSCHARSET",
+                    "LESSCHARDEF",
+                    "GIT_PAGER",
+                ] {
+                    command.env_remove(name);
+                }
+                if let Some(lang) = lang {
+                    command.env("LANG", lang);
+                }
+                let output = crate::command_env::output(&mut command).unwrap();
+                assert!(
+                    output.status.success(),
+                    "LANG={lang:?}:\n{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                );
+            }
+            return;
+        }
+
+        let hub = Arc::new(Hub::default());
+        let (outgoing, events) = unbounded();
+        hub.subscribe(&[], Subscriber::new(outgoing).0);
+        let terminal_id = Uuid::new_v4();
+        hub.begin_runtime(terminal_id, terminal_id);
+        let _terminal = crate::terminal::DaemonTerminal::open_with_shell(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+            80,
+            24,
+            hub.event_sink(terminal_id, terminal_id),
+            terminal_test_shell(
+                "printf 'lang:%s\\n' \"$LANG\"; git -c core.pager='/usr/bin/less -FRX' --paginate log -1 --format='Дефолтный фильтр'; while IFS= read -r line; do :; done",
+            ),
+        )
+        .unwrap();
+        let expected_lang = format!("lang:{}", std::env::var(PROBE).unwrap());
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let mut output = Vec::new();
+        while let Ok(ServerMessage::Event(event)) =
+            events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+        {
+            if event.event.kind == "terminalOutput" {
+                output.extend(
+                    base64::engine::general_purpose::STANDARD
+                        .decode(event.event.payload["data"].as_str().unwrap())
+                        .unwrap(),
+                );
+                let text = String::from_utf8_lossy(&output);
+                if text.contains(&expected_lang) && text.contains("Дефолтный фильтр")
+                {
+                    return;
+                }
+            }
+        }
+        panic!(
+            "terminal pager output: {}",
+            String::from_utf8_lossy(&output)
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn websocket_terminal_close_does_not_wait_for_a_shell_ignoring_hangup() {

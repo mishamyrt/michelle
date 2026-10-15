@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn terminal_shortcut_uses_control_in_both_layouts() {
         let bindings = crate::terminal_key_bindings();
-        for key in ["ctrl-`", "ctrl-ё", "ctrl-`->ё"] {
+        for key in ["ctrl-`", "ctrl-ё", "ctrl-`->ё", "ctrl-\\", "ctrl-\\->ё"] {
             let keystroke = gpui::Keystroke::parse(key).unwrap();
             assert!(
                 bindings
@@ -156,7 +156,17 @@ mod tests {
                 "{key}"
             );
         }
-        for key in ["cmd-`", "cmd-ё", "`", "ё", "ctrl-shift-`"] {
+        for key in [
+            "cmd-`",
+            "cmd-ё",
+            "cmd-\\",
+            "`",
+            "ё",
+            "\\",
+            "ctrl-shift-`",
+            "ctrl-shift-\\",
+            "ctrl-alt-\\",
+        ] {
             let keystroke = gpui::Keystroke::parse(key).unwrap();
             assert!(
                 bindings
