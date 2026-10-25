@@ -50,6 +50,7 @@ enum CommandMessage {
     TurnStarted,
     TurnFinished {
         success: bool,
+        context_tokens: Option<u64>,
         completed_at: Instant,
     },
     Cancel,
@@ -540,9 +541,10 @@ impl CodexDriver {
                         }
                         CommandMessage::TurnFinished {
                             success,
+                            context_tokens,
                             completed_at,
                         } => {
-                            idle_compaction.turn_finished(success, completed_at);
+                            idle_compaction.turn_finished(success, context_tokens, completed_at);
                             continue;
                         }
                         CommandMessage::Respond {
@@ -1384,6 +1386,7 @@ const CODEX_CITATION_SEPARATOR: char = '\u{e202}';
 
 #[derive(Default)]
 struct CodexStreamState {
+    context_tokens: Option<u64>,
     citations: HashMap<String, String>,
     citation_numbers: HashMap<String, usize>,
     citation_buffer: String,
@@ -1394,6 +1397,7 @@ struct CodexStreamState {
 
 impl CodexStreamState {
     fn begin_turn(&mut self) {
+        self.context_tokens = None;
         self.citations.clear();
         self.citation_numbers.clear();
         self.citation_buffer.clear();
@@ -1942,6 +1946,7 @@ fn handle_codex_message(
                 .map(str::to_owned);
             let _ = commands.send(CommandMessage::TurnFinished {
                 success: status == "completed",
+                context_tokens: stream_state.context_tokens,
                 completed_at: Instant::now(),
             });
             let _ = events.send(DriverEvent::TurnFinished {
@@ -1965,8 +1970,9 @@ fn handle_codex_message(
             let usage = params.get("tokenUsage");
             let tokens = usage
                 .and_then(|usage| usage.pointer("/last/totalTokens"))
-                .and_then(Value::as_u64)
-                .filter(|tokens| *tokens > 0);
+                .and_then(Value::as_u64);
+            stream_state.context_tokens = tokens;
+            let tokens = tokens.filter(|tokens| *tokens > 0);
             let window = usage
                 .and_then(|usage| usage.get("modelContextWindow"))
                 .and_then(Value::as_u64)
@@ -2581,6 +2587,7 @@ mod tests {
                     .commands
                     .send(CommandMessage::TurnFinished {
                         success: true,
+                        context_tokens: Some(200_001),
                         completed_at: Instant::now() - Duration::from_secs(29 * 60),
                     })
                     .unwrap();
@@ -2853,6 +2860,53 @@ mod tests {
                 &self.events,
                 &mut stream_state,
             );
+        }
+    }
+
+    #[test]
+    fn idle_compaction_receives_latest_context_instead_of_cumulative_usage() {
+        let harness = GoalHarness::new();
+        let mut stream_state = CodexStreamState::default();
+        for tokens in [Some(200_001), Some(200_000), Some(0), None] {
+            let mut messages = vec![json!({
+                "method": "turn/started",
+                "params": {"turn": {"id": "turn-1"}}
+            })];
+            if let Some(tokens) = tokens {
+                messages.push(json!({
+                    "method": "thread/tokenUsage/updated",
+                    "params": {"tokenUsage": {
+                        "last": {"totalTokens": tokens},
+                        "total": {"totalTokens": 1_000_000}
+                    }}
+                }));
+            }
+            messages.push(json!({
+                "method": "turn/completed",
+                "params": {"turn": {"status": "completed"}}
+            }));
+            for message in messages {
+                handle_codex_message(
+                    message,
+                    &harness.thread_id,
+                    &harness.turn_id,
+                    &harness.turn_ids,
+                    &harness.rollbacks,
+                    &harness.steers,
+                    &harness.background,
+                    &harness.goals,
+                    &harness.commands,
+                    &harness.events,
+                    &mut stream_state,
+                );
+            }
+            let mut commands = harness.command_rx.try_iter();
+            assert!(matches!(commands.next(), Some(CommandMessage::TurnStarted)));
+            assert!(matches!(
+                commands.next(),
+                Some(CommandMessage::TurnFinished { success: true, context_tokens, .. })
+                    if context_tokens == tokens
+            ));
         }
     }
 

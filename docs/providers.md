@@ -220,11 +220,13 @@ the normal turn lifecycle and queues behind a busy turn, including when sent
 with the steering shortcut. `contextCompaction` items become one upserted
 activity row showing compaction progress.
 
-Codex also compacts once after 29 minutes without a running turn: one minute
-before the assumed 30-minute prompt-cache expiry. The daemon's writer waits
+Codex also compacts once after 29 minutes without a running turn, only when
+the latest model call's context exceeds 200,000 tokens: one minute before
+the assumed 30-minute prompt-cache expiry. The daemon's writer waits
 on that deadline after a successful turn; new work cancels it, service polls
 do not postpone it, and manual or automatic compaction does not rearm it.
-Empty and failed sessions do not start an idle-compaction timer.
+Empty and failed sessions, and turns with unknown context usage, do not start
+an idle-compaction timer.
 
 **Inbound stream** ([driver/codex.rs:851](../crates/michelle-core/src/driver/codex.rs#L882)):
 

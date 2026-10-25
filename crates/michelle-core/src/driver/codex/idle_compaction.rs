@@ -8,6 +8,7 @@ use super::CommandMessage;
 
 const CACHE_LIFETIME: Duration = Duration::from_secs(30 * 60);
 const COMPACTION_LEAD_TIME: Duration = Duration::from_secs(60);
+const CONTEXT_TOKEN_THRESHOLD: u64 = 200_000;
 
 #[derive(Default)]
 pub(super) struct IdleCompaction {
@@ -39,10 +40,17 @@ impl IdleCompaction {
         self.deadline = None;
     }
 
-    pub(super) fn turn_finished(&mut self, success: bool, now: Instant) {
+    pub(super) fn turn_finished(
+        &mut self,
+        success: bool,
+        context_tokens: Option<u64>,
+        now: Instant,
+    ) {
         // Compaction must not keep an abandoned session warm indefinitely.
-        self.deadline =
-            (success && !self.compacting).then_some(now + CACHE_LIFETIME - COMPACTION_LEAD_TIME);
+        self.deadline = (success
+            && !self.compacting
+            && context_tokens.is_some_and(|tokens| tokens > CONTEXT_TOKEN_THRESHOLD))
+        .then_some(now + CACHE_LIFETIME - COMPACTION_LEAD_TIME);
         self.compacting = false;
     }
 }
@@ -57,24 +65,24 @@ mod tests {
         let now = Instant::now();
         let mut idle = IdleCompaction::default();
         assert!(idle.deadline.is_none());
-        idle.turn_finished(true, now);
+        idle.turn_finished(true, Some(200_001), now);
         assert_eq!(idle.deadline, Some(now + Duration::from_secs(29 * 60)));
 
         idle.prompt(false);
         assert!(idle.deadline.is_none());
-        idle.turn_finished(true, now + Duration::from_secs(60));
+        idle.turn_finished(true, Some(200_001), now + Duration::from_secs(60));
         assert_eq!(idle.deadline, Some(now + CACHE_LIFETIME));
 
         idle.turn_started();
         assert!(idle.deadline.is_none());
-        idle.turn_finished(false, now);
+        idle.turn_finished(false, Some(200_001), now);
         assert!(idle.deadline.is_none());
     }
 
     #[test]
     fn compacts_once_and_service_commands_do_not_reset_the_deadline() {
         let mut idle = IdleCompaction::default();
-        idle.turn_finished(true, Instant::now() - CACHE_LIFETIME);
+        idle.turn_finished(true, Some(200_001), Instant::now() - CACHE_LIFETIME);
         let deadline = idle.deadline;
         let (commands, received) = unbounded();
         commands
@@ -91,7 +99,7 @@ mod tests {
 
         idle.prompt(true);
         idle.turn_started();
-        idle.turn_finished(true, Instant::now());
+        idle.turn_finished(true, Some(200_001), Instant::now());
         assert!(idle.deadline.is_none());
         drop(commands);
         assert!(idle.recv(&received).is_err());
@@ -100,7 +108,7 @@ mod tests {
     #[test]
     fn a_queued_prompt_wins_over_an_expired_timer() {
         let mut idle = IdleCompaction::default();
-        idle.turn_finished(true, Instant::now() - CACHE_LIFETIME);
+        idle.turn_finished(true, Some(200_001), Instant::now() - CACHE_LIFETIME);
         let (commands, received) = unbounded();
         commands
             .send(CommandMessage::Prompt("Continue".to_owned()))
@@ -109,6 +117,18 @@ mod tests {
             matches!(idle.recv(&received), Ok(CommandMessage::Prompt(text)) if text == "Continue")
         );
         idle.prompt(false);
+        assert!(idle.deadline.is_none());
+    }
+
+    #[test]
+    fn requires_context_above_200_000_tokens() {
+        let now = Instant::now();
+        let mut idle = IdleCompaction::default();
+        for tokens in [None, Some(0), Some(199_999), Some(200_000), Some(200_001)] {
+            idle.turn_finished(true, tokens, now);
+            assert_eq!(idle.deadline.is_some(), tokens == Some(200_001));
+        }
+        idle.turn_finished(true, Some(100_000), now);
         assert!(idle.deadline.is_none());
     }
 }
