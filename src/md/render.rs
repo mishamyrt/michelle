@@ -48,6 +48,7 @@ use crate::ui::tooltip::Tooltip;
 use crate::ui::{StyledTypography, TextStyle};
 
 mod math_text;
+mod mermaid;
 
 /// Selection geometry: the laid-out text handle for one painted element.
 #[derive(Clone)]
@@ -1675,6 +1676,36 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
     // permanent O(code length) render cost; allocate only when it is invoked.
     let copy_content = flat.text.clone();
     let keyboard_copy_content = copy_content.clone();
+    let body = div()
+        .w_full()
+        .min_w_0()
+        .whitespace_normal()
+        .text_size(px(ctx.metrics.code_text_size))
+        .line_height(px(ctx.metrics.code_line_height))
+        .text_color(ctx.palette.text)
+        .child(text_element(&flat, key.clone(), ctx))
+        .into_any_element();
+    // Wait for the response to settle instead of laying out every streamed
+    // prefix. Keep source visible when Find has a match in this block.
+    let source_has_match = ctx.search.as_ref().is_some_and(|search| {
+        search
+            .matches
+            .binary_search_by_key(&key.index, |found| found.ordinal)
+            .is_ok()
+    });
+    let body = if language.is_some_and(|tag| tag.eq_ignore_ascii_case("mermaid"))
+        && !ctx.cache.is_some_and(|view| view.streaming.get())
+        && !source_has_match
+    {
+        mermaid::Diagram {
+            source: copy_content.clone(),
+            palette: *ctx.palette,
+            fallback: body,
+        }
+        .into_any_element()
+    } else {
+        body
+    };
     let copy_feedback = ctx.cache.map(|view| view.copied_code_blocks.clone());
     let copied = copy_feedback
         .as_ref()
@@ -1773,16 +1804,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                 .min_w_0()
                 .px(px(12.0))
                 .py(px(8.0))
-                .child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .text_size(px(ctx.metrics.code_text_size))
-                        .line_height(px(ctx.metrics.code_line_height))
-                        .text_color(ctx.palette.text)
-                        .child(text_element(&flat, key, ctx)),
-                ),
+                .child(body),
         )
         .into_any_element()
 }

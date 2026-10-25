@@ -175,6 +175,21 @@ element per word or start an animation clock. Selection and search use the
 original LaTeX byte ranges. The manual measurement is
 `cargo test --locked -p michelle --lib md::math::tests::benchmark_native_math_cache -- --ignored --nocapture`.
 
+## Markdown Mermaid
+
+Fenced `mermaid` blocks use native Merman rendering after the response settles
+([src/md/render/mermaid.rs](../src/md/render/mermaid.rs)). Parsing, layout, SVG
+and font loading, and rasterization run on two background workers, with a
+two-second cooperative layout deadline. Frames only queue misses and read an
+in-memory cache keyed by source, theme and display scale. Pending work is
+deduplicated and capped at 32; completed entries, including failures, are
+bounded to 64 entries / 32 MiB. Eviction also retires sprite-atlas images.
+Sources are limited to 64 KiB and raster buffers to four million pixels;
+long diagrams use a lower raster scale. Pending, invalid or unsupported
+diagrams keep selectable code. Find also reveals code for matching blocks.
+The manual measurement is
+`cargo test --locked -p michelle --lib md::render::mermaid::tests::benchmark_mermaid_cache -- --ignored --nocapture`.
+
 ## Measuring
 
 Sampling alone misled this investigation for hours; counters cracked it in one

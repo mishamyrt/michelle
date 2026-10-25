@@ -41,6 +41,9 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 michelle-client = { path = "crates/michelle-client" }
 michelle-protocol = { path = "crates/michelle-protocol" }
 pulldown-cmark = "0.13"
+# Native, offline Mermaid rendering; GPUI rasterizes the SVG on a worker.
+merman = { version = "=0.9.2", default-features = false, features = ["all-diagrams", "complete-svg"] }
+quick-xml = "0.42"
 # Native, offline math typesetting; all layout and raster work runs on workers.
 ratex-parser = "=0.1.14"
 ratex-layout = "=0.1.14"
