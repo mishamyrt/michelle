@@ -162,6 +162,7 @@ impl Michelle {
         composer_draft_key: crate::persistence::ComposerDraftKey,
         cx: &mut Context<Self>,
     ) {
+        self.notifications.clear_session_completion(session_id);
         self.sessions
             .runtime
             .submission_preparations

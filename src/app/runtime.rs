@@ -1018,6 +1018,7 @@ impl Michelle {
             |session_id| runtime_ids.contains(&session_id),
         );
         for session_id in &removed {
+            self.notifications.clear_session_completion(*session_id);
             self.sessions
                 .runtime
                 .runtime_attach_pending
@@ -2758,6 +2759,7 @@ impl Michelle {
         } else {
             None
         };
+        self.notifications.clear_session_completion(session_id);
         self.sessions
             .runtime
             .submission_preparations

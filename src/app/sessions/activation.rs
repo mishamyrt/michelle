@@ -243,6 +243,7 @@ impl Michelle {
             self.store_selected_right_panel_state();
         }
         self.state.selected_session = Some(session_id);
+        self.notifications.clear_session_completion(session_id);
         self.task_switcher.record_access(session_id);
         if let Some((
             project_id,

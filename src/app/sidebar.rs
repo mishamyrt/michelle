@@ -1981,6 +1981,11 @@ impl Michelle {
                     status_color(&theme, session.status),
                 ))
             })
+            .when(
+                session.status == SessionStatus::Idle
+                    && self.notifications.unseen_completions.contains(&session_id),
+                |element| element.child(icon("checkmark", 12.0, theme.success)),
+            )
             .when(session.status == SessionStatus::Background, |element| {
                 element.child(icon(
                     "hourglass",

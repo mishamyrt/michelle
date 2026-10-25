@@ -27,6 +27,8 @@ pub(in crate::app) fn paused_toast_duration(remaining: Duration, elapsed: Durati
 }
 
 pub(in crate::app) struct NotificationsModel {
+    /// Successful background turns the user has not opened yet.
+    pub(in crate::app) unseen_completions: HashSet<Uuid>,
     pub(in crate::app) toast: Option<ToastState>,
     pub(in crate::app) toast_generation: u64,
     pub(in crate::app) copied_control_feedback: HashMap<String, u64>,
@@ -36,6 +38,7 @@ pub(in crate::app) struct NotificationsModel {
 impl NotificationsModel {
     pub(in crate::app) fn new(startup_toast: Option<String>) -> Self {
         Self {
+            unseen_completions: HashSet::new(),
             toast: startup_toast.map(|message| ToastState {
                 message,
                 tone: ToastTone::Alert,
@@ -49,6 +52,23 @@ impl NotificationsModel {
             copied_control_feedback: HashMap::new(),
             copied_control_generation: 0,
         }
+    }
+
+    pub(in crate::app) fn record_session_completion(
+        &mut self,
+        session_id: Uuid,
+        selected_session: Option<Uuid>,
+        success: bool,
+    ) {
+        if success && selected_session != Some(session_id) {
+            self.unseen_completions.insert(session_id);
+        } else {
+            self.clear_session_completion(session_id);
+        }
+    }
+
+    pub(in crate::app) fn clear_session_completion(&mut self, session_id: Uuid) {
+        self.unseen_completions.remove(&session_id);
     }
 }
 
@@ -192,5 +212,48 @@ impl Michelle {
             });
         })
         .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_completions_remain_until_the_corresponding_session_is_opened() {
+        let mut notifications = NotificationsModel::new(None);
+        let first = Uuid::from_u128(1);
+        let second = Uuid::from_u128(2);
+        let selected = Some(Uuid::from_u128(3));
+        notifications.record_session_completion(first, selected, true);
+        notifications.record_session_completion(second, selected, true);
+        // Duplicate completion reports do not create multiple badges.
+        notifications.record_session_completion(first, selected, true);
+        assert_eq!(
+            notifications.unseen_completions,
+            HashSet::from([first, second])
+        );
+
+        notifications.clear_session_completion(first);
+        assert_eq!(notifications.unseen_completions, HashSet::from([second]));
+        notifications.clear_session_completion(second);
+        assert!(notifications.unseen_completions.is_empty());
+    }
+
+    #[test]
+    fn visible_or_failed_turns_do_not_leave_a_success_badge() {
+        let mut notifications = NotificationsModel::new(None);
+        let session = Uuid::from_u128(1);
+        notifications.record_session_completion(session, Some(session), true);
+        assert!(notifications.unseen_completions.is_empty());
+        notifications.record_session_completion(session, None, false);
+        assert!(notifications.unseen_completions.is_empty());
+
+        notifications.record_session_completion(session, None, true);
+        notifications.record_session_completion(session, None, false);
+        assert!(notifications.unseen_completions.is_empty());
+        notifications.record_session_completion(session, None, true);
+        notifications.clear_session_completion(session);
+        assert!(notifications.unseen_completions.is_empty());
     }
 }

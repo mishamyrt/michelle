@@ -317,6 +317,7 @@ impl Michelle {
                 }
             }
             DriverEvent::TurnStarted => {
+                self.notifications.clear_session_completion(session_id);
                 runtime.last_driver_error = None;
                 if let Some(session) = self.state.session_mut(session_id) {
                     if session.active_turn_id().is_some() {
@@ -696,6 +697,11 @@ impl Michelle {
                         TurnStatus::Failed
                     });
                 }
+                self.notifications.record_session_completion(
+                    session_id,
+                    self.state.selected_session,
+                    success,
+                );
                 runtime.pending_permission = None;
                 runtime.pending_user_input = None;
                 runtime.pending_computer_approval = None;
