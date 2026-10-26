@@ -535,15 +535,14 @@ fn slot() -> &'static (StdMutex<SlotState>, Condvar) {
 
 /// Returns the shared service, starting one if none is registered.
 ///
-/// The only entry point allowed to spawn, and reached only from driver start.
+/// The only entry point allowed to spawn, used by driver start and model discovery.
 /// Blocking: discovery, an HTTP probe, and up to a 20s start poll.
 pub(crate) fn shared(binary: &Path) -> anyhow::Result<Arc<OpenCodeService>> {
     acquire(binary, true)?.ok_or_else(|| anyhow!("the OpenCode background service is not running"))
 }
 
 /// Returns the shared service only if one is already healthy, NEVER starting
-/// it. Opening the Resume picker or refreshing the model catalog must not
-/// start the user's background daemon.
+/// it. Opening the Resume picker must not start the user's background daemon.
 pub(crate) fn attached(binary: &Path) -> anyhow::Result<Option<Arc<OpenCodeService>>> {
     acquire(binary, false)
 }

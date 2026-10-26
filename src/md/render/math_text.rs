@@ -518,7 +518,12 @@ impl Element for MathText {
         };
         for range in &self.flat.code_ranges {
             for rect in self.geometry.range_rects(range) {
-                wash(rect, self.palette.code_wash, CODE_WASH_RADIUS, window);
+                paint_squircle_fill(
+                    window,
+                    rect,
+                    gpui::Corners::all(px(CODE_WASH_RADIUS)),
+                    self.palette.code_wash.into(),
+                );
             }
         }
         if let Some(search) = &self.search {

@@ -1,7 +1,7 @@
 use super::model_picker::MODEL_PICKER_MENU_ID;
 use super::*;
 use crate::ui::components::menu_chip::chip_icon;
-use crate::ui::squircle::{SquircleStyled, squircle};
+use crate::ui::squircle::{SquircleExt, SquircleStyled, squircle, squircle_image};
 use crate::ui::{ActivationExt, IconButton, StyledTypography, TextStyle};
 
 pub(super) mod attachments;
@@ -17,7 +17,7 @@ pub(super) struct ComposerUi {
 const COMPUTER_USE_PREVIEW_WIDTH: f32 = 304.0;
 const COMPUTER_USE_PREVIEW_HEIGHT: f32 = 172.0;
 const COMPUTER_USE_PREVIEW_RADIUS: f32 = 12.0;
-const COMPUTER_USE_PREVIEW_INNER_RADIUS: f32 = COMPUTER_USE_PREVIEW_RADIUS - 1.0;
+const COMPUTER_USE_PREVIEW_INNER_RADIUS: f32 = COMPUTER_USE_PREVIEW_RADIUS - 4.0;
 
 struct ComputerUsePreviewDrag {
     cursor_offset: Cell<gpui::Point<Pixels>>,
@@ -130,6 +130,7 @@ impl Michelle {
                     .h(px(28.0))
                     .px(px(13.0))
                     .rounded(px(7.0))
+                    .squircle()
                     .flex()
                     .items_center()
                     .cursor_default()
@@ -163,9 +164,10 @@ impl Michelle {
                     .mx_auto()
                     .p(px(12.0))
                     .rounded(px(12.0))
+                    .squircle()
                     .border_1()
                     .border_color(theme.border_strong)
-                    .bg(theme.raised)
+                    .bg(theme.transcript_background)
                     .shadow_md()
                     .child(
                         div()
@@ -189,7 +191,8 @@ impl Michelle {
                             .overflow_y_scroll()
                             .p(px(8.0))
                             .rounded(px(7.0))
-                            .bg(theme.inset)
+                            .squircle()
+                            .bg(theme.transcript_header_background)
                             .font_family(crate::md::render::MONO_FAMILY)
                             .text_size(sp(12.5))
                             .line_height(sp(16.0))
@@ -241,6 +244,7 @@ impl Michelle {
                     .px(px(10.0))
                     .py(px(5.0))
                     .rounded(px(8.0))
+                    .squircle()
                     .border_1()
                     .border_color(if is_selected {
                         theme.accent.opacity(0.34)
@@ -316,6 +320,7 @@ impl Michelle {
                 .h(px(26.0))
                 .px(px(8.0))
                 .rounded(px(6.0))
+                .squircle()
                 .flex()
                 .items_center()
                 .cursor_default()
@@ -344,6 +349,7 @@ impl Michelle {
             .h(px(26.0))
             .px(px(10.0))
             .rounded(px(6.0))
+            .squircle()
             .flex()
             .items_center()
             .cursor_default()
@@ -383,6 +389,7 @@ impl Michelle {
                 .h(px(18.0))
                 .px(px(6.0))
                 .rounded(px(5.0))
+                .squircle()
                 .bg(theme.overlay)
                 .flex()
                 .items_center()
@@ -406,9 +413,10 @@ impl Michelle {
                 .pt(px(12.0))
                 .pb(px(10.0))
                 .rounded(px(13.0))
+                .squircle()
                 .border_1()
                 .border_color(theme.border)
-                .bg(theme.composer)
+                .bg(theme.transcript_background)
                 .tab_index(0)
                 .tab_group()
                 .tab_stop(false)
@@ -447,6 +455,7 @@ impl Michelle {
                         .h(px(34.0))
                         .px(px(10.0))
                         .rounded(px(8.0))
+                        .squircle()
                         .border_1()
                         .border_color(if has_custom {
                             theme.accent.opacity(0.34)
@@ -511,6 +520,7 @@ impl Michelle {
                     .h(px(29.0))
                     .px(px(13.0))
                     .rounded(px(7.0))
+                    .squircle()
                     .flex()
                     .items_center()
                     .cursor_default()
@@ -544,9 +554,10 @@ impl Michelle {
                 .mx_auto()
                 .p(px(13.0))
                 .rounded(px(12.0))
+                .squircle()
                 .border_1()
                 .border_color(theme.warning.opacity(0.5))
-                .bg(theme.raised)
+                .bg(theme.transcript_background)
                 .shadow_md()
                 .child(
                     div()
@@ -575,7 +586,8 @@ impl Michelle {
                         .mt(px(8.0))
                         .p(px(9.0))
                         .rounded(px(8.0))
-                        .bg(theme.inset)
+                        .squircle()
+                        .bg(theme.transcript_header_background)
                         .child(
                             div()
                                 .text_size(sp(12.5))
@@ -705,6 +717,7 @@ impl Michelle {
                         .w(px(COMPUTER_USE_PREVIEW_WIDTH))
                         .h(px(COMPUTER_USE_PREVIEW_HEIGHT))
                         .rounded(px(COMPUTER_USE_PREVIEW_RADIUS))
+                        .squircle()
                         .overflow_hidden()
                         .border_1()
                         .border_color(if is_top {
@@ -712,7 +725,7 @@ impl Michelle {
                         } else {
                             theme.border
                         })
-                        .bg(theme.raised)
+                        .bg(theme.surface.blend(theme.transcript_header_background))
                         .shadow(vec![
                             gpui::BoxShadow::new(
                                 px(0.0),
@@ -763,21 +776,23 @@ impl Michelle {
                             cx.notify();
                         }))
                         .child(
-                            // GPUI overflow clipping is rectangular. Round
-                            // each painted layer inside the card's 1px border.
+                            // Keep the image mask inside the floating frame.
                             div()
                                 .absolute()
-                                .inset_0()
+                                .inset(px(4.0))
                                 .rounded(px(COMPUTER_USE_PREVIEW_INNER_RADIUS))
+                                .squircle()
                                 .overflow_hidden()
-                                .bg(theme.inset)
+                                .bg(theme.surface.blend(theme.transcript_header_background))
                                 .when_some(screenshot, |element, screenshot| {
                                     element.child(
-                                        img(screenshot)
-                                            .w_full()
-                                            .h_full()
-                                            .rounded(px(COMPUTER_USE_PREVIEW_INNER_RADIUS))
-                                            .object_fit(ObjectFit::Contain),
+                                        squircle_image(
+                                            screenshot,
+                                            px(COMPUTER_USE_PREVIEW_INNER_RADIUS),
+                                            theme.surface.blend(theme.transcript_header_background),
+                                        )
+                                        .size_full()
+                                        .object_fit(ObjectFit::Contain),
                                     )
                                 })
                                 .when(state.frames.current.is_none(), |element| {
@@ -797,11 +812,12 @@ impl Michelle {
                         .child(
                             div()
                                 .absolute()
-                                .top_0()
-                                .left_0()
-                                .w_full()
+                                .top(px(4.0))
+                                .left(px(4.0))
+                                .right(px(4.0))
                                 .h(px(64.0))
                                 .rounded_t(px(COMPUTER_USE_PREVIEW_INNER_RADIUS))
+                                .squircle()
                                 .pt(px(6.0))
                                 .pl(px(6.0))
                                 .pr(px(10.0))
@@ -962,6 +978,7 @@ impl Michelle {
                 .h(px(24.0))
                 .px(px(7.0))
                 .rounded(px(6.0))
+                .squircle()
                 .flex()
                 .items_center()
                 .gap(px(6.0))
@@ -1022,11 +1039,13 @@ impl Michelle {
                 .relative()
                 .w(px(64.0))
                 .h(px(64.0))
+                .p(px(4.0))
                 .rounded(px(8.0))
+                .squircle()
                 .overflow_hidden()
                 .border_1()
                 .border_color(theme.border)
-                .bg(theme.inset)
+                .bg(theme.transcript_background)
                 .track_focus(menu.trigger_focus_handle())
                 .tab_index(0)
                 .focus_visible(|style| style.border_color(theme.accent))
@@ -1069,9 +1088,13 @@ impl Michelle {
                                 cx.stop_propagation();
                             }))
                             .child(
-                                img(attachment_image.image())
-                                    .size_full()
-                                    .object_fit(ObjectFit::Cover),
+                                squircle_image(
+                                    attachment_image.image(),
+                                    px(4.0),
+                                    theme.composer.blend(theme.transcript_background),
+                                )
+                                .size_full()
+                                .object_fit(ObjectFit::Cover),
                             ),
                     );
                 } else {
@@ -1136,13 +1159,14 @@ impl Michelle {
                     .h(px(16.0))
                     .tab_index(0)
                     .rounded(px(5.0))
+                    .squircle()
                     .flex()
                     .items_center()
                     .justify_center()
                     .cursor_default()
-                    .bg(theme.canvas.opacity(0.8))
+                    .bg(theme.composer.blend(theme.transcript_header_background))
                     .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .hover(|element| element.bg(theme.canvas.opacity(0.95)))
+                    .hover(|element| element.bg(theme.composer.blend(theme.overlay_strong)))
                     .active(|element| element.opacity(0.8))
                     .child(icon("xmark", 9.0, theme.text_secondary))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -1187,7 +1211,7 @@ impl Michelle {
         }
         let theme = Theme::current(cx);
         let steerable = self.session_can_steer(session);
-        let mut list = div().flex().flex_col().py(px(4.0));
+        let mut list = div().flex().flex_col().p(px(4.0));
         for message in &session.queued_messages {
             let message_id = message.id;
             let content = if message.visible_content().trim().is_empty() {
@@ -1208,6 +1232,7 @@ impl Michelle {
                     .h(px(24.0))
                     .px(px(7.0))
                     .rounded(px(6.0))
+                    .squircle()
                     .flex()
                     .items_center()
                     .gap(px(5.0))
@@ -1243,6 +1268,7 @@ impl Michelle {
                     .w(px(24.0))
                     .h(px(24.0))
                     .rounded(px(6.0))
+                    .squircle()
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1277,6 +1303,8 @@ impl Michelle {
             list = list.child(
                 div()
                     .id(SharedString::from(format!("queued-message-{message_id}")))
+                    .rounded(px(8.0))
+                    .squircle()
                     .h(px(30.0))
                     .pl(px(12.0))
                     .pr(px(6.0))
@@ -1312,6 +1340,7 @@ impl Michelle {
                                     .w(px(24.0))
                                     .h(px(24.0))
                                     .rounded(px(6.0))
+                                    .squircle()
                                     .flex()
                                     .items_center()
                                     .justify_center()
@@ -1366,13 +1395,12 @@ impl Michelle {
                         div()
                             .rounded_tl(px(12.0))
                             .rounded_tr(px(12.0))
+                            .squircle()
                             .border_t_1()
                             .border_l_1()
                             .border_r_1()
                             .border_color(theme.border)
-                            .bg(theme.composer)
-                            // Row hover fills are full-width rectangles; clip
-                            // them to the card's rounded corners.
+                            .bg(theme.transcript_background)
                             .overflow_hidden()
                             .child(list),
                     ),

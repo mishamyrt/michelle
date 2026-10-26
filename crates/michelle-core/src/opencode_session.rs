@@ -1,10 +1,10 @@
 //! Cold-path OpenCode helpers: the resume catalog, transcript import,
 //! conversation forking, and the model/agent catalog.
 //!
-//! Everything here goes through [`opencode_service::attached`], never
-//! [`opencode_service::shared`]. Opening the Resume picker or refreshing the
-//! model catalog must not start the user's background daemon, so an absent
-//! service is an empty catalog — not a spawn, and not a 20s start poll.
+//! Session reads go through [`opencode_service::attached`], so opening the
+//! Resume picker does not start the user's background daemon. Model discovery
+//! uses [`opencode_service::shared`]: the first model must be selectable before
+//! a session exists, including when no service or cached catalog exists yet.
 //!
 //! Every call blocks on a socket, so every caller must already be off the UI
 //! thread; one of these is several frames of budget.
@@ -462,13 +462,12 @@ fn retained_turn_count(total_turns: usize, turns_to_remove: usize) -> anyhow::Re
 
 /// The service's model and primary-agent catalogs.
 ///
-/// Attach-only, so a launch with no service running answers empties and
-/// `model_catalog` falls back to its disk cache rather than starting the
-/// user's daemon just to refresh a picker.
+/// Starts the shared service if needed, so a fresh installation can offer
+/// models before the first session. Failed discovery still uses the disk cache.
 pub(crate) fn discover_catalog(
     binary: &Path,
 ) -> (Vec<ProviderModel>, Option<Vec<ProviderAgentPreset>>) {
-    let Ok(Some(service)) = opencode_service::attached(binary) else {
+    let Ok(service) = opencode_service::shared(binary) else {
         return (Vec::new(), None);
     };
     let endpoint = service.endpoint();
@@ -1042,10 +1041,10 @@ mod tests {
         );
     }
 
-    /// The service is the only source of the catalog, and both halves have
-    /// to arrive together or the picker degrades to the disk cache.
+    /// Run with the service stopped to cover discovery before the first session.
+    /// No session is created and no prompt is sent.
     #[test]
-    #[ignore = "requires a running OpenCode background service"]
+    #[ignore = "requires OpenCode 2; may start its background service"]
     fn discovers_the_real_model_and_agent_catalog() {
         let binary =
             crate::command_env::find_executable("opencode").expect("opencode is not installed");
@@ -1084,7 +1083,7 @@ mod discovery_smoke {
     /// Proves the picker is actually populated against a live service, which a
     /// unit test over canned JSON cannot.
     #[test]
-    #[ignore = "requires a running OpenCode background service"]
+    #[ignore = "requires OpenCode 2; may start its background service"]
     fn discovers_models_from_the_adopted_service() {
         let (models, presets) = super::discover_catalog(std::path::Path::new("opencode"));
         println!(

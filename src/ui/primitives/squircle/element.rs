@@ -2,9 +2,9 @@
 
 use gpui::{
     App, Background, Bounds, Corners, CornersRefinement, Element, ElementId, FillOptions, FillRule,
-    GlobalElementId, Hitbox, InspectorElementId, InteractiveElement, Interactivity, IntoElement,
-    LayoutId, Overflow, ParentElement, PathBuilder, PathStyle, Pixels, StatefulInteractiveElement,
-    StyleRefinement, Styled, Window, point, px, size,
+    GlobalElementId, Hitbox, Hsla, InspectorElementId, InteractiveElement, Interactivity,
+    IntoElement, LayoutId, Overflow, ParentElement, PathBuilder, PathStyle, Pixels,
+    StatefulInteractiveElement, StyleRefinement, Styled, Window, point, px, size,
 };
 
 use super::geometry::SquirclePath;
@@ -196,6 +196,34 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement + Styled> I
     }
 }
 
+fn corner_mask(bounds: Bounds<Pixels>, radii: Corners<Pixels>) -> Option<gpui::Path<Pixels>> {
+    let shape = SquirclePath::new(bounds, &corners(radii), 0.0, 0.6, true)?;
+    let mut builder = PathBuilder::fill().with_style(PathStyle::Fill(
+        FillOptions::default().with_fill_rule(FillRule::EvenOdd),
+    ));
+    builder.move_to(bounds.origin);
+    builder.line_to(bounds.top_right());
+    builder.line_to(bounds.bottom_right());
+    builder.line_to(bounds.bottom_left());
+    builder.close();
+    shape.append_to(&mut builder);
+    builder.build().ok()
+}
+
+pub(super) fn paint_corner_mask(
+    window: &mut Window,
+    bounds: Bounds<Pixels>,
+    radii: Corners<Pixels>,
+    backdrop: Hsla,
+) {
+    // shortcut: GPUI exposes rectangular clips; corner masks require a uniform backdrop.
+    if radii != Corners::default()
+        && let Some(mask) = corner_mask(bounds, radii)
+    {
+        window.paint_path(mask, backdrop);
+    }
+}
+
 fn corners(radii: Corners<Pixels>) -> CornersRefinement<Pixels> {
     CornersRefinement {
         top_left: Some(radii.top_left),
@@ -371,6 +399,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn image_corner_mask_covers_only_the_four_corners() {
+        let bounds = Bounds::new(point(px(17.0), px(29.0)), size(px(96.0), px(80.0)));
+        let mask = corner_mask(bounds, Corners::all(px(9.0))).unwrap();
+        let covered = |point: gpui::Point<Pixels>| {
+            mask.vertices.chunks_exact(3).any(|triangle| {
+                let [a, b, c] = std::array::from_fn(|i| triangle[i].xy_position);
+                let cross = |u: gpui::Point<Pixels>, v: gpui::Point<Pixels>| {
+                    u.x.as_f32() * v.y.as_f32() - u.y.as_f32() * v.x.as_f32()
+                };
+                let signs = [
+                    cross(b - a, point - a),
+                    cross(c - b, point - b),
+                    cross(a - c, point - c),
+                ];
+                signs.iter().all(|s| *s >= -0.0001) || signs.iter().all(|s| *s <= 0.0001)
+            })
+        };
+        for offset in [(0.5, 0.5), (95.5, 0.5), (0.5, 79.5), (95.5, 79.5)] {
+            assert!(covered(bounds.origin + point(px(offset.0), px(offset.1))));
+        }
+        for offset in [(48.0, 40.0), (48.0, 0.5), (0.5, 40.0), (5.0, 5.0)] {
+            assert!(!covered(bounds.origin + point(px(offset.0), px(offset.1))));
+        }
+        for vertex in mask.vertices {
+            let point = vertex.xy_position;
+            assert!(point.x >= bounds.left() - px(0.01) && point.x <= bounds.right() + px(0.01));
+            assert!(point.y >= bounds.top() - px(0.01) && point.y <= bounds.bottom() + px(0.01));
+        }
+        assert!(corner_mask(Bounds::default(), Corners::all(px(9.0))).is_none());
+    }
+
+    #[test]
+    #[ignore = "manual per-image corner-mask measurement"]
+    fn benchmark_image_corner_mask() {
+        let bounds = Bounds::new(point(px(0.0), px(0.0)), size(px(96.0), px(80.0)));
+        let start = std::time::Instant::now();
+        for _ in 0..10_000 {
+            std::hint::black_box(corner_mask(bounds, Corners::all(px(9.0))).unwrap());
+        }
+        eprintln!(
+            "image corner mask: {:?} per image",
+            start.elapsed() / 10_000
+        );
     }
 
     #[test]

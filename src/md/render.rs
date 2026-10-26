@@ -29,8 +29,8 @@ use gpui::{
     AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Font, FontStyle,
     FontWeight, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SharedString, StrikethroughStyle,
-    StyledText, TextLayout, TextRun, UnderlineStyle, Window, canvas, div, font, img, point,
-    prelude::*, px, quad, relative, size,
+    StyledText, TextLayout, TextRun, UnderlineStyle, Window, canvas, div, font, point, prelude::*,
+    px, quad, relative, size,
 };
 use regex::Regex;
 
@@ -43,7 +43,7 @@ use super::selection::{
 use super::veil::{RowVeil, apply_veil};
 use crate::theme::Theme;
 use crate::ui::menu::{ContextMenuHandle, context_menu};
-use crate::ui::squircle::SquircleExt;
+use crate::ui::squircle::{SquircleExt, paint_fill as paint_squircle_fill, squircle_image};
 use crate::ui::tooltip::Tooltip;
 use crate::ui::{StyledTypography, TextStyle};
 
@@ -204,6 +204,7 @@ fn heading_metrics(level: u8, metrics: &Metrics) -> (f32, f32, FontWeight) {
 /// Colors for markdown paint, resolved once per render from the theme.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
+    pub surface: Hsla,
     pub text: Hsla,
     pub secondary: Hsla,
     pub tertiary: Hsla,
@@ -238,6 +239,7 @@ impl Palette {
             1.0,
         );
         Self {
+            surface: theme.surface,
             text: theme.text,
             secondary: theme.text_secondary,
             tertiary: theme.text_tertiary,
@@ -389,7 +391,7 @@ pub fn flatten(
             } else {
                 base_color
             },
-            // Inline code's wash is painted as *rounded* quads by the canvas
+            // Inline code's wash is painted as squircles by the canvas
             // underlay; a run background could only ever be a square box.
             background_color: None,
             underline: run.style.link.is_some().then_some(UnderlineStyle {
@@ -780,14 +782,12 @@ fn text_element_with_selection(
         move |_, _, window, _| {
             for range in &code_ranges {
                 for rect in range_rects(&layout, range, CODE_WASH_PAD_X, CODE_WASH_INSET_Y) {
-                    window.paint_quad(quad(
+                    paint_squircle_fill(
+                        window,
                         rect,
-                        px(CODE_WASH_RADIUS),
-                        code_wash,
-                        px(0.0),
-                        gpui::transparent_black(),
-                        BorderStyle::default(),
-                    ));
+                        gpui::Corners::all(px(CODE_WASH_RADIUS)),
+                        code_wash.into(),
+                    );
                 }
             }
             if let Some(search) = &search {
@@ -1545,6 +1545,7 @@ fn checkbox(checked: bool, ctx: &Ctx) -> AnyElement {
         .my(px(((ctx.metrics.line_height - box_size) / 2.0).max(0.0)))
         .flex_none()
         .rounded(px(3.0))
+        .squircle()
         .border_1()
         .border_color(if checked {
             ctx.palette.accent
@@ -1556,11 +1557,7 @@ fn checkbox(checked: bool, ctx: &Ctx) -> AnyElement {
         .items_center()
         .justify_center()
         .when(checked, |element| {
-            element.child(crate::ui::icon(
-                "checkmark",
-                box_size - 4.0,
-                ctx.palette.inset,
-            ))
+            element.child(crate::ui::icon("checkmark", box_size - 4.0, gpui::white()))
         })
         .into_any_element()
 }
@@ -1574,22 +1571,18 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
     let key = ctx.next_key();
     let id = SharedString::from(format!("image-{}-{}", key.row, key.index));
     let image = match decode_data_url(url) {
-        Some(decoded) => img(decoded).id(id),
-        None => img(url.to_owned()).id(id),
-    };
+        Some(decoded) => squircle_image(decoded, px(6.0), ctx.palette.surface),
+        None => squircle_image(url.to_owned(), px(6.0), ctx.palette.surface),
+    }
+    .object_fit(gpui::ObjectFit::ScaleDown)
+    .id(id);
     div()
         .w_full()
         .min_w_0()
         .flex()
         .flex_col()
         .gap(px(4.0))
-        .child(
-            image
-                .max_w(relative(1.0))
-                .max_h(px(MAX_HEIGHT))
-                .rounded(px(6.0))
-                .object_fit(gpui::ObjectFit::ScaleDown),
-        )
+        .child(image.max_w(relative(1.0)).max_h(px(MAX_HEIGHT)))
         .when(!alt.trim().is_empty(), |element| {
             element.child(
                 div()
@@ -1873,6 +1866,7 @@ fn render_table(
         .w_full()
         .min_w_0()
         .rounded(px(8.0))
+        .squircle()
         .border_1()
         .border_color(ctx.palette.border)
         .overflow_hidden()
@@ -1882,7 +1876,10 @@ fn render_table(
     if !header.is_empty() {
         table = table.child(
             table_row(header, &widths, align, ctx, FontWeight::SEMIBOLD, true)
-                .bg(ctx.palette.overlay),
+                .bg(ctx.palette.overlay)
+                .rounded_t(px(7.0))
+                .when(rows.is_empty(), |row| row.rounded_b(px(7.0)))
+                .squircle(),
         );
     }
     for (index, row) in rows.iter().enumerate() {

@@ -58,3 +58,11 @@ Local adaptations:
 
 No Cargo dependencies are added. Geometry work is bounded by four corners and
 performs no I/O or animation scheduling.
+
+`SquircleImage` uses native GPUI image loading, sizing and input, then covers the
+four corners of the fitted image with the same squircle geometry. Pass the
+opaque, uniform parent background to `squircle_image(source, radius, backdrop)`;
+resolve translucent fills against their actual parent first. Floating frames
+must inset the image so this mask stays inside the frame. Like `Img`, resources
+and encoded images load through asynchronous assets; retained `RenderImage`
+values go straight to the sprite atlas. Set `object_fit` before assigning an ID.

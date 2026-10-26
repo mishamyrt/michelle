@@ -1,5 +1,8 @@
 use super::*;
-use crate::ui::{ActivationExt, IconButton, squircle::SquircleExt};
+use crate::ui::{
+    ActivationExt, IconButton,
+    squircle::{SquircleExt, squircle_image},
+};
 
 use chrono::{Datelike, Days};
 use std::path::Path;
@@ -349,11 +352,13 @@ fn render_sent_message_attachments(
             )))
             .w(px(96.0))
             .h(px(80.0))
+            .p(px(4.0))
             .rounded(px(9.0))
+            .squircle()
             .overflow_hidden()
             .border_1()
             .border_color(theme.border)
-            .bg(theme.inset)
+            .bg(theme.transcript_background)
             .track_focus(menu.trigger_focus_handle())
             .tab_index(0)
             .focus_visible(|style| style.border_color(theme.accent))
@@ -386,9 +391,13 @@ fn render_sent_message_attachments(
                             cx.stop_propagation();
                         })
                         .child(
-                            img(attachment_image.image())
-                                .size_full()
-                                .object_fit(ObjectFit::Cover),
+                            squircle_image(
+                                attachment_image.image(),
+                                px(5.0),
+                                theme.surface.blend(theme.transcript_background),
+                            )
+                            .size_full()
+                            .object_fit(ObjectFit::Cover),
                         ),
                 );
                 tile = tile.on_key_down(move |event: &KeyDownEvent, window, cx| {
@@ -551,6 +560,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut Context<Michelle>) 
                         .w_full()
                         .max_w(px(540.0))
                         .rounded(px(16.0))
+                        .squircle()
                         .bg(theme.message_bubble_background)
                         .pt(px(9.0))
                         .pb(px(8.0))
@@ -570,6 +580,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut Context<Michelle>) 
                                         .h(px(26.0))
                                         .px(px(10.0))
                                         .rounded(px(7.0))
+                                        .squircle()
                                         .border_1()
                                         .border_color(theme.border)
                                         .bg(theme.overlay)
@@ -594,6 +605,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut Context<Michelle>) 
                                         .h(px(26.0))
                                         .px(px(11.0))
                                         .rounded(px(7.0))
+                                        .squircle()
                                         .bg(if can_submit {
                                             theme.inverse
                                         } else {
@@ -670,16 +682,18 @@ pub(super) fn render_message(params: MessageRender, cx: &mut Context<Michelle>) 
                                     // Keep the fades inside the bubble's padding so
                                     // square fade quads cannot paint over its rounded corners.
                                     .when_some(user_message_viewport, |body, viewport| {
+                                        let bubble_surface =
+                                            theme.surface.blend(theme.message_bubble_background);
                                         body.child(scrollbar::edge_fade(
                                             viewport.scroll_handle.clone(),
                                             scrollbar::FadeEdge::Top,
-                                            theme.raised,
+                                            bubble_surface,
                                         ))
                                         .child(
                                             scrollbar::edge_fade(
                                                 viewport.scroll_handle.clone(),
                                                 scrollbar::FadeEdge::Bottom,
-                                                theme.raised,
+                                                bubble_surface,
                                             ),
                                         )
                                     }),

@@ -29,6 +29,7 @@ use crate::ui::{StyledTypography, TextStyle};
 
 use super::*;
 use crate::ui::primitives::navigation::next_picker_highlight;
+use crate::ui::squircle::SquircleExt;
 
 /// Key context the composer card declares while the popup is open.
 const AUTOCOMPLETE_CONTEXT: &str = "ComposerAutocomplete > TextInput";
@@ -314,6 +315,7 @@ impl Michelle {
                             .w(card_bounds.size.width)
                             .max_h(px(302.0))
                             .rounded(px(11.0))
+                            .squircle()
                             .border_1()
                             .border_color(theme.border_strong)
                             .bg(theme.raised)
@@ -349,6 +351,7 @@ impl Michelle {
             .h(px(30.0))
             .px(px(8.0))
             .rounded(px(6.0))
+            .squircle()
             .flex()
             .items_center()
             .gap(px(8.0))
@@ -417,6 +420,7 @@ impl Michelle {
                             .px(px(5.0))
                             .flex_none()
                             .rounded(px(4.0))
+                            .squircle()
                             .border_1()
                             .border_color(theme.border)
                             .flex()

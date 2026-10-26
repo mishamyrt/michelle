@@ -1,6 +1,6 @@
 use super::right_panel::{DiffRowStyle, render_diff_code_row};
 use super::*;
-use crate::ui::squircle::SquircleExt;
+use crate::ui::squircle::{SquircleExt, squircle_image};
 use crate::ui::{ActivationExt, DisclosureGroup, IconButton};
 
 mod list;
@@ -762,6 +762,7 @@ impl Render for ConversationNavigationRail {
                 .max_h(px(preview_height))
                 .overflow_hidden()
                 .rounded(px(14.0))
+                .squircle()
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.raised)
@@ -888,6 +889,7 @@ impl ConversationNavigationRail {
                     .flex()
                     .items_center()
                     .rounded(px(4.0))
+                    .squircle()
                     .track_focus(&focus_handle)
                     .tab_index(turn_index as isize)
                     .focus_visible(|style| style.border_1().border_color(theme.accent))
@@ -1296,6 +1298,10 @@ impl Michelle {
                         } else {
                             MarkdownMetrics::BODY
                         });
+                    let mut palette = palette;
+                    if message.role == MessageRole::User {
+                        palette.surface = theme.surface.blend(theme.message_bubble_background);
+                    }
                     let animate_streaming = message.streaming && !cx.reduce_motion();
                     let mut ctx = self
                         .markdown_ctx(
@@ -1866,6 +1872,7 @@ impl Michelle {
             .min_w_0()
             .h(px(26.0))
             .rounded(px(5.0))
+            .squircle()
             .flex()
             .items_center()
             .gap(px(6.0))
@@ -1924,8 +1931,7 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // `Theme::overlay` is 5% alpha and GPUI's `opacity` multiplies it.
-        let activity_surface = theme.surface.blend(theme.overlay.opacity(0.7));
+        let activity_surface = theme.surface.blend(theme.transcript_header_background);
         let mut items = div()
             .w_full()
             .min_w_0()
@@ -1958,6 +1964,7 @@ impl Michelle {
                     .h(px(20.0))
                     .px(px(6.0))
                     .rounded(px(5.0))
+                    .squircle()
                     .border_1()
                     .border_color(theme.border_strong)
                     .flex_none()
@@ -2135,6 +2142,7 @@ impl Michelle {
                 // activity stream, so keep selectable markdown rather than
                 // presenting it as monospace tool output.
                 let mut palette = MarkdownPalette::from_theme(theme);
+                palette.surface = activity_surface;
                 palette.text = theme.text_secondary;
                 palette.secondary = theme.text_tertiary;
                 let ctx = self
@@ -2331,6 +2339,7 @@ impl Michelle {
                                             )))
                                             .size(px(20.0))
                                             .rounded(px(5.0))
+                                            .squircle()
                                             .flex()
                                             .items_center()
                                             .justify_center()
@@ -2760,15 +2769,14 @@ fn render_activity_image(
     // Daemon blobs use the bounded decoded-image cache. Only legacy inline data
     // URLs still pay a per-render base64 decode.
     let id = SharedString::from(format!("activity-image-{activity_id}-{image_index}"));
+    let surface = theme.surface.blend(theme.transcript_header_background);
     if let Some(image) = image {
-        return img(image.image())
+        return squircle_image(image.image(), px(4.0), surface)
             .id(id)
             .w(px(ACTIVITY_IMAGE_WIDTH))
             .max_w(gpui::relative(1.0))
             .max_h(px(ACTIVITY_IMAGE_HEIGHT))
             .mt(px(8.0))
-            .rounded(px(4.0))
-            .object_fit(ObjectFit::Contain)
             .into_any_element();
     }
     if michelle_protocol::blob::is_reference(image_url)
@@ -2781,7 +2789,8 @@ fn render_activity_image(
             .h(px(80.0))
             .mt(px(8.0))
             .rounded(px(4.0))
-            .bg(theme.inset)
+            .squircle()
+            .bg(theme.transcript_background)
             .flex()
             .items_center()
             .justify_center()
@@ -2790,16 +2799,14 @@ fn render_activity_image(
     };
 
     match decode_activity_image(image_url) {
-        Some(image) => img(image),
-        None => img(image_url.to_owned()),
+        Some(image) => squircle_image(image, px(4.0), surface),
+        None => squircle_image(image_url.to_owned(), px(4.0), surface),
     }
     .id(id)
     .w(px(ACTIVITY_IMAGE_WIDTH))
     .max_w(gpui::relative(1.0))
     .max_h(px(ACTIVITY_IMAGE_HEIGHT))
     .mt(px(8.0))
-    .rounded(px(4.0))
-    .object_fit(ObjectFit::Contain)
     .into_any_element()
 }
 

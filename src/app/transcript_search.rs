@@ -10,6 +10,7 @@ use regex::{Regex, RegexBuilder};
 use super::*;
 use crate::md::render::{SearchHighlights, TextSearchMatch};
 use crate::md::selection::TextKey;
+use crate::ui::squircle::SquircleExt;
 use crate::ui::{ActivationExt, IconButton, SearchField};
 
 const MAX_TRANSCRIPT_SEARCH_MATCHES: usize = 20_000;
@@ -506,6 +507,7 @@ impl Michelle {
                 .w(px(bar_width))
                 .max_w_full()
                 .rounded(px(8.0))
+                .squircle()
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.raised)

@@ -541,8 +541,11 @@ already started, found through its registration file
 and confirmed with `GET /api/info`, whose `pid` and `version` must match the
 registration
 ([opencode_service.rs](../crates/michelle-core/src/opencode_service.rs)). Only
-when none is registered does a session start run `opencode serve --service`,
-which yields to a healthy incumbent, and poll the registration for up to 20 s.
+when none is registered does model discovery or a session start run
+`opencode serve --service`, which yields to a healthy incumbent, and poll the
+registration for up to 20 s.
+Model discovery can therefore populate the picker before the first session;
+opening the Resume picker still only attaches to an already running service.
 An OpenCode 1 binary is refused before that spawn: its `serve` has no service
 mode, would never register, and would be left running as an orphan.
 

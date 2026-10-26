@@ -36,6 +36,9 @@ mod element;
 pub(crate) use element::paint_fill;
 pub use element::{SquircleElement, SquircleExt};
 
+mod image;
+pub use image::{SquircleImage, squircle_image};
+
 #[cfg(test)]
 pub(crate) mod test_support;
 
