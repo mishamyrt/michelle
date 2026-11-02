@@ -31,6 +31,7 @@ impl Michelle {
             return div()
                 .h(px(24.0))
                 .px(px(7.0))
+                .text_style(TextStyle::CAPTION_2)
                 .flex()
                 .items_center()
                 .gap(px(6.0))

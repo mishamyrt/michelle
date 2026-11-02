@@ -475,15 +475,6 @@ impl Michelle {
             && !session.is_busy()
     }
 
-    pub(in crate::app) fn move_sidebar_session_to_project(
-        &mut self,
-        session_id: Uuid,
-        project_id: Uuid,
-        cx: &mut Context<Self>,
-    ) {
-        self.move_sidebar_session(session_id, Some(project_id), None, cx);
-    }
-
     pub(in crate::app) fn move_sidebar_session(
         &mut self,
         session_id: Uuid,

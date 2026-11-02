@@ -2090,7 +2090,7 @@ impl Michelle {
                 move |_| {
                     let rename_michelle = michelle.clone();
                     let remove_michelle = michelle.clone();
-                    let mut items = vec![
+                    vec![
                         MenuItem::new(tr!("common.rename"), move |window, cx| {
                             let _ = rename_michelle.update(cx, |michelle, cx| {
                                 michelle.begin_session_rename(session_id, window, cx);
@@ -2101,78 +2101,7 @@ impl Michelle {
                             let _ = remove_michelle
                                 .update(cx, |michelle, cx| michelle.remove_session(session_id, cx));
                         }),
-                    ];
-                    let move_michelle = michelle.clone();
-                    items.insert(
-                        1,
-                        MenuItem::Submenu {
-                            label: tr!("sidebar.move_to_project").into(),
-                            value: None,
-                            items: Rc::new(move |cx| {
-                                let Some(entity) = move_michelle.upgrade() else {
-                                    return Vec::new();
-                                };
-                                let this = entity.read(cx);
-                                let session = this
-                                    .state
-                                    .sessions
-                                    .iter()
-                                    .find(|session| session.id == session_id);
-                                let enabled = session.is_some_and(|session| {
-                                    this.sidebar_session_can_move_to_project(session)
-                                });
-                                let mut destinations = this
-                                    .state
-                                    .projects
-                                    .iter()
-                                    .filter(|project| {
-                                        !this
-                                            .sidebar_model
-                                            .projectless_projects
-                                            .borrow()
-                                            .contains(&project.id)
-                                            && session.is_some_and(|session| {
-                                                session.project_id != project.id
-                                            })
-                                    })
-                                    .map(|project| {
-                                        let weak = move_michelle.clone();
-                                        let id = project.id;
-                                        MenuItem::new(project.display_name(), move |_, cx| {
-                                            let _ = weak.update(cx, |this, cx| {
-                                                this.move_sidebar_session_to_project(
-                                                    session_id, id, cx,
-                                                );
-                                            });
-                                        })
-                                        .disabled(!enabled)
-                                    })
-                                    .collect::<Vec<_>>();
-                                if session.is_some_and(|session| {
-                                    !this
-                                        .sidebar_model
-                                        .projectless_projects
-                                        .borrow()
-                                        .contains(&session.project_id)
-                                }) {
-                                    let weak = move_michelle.clone();
-                                    destinations.push(MenuItem::Separator);
-                                    destinations.push(
-                                        MenuItem::new(tr!("sidebar.chats"), move |_, cx| {
-                                            let _ = weak.update(cx, |this, cx| {
-                                                this.move_sidebar_session(
-                                                    session_id, None, None, cx,
-                                                );
-                                            });
-                                        })
-                                        .disabled(!enabled),
-                                    );
-                                }
-                                destinations
-                            }),
-                        },
-                    );
-                    items
+                    ]
                 },
             )
         };
