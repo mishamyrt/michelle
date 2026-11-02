@@ -767,9 +767,35 @@ pub enum CheckpointStatus {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CheckpointFile {
+    #[serde(
+        deserialize_with = "deserialize_checkpoint_path",
+        serialize_with = "serialize_checkpoint_path"
+    )]
     pub path: String,
     pub additions: u64,
     pub deletions: u64,
+}
+
+fn deserialize_checkpoint_path<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Older checkpoints persisted the path column from Git's --numstat verbatim.
+    let path = String::deserialize(deserializer)?;
+    Ok(crate::git::unquote_path(&path))
+}
+
+fn serialize_checkpoint_path<S>(path: &str, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    if path.starts_with('"') && path.ends_with('"') {
+        // Preserve literal surrounding quotes across the legacy decoder on reload.
+        let quoted = format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""));
+        serializer.serialize_str(&quoted)
+    } else {
+        serializer.serialize_str(path)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -4766,6 +4792,39 @@ mod tests {
         let checkpoint = session.turns[0].checkpoint.as_ref().unwrap();
         assert_eq!((checkpoint.additions, checkpoint.deletions), (10, 7));
         assert!(checkpoint.totals_are_current());
+    }
+
+    #[test]
+    fn legacy_checkpoint_paths_are_decoded_when_loaded() {
+        let file: CheckpointFile = serde_json::from_value(serde_json::json!({
+            "path": r#""\320\232\320\276\320\274\320\260\320\275\320\264\320\260.md""#,
+            "additions": 7,
+            "deletions": 1,
+        }))
+        .unwrap();
+        assert_eq!(file.path, "Команда.md");
+        assert_eq!((file.additions, file.deletions), (7, 1));
+    }
+
+    #[test]
+    fn checkpoint_paths_survive_repeated_save_and_load() {
+        for path in [
+            "Проекты/Geoportal/Карта.md",
+            r"folder\name.md",
+            r#""quoted""#,
+            r#""\320\232""#,
+            "\"name\twith\ncontrols\"",
+        ] {
+            let mut file = CheckpointFile {
+                path: path.to_owned(),
+                additions: 1,
+                deletions: 0,
+            };
+            for _ in 0..3 {
+                file = serde_json::from_str(&serde_json::to_string(&file).unwrap()).unwrap();
+                assert_eq!(file.path, path);
+            }
+        }
     }
 
     #[test]

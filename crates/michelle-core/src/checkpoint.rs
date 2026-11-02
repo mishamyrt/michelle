@@ -614,7 +614,7 @@ fn diff_files(cwd: &Path, from_ref: &str, to_ref: &str) -> anyhow::Result<Vec<Ch
             continue;
         };
         files.push(CheckpointFile {
-            path: path.to_owned(),
+            path: michelle_protocol::git::unquote_path(path),
             additions,
             deletions,
         });
@@ -1010,6 +1010,42 @@ mod tests {
         assert!(!directory.join("discard.txt").exists());
 
         fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn checkpoint_file_paths_preserve_cyrillic_and_special_characters() {
+        let directory =
+            std::env::temp_dir().join(format!("michelle-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        git_ok(&directory, &["config", "core.quotePath", "true"]);
+        git_ok(&directory, &["config", "core.autocrlf", "false"]);
+        let session_id = Uuid::new_v4();
+        capture_turn(&directory, session_id, 0).unwrap();
+
+        let paths = [
+            "Команда.md",
+            "Проекты/Geoportal/Карта.md",
+            "folder with spaces/заметки.txt",
+            r#""\320\232""#,
+            "line\tbreak\nимя.md",
+        ];
+        for path in paths {
+            let file = directory.join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, "new\n").unwrap();
+        }
+
+        let turn = capture_turn(&directory, session_id, 1).unwrap();
+        assert_eq!(turn.files.len(), paths.len());
+        for path in paths {
+            let file = turn.files.iter().find(|file| file.path == path).unwrap();
+            assert_eq!((file.additions, file.deletions), (1, 0));
+            let restored: CheckpointFile =
+                serde_json::from_str(&serde_json::to_string(file).unwrap()).unwrap();
+            assert_eq!(&restored, file);
+        }
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
