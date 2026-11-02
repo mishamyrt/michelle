@@ -497,6 +497,11 @@ impl Michelle {
                 .size_full()
                 .pb(anchor_end_space),
             )
+            .child(scrollbar::edge_fade(
+                scrollbar_handle.clone(),
+                scrollbar::FadeEdge::Bottom,
+                Theme::current(cx).surface,
+            ))
             .children(navigation_rail)
             .children(scroll_to_bottom)
             .child(scrollbar::vertical(
