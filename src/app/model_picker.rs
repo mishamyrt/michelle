@@ -185,15 +185,13 @@ impl Michelle {
                         let effort = option.id;
                         let is_default = default_effort.as_deref() == Some(effort.as_str());
                         let selected = selected_effort.as_deref() == Some(effort.as_str());
-                        items.push(
-                            traits_choice(theme, option.label, is_default, selected).on_click(
-                                move |_, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_reasoning_effort(effort.clone(), cx);
-                                    });
-                                },
-                            ),
-                        );
+                        items.push(traits_choice(option.label, is_default, selected).on_click(
+                            move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_reasoning_effort(effort.clone(), cx);
+                                });
+                            },
+                        ));
                     }
                 }
                 if !service_tiers.is_empty() {
@@ -204,7 +202,6 @@ impl Michelle {
                     let weak_standard = weak.clone();
                     items.push(
                         traits_choice(
-                            theme,
                             tr!("models.standard"),
                             default_tier == "default",
                             selected_tier == "default",
@@ -220,15 +217,13 @@ impl Michelle {
                         let tier = option.id;
                         let is_default = default_tier == tier;
                         let selected = selected_tier == tier;
-                        items.push(
-                            traits_choice(theme, option.label, is_default, selected).on_click(
-                                move |_, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_service_tier(tier.clone(), cx);
-                                    });
-                                },
-                            ),
-                        );
+                        items.push(traits_choice(option.label, is_default, selected).on_click(
+                            move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_service_tier(tier.clone(), cx);
+                                });
+                            },
+                        ));
                     }
                 }
                 if !context_windows.is_empty() {
@@ -241,15 +236,13 @@ impl Michelle {
                         let window = option.id;
                         let is_default = default_window.as_deref() == Some(window.as_str());
                         let selected = selected_window.as_deref() == Some(window.as_str());
-                        items.push(
-                            traits_choice(theme, option.label, is_default, selected).on_click(
-                                move |_, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_context_window(window.clone(), cx);
-                                    });
-                                },
-                            ),
-                        );
+                        items.push(traits_choice(option.label, is_default, selected).on_click(
+                            move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_context_window(window.clone(), cx);
+                                });
+                            },
+                        ));
                     }
                 }
                 items
@@ -534,12 +527,7 @@ pub(super) fn subscribe_search(search_input: &Entity<TextInput>, cx: &mut Contex
 
 /// One choice in the model-traits menu: a label plus a badge marking the
 /// provider's own default, so the current selection and the default read apart.
-pub(in crate::app) fn traits_choice(
-    theme: Theme,
-    label: String,
-    is_default: bool,
-    selected: bool,
-) -> MenuItem {
+pub(in crate::app) fn traits_choice(label: String, is_default: bool, selected: bool) -> MenuItem {
     MenuItem::custom(move |_, _| {
         div()
             .w(px(190.0))
@@ -553,12 +541,11 @@ pub(in crate::app) fn traits_choice(
                 element.child(
                     div()
                         .h(px(18.0))
-                        .px(px(5.0))
                         .flex_none()
                         .flex()
                         .items_center()
                         .text_style(TextStyle::CAPTION_2.bold())
-                        .text_color(theme.text_tertiary)
+                        .opacity(0.6)
                         .child(tr!("common.default")),
                 )
             })

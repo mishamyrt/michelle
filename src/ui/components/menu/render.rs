@@ -239,7 +239,7 @@ fn render_menu_item(
             .px(px(16.5))
             .pt(px(6.0))
             .pb(px(2.0))
-            .text_style(TextStyle::SUBHEADLINE)
+            .text_style(TextStyle::SUBHEADLINE.bold())
             .text_color(theme.text_tertiary)
             .child(label)
             .into_any_element(),
