@@ -1940,11 +1940,7 @@ impl Michelle {
         let mut items = div()
             .w_full()
             .min_w_0()
-            .ml(px(6.0))
-            .pl(px(12.0))
             .pb(px(2.0))
-            .border_l_1()
-            .border_color(theme.border)
             .flex()
             .flex_col()
             .gap(px(8.0));

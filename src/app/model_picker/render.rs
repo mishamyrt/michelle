@@ -1,6 +1,9 @@
 //! Searchable model menu; only visible rows are built.
+use gpui::{BoxShadow, Point};
+
 use super::model::{next_model_picker_highlight, visible_picker_rows};
 use super::*;
+use crate::ui::squircle::SquircleExt;
 use crate::ui::{
     IconSize, SelectableRow, SfSymbol,
     squircle::{SquircleStyled, squircle},
@@ -197,8 +200,9 @@ impl Michelle {
                                     ModelPickerRow::Header(kind) => div()
                                         .h(px(ROW_HEIGHT))
                                         .flex()
+                                        .pl(px(10.0))
                                         .items_center()
-                                        .text_style(TextStyle::CAPTION_2)
+                                        .text_style(TextStyle::SUBHEADLINE.bold())
                                         .text_color(theme.text_tertiary)
                                         .child(
                                             kind.map(|kind| SharedString::from(kind.short_name()))
@@ -335,13 +339,36 @@ impl Michelle {
                             .h(px(32.0))
                             .flex_none()
                             .px(px(10.0))
+                            .squircle()
                             .rounded(px(9.0))
-                            .border_2()
-                            .border_color(if search_focused {
-                                theme.accent
+                            .border(px(0.5))
+                            .shadow(if search_focused {
+                                vec![
+                                    BoxShadow {
+                                        color: theme.accent,
+                                        blur_radius: px(0.0),
+                                        offset: Point {
+                                            x: px(0.0),
+                                            y: px(0.0),
+                                        },
+                                        spread_radius: px(1.5),
+                                        inset: true,
+                                    },
+                                    BoxShadow {
+                                        color: theme.accent.alpha(0.25),
+                                        blur_radius: px(3.0),
+                                        offset: Point {
+                                            x: px(0.0),
+                                            y: px(2.0),
+                                        },
+                                        spread_radius: px(0.0),
+                                        inset: false,
+                                    },
+                                ]
                             } else {
-                                theme.border_strong
+                                vec![]
                             })
+                            .border_color(theme.border_strong)
                             .bg(theme.raised)
                             .flex()
                             .items_center()
