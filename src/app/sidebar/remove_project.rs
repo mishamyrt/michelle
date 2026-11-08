@@ -60,7 +60,13 @@ impl Michelle {
         let collection = self.state.sidebar_group_for_project(project_id);
         if self.remove_sidebar_project(project_id, cx) {
             self.sidebar_ui.remove_project_dialog = None;
-            self.focus_sidebar_row(SidebarRow::Collection(collection), window, cx);
+            self.focus_sidebar_row(
+                SidebarRow::Collection(
+                    collection.map_or(SidebarCollection::Projects, SidebarCollection::Group),
+                ),
+                window,
+                cx,
+            );
         }
     }
 

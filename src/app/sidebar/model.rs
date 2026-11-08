@@ -63,11 +63,16 @@ impl Michelle {
                 fingerprint,
                 u64::from(self.state.sidebar_hidden_projects.contains(&project.id)),
             );
+            fingerprint = mix(
+                fingerprint,
+                u64::from(self.state.sidebar_pinned_projects.contains(&project.id)),
+            );
         }
         fingerprint = mix(
             fingerprint,
             u64::from(self.state.sidebar_projects_collapsed),
         );
+        fingerprint = mix(fingerprint, u64::from(self.state.sidebar_pinned_collapsed));
         for group in &self.state.sidebar_project_groups {
             fingerprint = mix_uuid(fingerprint, group.id);
             fingerprint = mix(fingerprint, u64::from(group.collapsed));
@@ -223,6 +228,8 @@ impl Michelle {
             &self.state.sidebar_project_groups,
             self.state.sidebar_projects_collapsed,
             &self.state.sidebar_hidden_projects,
+            &self.state.sidebar_pinned_projects,
+            self.state.sidebar_pinned_collapsed,
         );
         rows
     }
@@ -230,6 +237,15 @@ impl Michelle {
         self.sidebar_model.rows_fingerprint.set(None);
         self.save();
         cx.notify();
+    }
+
+    pub(super) fn toggle_sidebar_project_pin(&mut self, project: Uuid, cx: &mut Context<Self>) {
+        let pinned = !self.state.sidebar_pinned_projects.contains(&project);
+        if self.state.set_sidebar_project_pinned(project, pinned) {
+            let collection = SidebarCollection::for_project(&self.state, project);
+            self.set_sidebar_collection_collapsed(collection, false, cx);
+            self.save_sidebar_presentation(cx);
+        }
     }
 
     pub(in crate::app) fn remove_sidebar_project(
@@ -289,22 +305,24 @@ impl Michelle {
 
     pub(in crate::app) fn set_sidebar_collection_collapsed(
         &mut self,
-        id: Option<Uuid>,
+        id: SidebarCollection,
         collapsed: bool,
         cx: &mut Context<Self>,
     ) {
-        let value = if let Some(id) = id {
-            let Some(group) = self
-                .state
-                .sidebar_project_groups
-                .iter_mut()
-                .find(|group| group.id == id)
-            else {
-                return;
-            };
-            &mut group.collapsed
-        } else {
-            &mut self.state.sidebar_projects_collapsed
+        let value = match id {
+            SidebarCollection::Group(id) => {
+                let Some(group) = self
+                    .state
+                    .sidebar_project_groups
+                    .iter_mut()
+                    .find(|group| group.id == id)
+                else {
+                    return;
+                };
+                &mut group.collapsed
+            }
+            SidebarCollection::Projects => &mut self.state.sidebar_projects_collapsed,
+            SidebarCollection::Pinned => &mut self.state.sidebar_pinned_collapsed,
         };
         let collapse_changed = *value != collapsed;
         *value = collapsed;
@@ -400,14 +418,32 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) {
         match (source, target) {
-            (SidebarRow::Collection(Some(source)), SidebarRow::Collection(target)) => {
-                if self.state.reorder_sidebar_project_group(source, target) {
+            (
+                SidebarRow::Collection(SidebarCollection::Group(source)),
+                SidebarRow::Collection(target),
+            ) => {
+                if self.state.reorder_sidebar_project_group(
+                    source,
+                    match target {
+                        SidebarCollection::Group(id) => Some(id),
+                        SidebarCollection::Projects => None,
+                        SidebarCollection::Pinned => return,
+                    },
+                ) {
                     self.save_sidebar_presentation(cx);
                 }
                 return;
             }
             (SidebarRow::Header(SidebarGroup::Project(source)), SidebarRow::Collection(target)) => {
-                self.move_sidebar_project_to_collection(source, target, cx);
+                match target {
+                    SidebarCollection::Group(id) => {
+                        self.move_sidebar_project_to_collection(source, Some(id), cx)
+                    }
+                    SidebarCollection::Projects => {
+                        self.move_sidebar_project_to_collection(source, None, cx)
+                    }
+                    SidebarCollection::Pinned => {}
+                }
                 return;
             }
             _ => {}
@@ -441,9 +477,10 @@ impl Michelle {
                 SidebarRow::Header(SidebarGroup::Project(target)),
             ) => {
                 let destination = self.state.sidebar_group_for_project(target);
-                let transferred = self
-                    .state
-                    .move_project_to_sidebar_group(source, destination);
+                let transferred = !self.state.sidebar_pinned_projects.contains(&source)
+                    && self
+                        .state
+                        .move_project_to_sidebar_group(source, destination);
                 let reordered = self.state.sidebar_ordering == SidebarOrdering::Manual
                     && move_sidebar_item(
                         &mut self.state.sidebar_project_order,
@@ -603,7 +640,8 @@ impl Michelle {
                         let group = if project.is_projectless() {
                             SidebarGroup::Projectless
                         } else {
-                            let collection = this.state.sidebar_group_for_project(project_id);
+                            let collection =
+                                SidebarCollection::for_project(&this.state, project_id);
                             this.set_sidebar_collection_collapsed(collection, false, cx);
                             SidebarGroup::Project(project_id)
                         };
@@ -727,12 +765,12 @@ impl Michelle {
             return;
         }
         let changed = match row {
-            SidebarRow::Collection(Some(_)) => {
+            SidebarRow::Collection(SidebarCollection::Group(_)) => {
                 let ranks = preview
                     .rows
                     .iter()
                     .filter_map(|row| match row {
-                        SidebarRow::Collection(Some(id)) => Some(*id),
+                        SidebarRow::Collection(SidebarCollection::Group(id)) => Some(*id),
                         _ => None,
                     })
                     .enumerate()
@@ -788,7 +826,7 @@ impl Michelle {
     fn apply_sidebar_project_drop(
         &mut self,
         row: SidebarRow,
-        destination: Option<(Option<Uuid>, Option<Uuid>)>,
+        destination: Option<(SidebarCollection, Option<Uuid>)>,
         cx: &mut Context<Self>,
     ) {
         let SidebarRow::Header(SidebarGroup::Project(project)) = row else {
@@ -797,9 +835,17 @@ impl Michelle {
         let Some((collection, before)) = destination else {
             return;
         };
-        let transferred = self
-            .state
-            .move_project_to_sidebar_group(project, collection);
+        let pinned = self.state.sidebar_pinned_projects.contains(&project);
+        if pinned != (collection == SidebarCollection::Pinned) {
+            return;
+        }
+        let transferred = match collection {
+            SidebarCollection::Group(id) => {
+                self.state.move_project_to_sidebar_group(project, Some(id))
+            }
+            SidebarCollection::Projects => self.state.move_project_to_sidebar_group(project, None),
+            SidebarCollection::Pinned => false,
+        };
         let mut reordered = false;
         if self.state.sidebar_ordering == SidebarOrdering::Manual {
             self.remember_sidebar_manual_order();
@@ -1044,11 +1090,13 @@ pub(in crate::app) fn visible_project_sessions(
 pub(in crate::app) fn reset_sidebar_collection_reveals(
     revealed: &mut HashMap<SidebarGroup, usize>,
     state: &PersistedState,
-    collection: Option<Uuid>,
+    collection: SidebarCollection,
 ) -> bool {
     let previous_count = revealed.len();
     revealed.retain(|group, _| match group {
-        SidebarGroup::Project(project) => state.sidebar_group_for_project(*project) != collection,
+        SidebarGroup::Project(project) => {
+            SidebarCollection::for_project(state, *project) != collection
+        }
         SidebarGroup::Projectless => true,
     });
     revealed.len() != previous_count
@@ -1075,7 +1123,9 @@ pub(in crate::app) fn sidebar_header_task_counts(
     let mut collections = HashMap::new();
     for collection in &state.sidebar_project_groups {
         for project in &collection.projects {
-            collections.entry(*project).or_insert(collection.id);
+            collections
+                .entry(*project)
+                .or_insert(SidebarCollection::Group(collection.id));
         }
     }
     let mut headers = HashMap::<_, SidebarTaskCounts>::new();
@@ -1107,8 +1157,18 @@ pub(in crate::app) fn sidebar_header_task_counts(
         };
         for row in [
             Some(SidebarRow::Header(group)),
-            (!projectless)
-                .then(|| SidebarRow::Collection(collections.get(&session.project_id).copied())),
+            (!projectless).then(|| {
+                SidebarRow::Collection(
+                    if state.sidebar_pinned_projects.contains(&session.project_id) {
+                        SidebarCollection::Pinned
+                    } else {
+                        collections
+                            .get(&session.project_id)
+                            .copied()
+                            .unwrap_or(SidebarCollection::Projects)
+                    },
+                )
+            }),
         ]
         .into_iter()
         .flatten()
@@ -1128,6 +1188,8 @@ pub(in crate::app) fn append_sidebar_project_collections(
     groups: &[SidebarProjectGroup],
     projects_collapsed: bool,
     hidden_projects: &HashSet<Uuid>,
+    pinned_projects: &HashSet<Uuid>,
+    pinned_collapsed: bool,
 ) {
     let mut membership = HashMap::new();
     for (index, group) in groups.iter().enumerate() {
@@ -1137,6 +1199,7 @@ pub(in crate::app) fn append_sidebar_project_collections(
     }
     let mut buckets = vec![Vec::new(); groups.len() + 1];
     let mut chats = Vec::new();
+    let mut pinned = Vec::new();
     for section in sections {
         if matches!(section.first(), Some(SidebarRow::Header(SidebarGroup::Project(id))) if hidden_projects.contains(id))
         {
@@ -1148,6 +1211,14 @@ pub(in crate::app) fn append_sidebar_project_collections(
         }
         let index = match section.first() {
             Some(SidebarRow::Header(SidebarGroup::Project(id))) => {
+                if pinned_projects.contains(id) {
+                    pinned.extend(
+                        section
+                            .into_iter()
+                            .filter(|row| *row != SidebarRow::GroupSpacer),
+                    );
+                    continue;
+                }
                 membership.get(id).copied().unwrap_or(groups.len())
             }
             _ => groups.len(),
@@ -1158,12 +1229,23 @@ pub(in crate::app) fn append_sidebar_project_collections(
                 .filter(|row| *row != SidebarRow::GroupSpacer),
         );
     }
+    if !pinned.is_empty() {
+        rows.push(SidebarRow::Collection(SidebarCollection::Pinned));
+        if !pinned_collapsed {
+            rows.append(&mut pinned);
+        }
+        rows.push(SidebarRow::PinnedDivider);
+    }
     for (index, mut bucket) in buckets.into_iter().enumerate() {
         let group = groups.get(index);
         if group.is_none() && bucket.is_empty() {
             continue;
         }
-        rows.push(SidebarRow::Collection(group.map(|group| group.id)));
+        rows.push(SidebarRow::Collection(
+            group.map_or(SidebarCollection::Projects, |group| {
+                SidebarCollection::Group(group.id)
+            }),
+        ));
         if !group.map_or(projects_collapsed, |group| group.collapsed) {
             rows.append(&mut bucket);
         }
@@ -1178,16 +1260,36 @@ pub(in crate::app) fn sidebar_reorder_siblings(
     row: SidebarRow,
 ) -> Vec<SidebarRow> {
     match row {
-        SidebarRow::Collection(Some(_)) => rows
+        SidebarRow::Collection(SidebarCollection::Group(_)) => rows
             .iter()
             .copied()
-            .filter(|row| matches!(row, SidebarRow::Collection(Some(_))))
+            .filter(|row| matches!(row, SidebarRow::Collection(SidebarCollection::Group(_))))
             .collect(),
-        SidebarRow::Header(SidebarGroup::Project(_)) => rows
-            .iter()
-            .copied()
-            .filter(|row| matches!(row, SidebarRow::Header(SidebarGroup::Project(_))))
-            .collect(),
+        SidebarRow::Header(SidebarGroup::Project(_)) => {
+            let source_pinned = rows
+                .iter()
+                .take_while(|candidate| **candidate != row)
+                .filter_map(|row| match row {
+                    SidebarRow::Collection(collection) => {
+                        Some(*collection == SidebarCollection::Pinned)
+                    }
+                    _ => None,
+                })
+                .last()
+                .unwrap_or(false);
+            let mut pinned = false;
+            rows.iter()
+                .copied()
+                .filter(|row| match row {
+                    SidebarRow::Collection(collection) => {
+                        pinned = *collection == SidebarCollection::Pinned;
+                        false
+                    }
+                    SidebarRow::Header(SidebarGroup::Project(_)) => pinned == source_pinned,
+                    _ => false,
+                })
+                .collect()
+        }
         SidebarRow::Session(_) => {
             let Some(index) = rows.iter().position(|candidate| *candidate == row) else {
                 return Vec::new();
@@ -1217,13 +1319,15 @@ impl Michelle {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        let collections_changed = !self.state.sidebar_projects_collapsed
+        let collections_changed = !self.state.sidebar_pinned_collapsed
+            || !self.state.sidebar_projects_collapsed
             || self
                 .state
                 .sidebar_project_groups
                 .iter()
                 .any(|group| !group.collapsed);
         self.state.sidebar_projects_collapsed = true;
+        self.state.sidebar_pinned_collapsed = true;
         for group in &mut self.state.sidebar_project_groups {
             group.collapsed = true;
         }

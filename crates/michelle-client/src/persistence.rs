@@ -343,6 +343,10 @@ struct AppState {
     #[serde(default)]
     sidebar_projects_collapsed: bool,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    sidebar_pinned_projects: HashSet<Uuid>,
+    #[serde(default)]
+    sidebar_pinned_collapsed: bool,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     sidebar_collapsed_projects: HashSet<Uuid>,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     sidebar_hidden_projects: HashSet<Uuid>,
@@ -411,6 +415,10 @@ pub struct PersistedState {
     #[serde(default)]
     pub sidebar_projects_collapsed: bool,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub sidebar_pinned_projects: HashSet<Uuid>,
+    #[serde(default)]
+    pub sidebar_pinned_collapsed: bool,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub sidebar_collapsed_projects: HashSet<Uuid>,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub sidebar_hidden_projects: HashSet<Uuid>,
@@ -460,6 +468,7 @@ impl PersistedState {
             .retain(|session| !removed.contains(session));
         self.sidebar_project_order.retain(|project| *project != id);
         self.sidebar_hidden_projects.remove(&id);
+        self.sidebar_pinned_projects.remove(&id);
         self.sidebar_collapsed_projects.remove(&id);
         for group in &mut self.sidebar_project_groups {
             group.projects.retain(|project| *project != id);
@@ -474,6 +483,21 @@ impl PersistedState {
             self.selected_session = None;
         }
         true
+    }
+
+    pub fn set_sidebar_project_pinned(&mut self, project: Uuid, pinned: bool) -> bool {
+        if !self
+            .projects
+            .iter()
+            .any(|item| item.id == project && !item.is_projectless())
+        {
+            return false;
+        }
+        if pinned {
+            self.sidebar_pinned_projects.insert(project)
+        } else {
+            self.sidebar_pinned_projects.remove(&project)
+        }
     }
 
     pub fn sidebar_group_for_project(&self, project: Uuid) -> Option<Uuid> {
@@ -617,6 +641,8 @@ impl PersistedState {
             sidebar_project_order: Vec::new(),
             sidebar_project_groups: Vec::new(),
             sidebar_projects_collapsed: false,
+            sidebar_pinned_projects: HashSet::new(),
+            sidebar_pinned_collapsed: false,
             sidebar_collapsed_projects: HashSet::new(),
             sidebar_hidden_projects: HashSet::new(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
@@ -762,6 +788,8 @@ impl PersistedState {
             sidebar_project_order: self.sidebar_project_order.clone(),
             sidebar_project_groups: self.sidebar_project_groups.clone(),
             sidebar_projects_collapsed: self.sidebar_projects_collapsed,
+            sidebar_pinned_projects: self.sidebar_pinned_projects.clone(),
+            sidebar_pinned_collapsed: self.sidebar_pinned_collapsed,
             sidebar_collapsed_projects: self.sidebar_collapsed_projects.clone(),
             sidebar_hidden_projects: self.sidebar_hidden_projects.clone(),
             right_panel_width: self.right_panel_width,
@@ -800,6 +828,8 @@ impl PersistedState {
         self.sidebar_project_order = app_state.sidebar_project_order;
         self.sidebar_project_groups = app_state.sidebar_project_groups;
         self.sidebar_projects_collapsed = app_state.sidebar_projects_collapsed;
+        self.sidebar_pinned_projects = app_state.sidebar_pinned_projects;
+        self.sidebar_pinned_collapsed = app_state.sidebar_pinned_collapsed;
         self.sidebar_collapsed_projects = app_state.sidebar_collapsed_projects;
         self.sidebar_hidden_projects = app_state.sidebar_hidden_projects;
         self.right_panel_width = app_state.right_panel_width;
@@ -1503,6 +1533,8 @@ mod tests {
         assert!(state.sidebar_project_order.is_empty());
         assert!(state.sidebar_project_groups.is_empty());
         assert!(!state.sidebar_projects_collapsed);
+        assert!(state.sidebar_pinned_projects.is_empty());
+        assert!(!state.sidebar_pinned_collapsed);
         assert!(state.sidebar_collapsed_projects.is_empty());
         assert!(state.sidebar_hidden_projects.is_empty());
         assert_eq!(state.last_runtime_mode, RuntimeMode::FullAccess);
@@ -1541,6 +1573,7 @@ mod tests {
         state.selected_project = Some(project);
         state.selected_session = Some(chat);
         state.sidebar_hidden_projects.insert(project);
+        state.sidebar_pinned_projects.insert(project);
         state.sidebar_collapsed_projects.insert(project);
         state.sidebar_project_order = vec![project, other.id];
         state.sidebar_session_order = vec![chat, other_chat.id];
@@ -1560,6 +1593,7 @@ mod tests {
         assert_eq!(state.sidebar_session_order, vec![other_chat.id]);
         assert_eq!(state.sidebar_project_groups[0].projects, vec![other.id]);
         assert!(state.sidebar_hidden_projects.is_empty());
+        assert!(state.sidebar_pinned_projects.is_empty());
         assert!(state.sidebar_collapsed_projects.is_empty());
 
         let saved = serde_json::to_vec(&state.app_state()).unwrap();
@@ -1618,6 +1652,34 @@ mod tests {
             assert_eq!(restored.sidebar_session_order, state.sidebar_session_order);
             assert_eq!(restored.sidebar_project_order, state.sidebar_project_order);
         }
+    }
+
+    #[test]
+    fn pinned_projects_survive_restart_without_changing_their_groups() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project = state.projects[0].id;
+        let group = state.create_sidebar_project_group("Work").unwrap();
+        state.move_project_to_sidebar_group(project, Some(group));
+        assert!(!state.set_sidebar_project_pinned(Uuid::nil(), true));
+        assert!(state.set_sidebar_project_pinned(project, true));
+        assert!(!state.set_sidebar_project_pinned(project, true));
+        assert_eq!(state.sidebar_group_for_project(project), Some(group));
+        state.sidebar_pinned_collapsed = true;
+
+        let saved = serde_json::to_vec(&state.app_state()).unwrap();
+        let mut restored = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        restored.projects.clone_from(&state.projects);
+        restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
+        assert!(restored.sidebar_pinned_collapsed);
+        assert!(restored.sidebar_pinned_projects.contains(&project));
+        assert!(restored.set_sidebar_project_pinned(project, false));
+        assert_eq!(restored.sidebar_group_for_project(project), Some(group));
+        assert!(!restored.set_sidebar_project_pinned(project, false));
+
+        assert!(restored.move_project_to_sidebar_group(project, None));
+        assert!(restored.set_sidebar_project_pinned(project, true));
+        assert!(restored.set_sidebar_project_pinned(project, false));
+        assert_eq!(restored.sidebar_group_for_project(project), None);
     }
 
     #[test]

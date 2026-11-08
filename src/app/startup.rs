@@ -832,6 +832,7 @@ impl Michelle {
                     collapsed_groups: sidebar_collapsed_groups,
                     project_reveal_counts: HashMap::new(),
                     group_header_focuses: RefCell::new(HashMap::new()),
+                    project_pin_focuses: RefCell::new(HashMap::new()),
                     show_more_focuses: RefCell::new(HashMap::new()),
                     list_state: sidebar_list_state,
                     scrollbar: ScrollbarState::new(),

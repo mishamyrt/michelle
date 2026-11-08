@@ -475,6 +475,12 @@ sidebar.ordering_manual:
   en: Manual
 sidebar.projects:
   en: Projects
+sidebar.pinned:
+  en: Pinned
+sidebar.pin_project:
+  en: Pin Project
+sidebar.unpin_project:
+  en: Unpin Project
 sidebar.chats:
   en: Chats
 sidebar.new_group:

@@ -61,6 +61,8 @@ pub(crate) const SYMBOLS: &[&str] = &[
     "minus",
     "pencil",
     "photo",
+    "pin",
+    "pin.slash",
     "plus",
     "point.topleft.down.to.point.bottomright.curvepath",
     "scope",
