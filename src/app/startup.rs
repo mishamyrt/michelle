@@ -819,7 +819,7 @@ impl Michelle {
                     projectless_projects: RefCell::new(HashSet::new()),
                     session_moves: HashSet::new(),
                     pending_session_drops: HashMap::new(),
-                    working_headers: RefCell::new(HashSet::new()),
+                    header_task_counts: RefCell::new(HashMap::new()),
                 },
                 sidebar_ui: sidebar::SidebarUi {
                     onboarding_add_project_focus,

@@ -697,11 +697,8 @@ impl Michelle {
                         TurnStatus::Failed
                     });
                 }
-                self.notifications.record_session_completion(
-                    session_id,
-                    self.state.selected_session,
-                    success,
-                );
+                self.notifications
+                    .record_session_completion(session_id, self.state.selected_session);
                 runtime.pending_permission = None;
                 runtime.pending_user_input = None;
                 runtime.pending_computer_approval = None;
@@ -733,6 +730,7 @@ impl Michelle {
                 }
             }
             DriverEvent::Error(error) => {
+                let selected_session = self.state.selected_session;
                 let error = compact_driver_error(&error);
                 runtime.last_driver_error = Some(error.clone());
                 if self.state.selected_session == Some(session_id) {
@@ -763,6 +761,8 @@ impl Michelle {
                 {
                     if session.status != SessionStatus::Working {
                         session.status = SessionStatus::Failed;
+                        self.notifications
+                            .record_session_completion(session_id, selected_session);
                     }
                     if should_append {
                         session.push_message(MessageRole::Assistant, error);
@@ -770,6 +770,7 @@ impl Michelle {
                 }
             }
             DriverEvent::ProcessExited => {
+                let selected_session = self.state.selected_session;
                 self.mark_background_work_lost(session_id);
                 let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
                 self.finish_streaming_assistant(session_id);
@@ -789,6 +790,8 @@ impl Michelle {
                     && session.status.is_busy()
                 {
                     session.status = SessionStatus::Failed;
+                    self.notifications
+                        .record_session_completion(session_id, selected_session);
                     session.updated_at = unix_time();
                     if needs_fallback {
                         session.push_message(MessageRole::Assistant, failure_message);

@@ -27,7 +27,7 @@ pub(in crate::app) fn paused_toast_duration(remaining: Duration, elapsed: Durati
 }
 
 pub(in crate::app) struct NotificationsModel {
-    /// Successful background turns the user has not opened yet.
+    /// Finished background turns the user has not opened yet.
     pub(in crate::app) unseen_completions: HashSet<Uuid>,
     pub(in crate::app) toast: Option<ToastState>,
     pub(in crate::app) toast_generation: u64,
@@ -58,9 +58,8 @@ impl NotificationsModel {
         &mut self,
         session_id: Uuid,
         selected_session: Option<Uuid>,
-        success: bool,
     ) {
-        if success && selected_session != Some(session_id) {
+        if selected_session != Some(session_id) {
             self.unseen_completions.insert(session_id);
         } else {
             self.clear_session_completion(session_id);
@@ -225,10 +224,10 @@ mod tests {
         let first = Uuid::from_u128(1);
         let second = Uuid::from_u128(2);
         let selected = Some(Uuid::from_u128(3));
-        notifications.record_session_completion(first, selected, true);
-        notifications.record_session_completion(second, selected, true);
+        notifications.record_session_completion(first, selected);
+        notifications.record_session_completion(second, selected);
         // Duplicate completion reports do not create multiple badges.
-        notifications.record_session_completion(first, selected, true);
+        notifications.record_session_completion(first, selected);
         assert_eq!(
             notifications.unseen_completions,
             HashSet::from([first, second])
@@ -241,18 +240,18 @@ mod tests {
     }
 
     #[test]
-    fn visible_or_failed_turns_do_not_leave_a_success_badge() {
+    fn visible_completions_and_new_turns_clear_unseen_statuses() {
         let mut notifications = NotificationsModel::new(None);
         let session = Uuid::from_u128(1);
-        notifications.record_session_completion(session, Some(session), true);
-        assert!(notifications.unseen_completions.is_empty());
-        notifications.record_session_completion(session, None, false);
+        notifications.record_session_completion(session, Some(session));
         assert!(notifications.unseen_completions.is_empty());
 
-        notifications.record_session_completion(session, None, true);
-        notifications.record_session_completion(session, None, false);
+        notifications.record_session_completion(session, None);
+        assert!(notifications.unseen_completions.contains(&session));
+        notifications.record_session_completion(session, Some(session));
         assert!(notifications.unseen_completions.is_empty());
-        notifications.record_session_completion(session, None, true);
+
+        notifications.record_session_completion(session, None);
         notifications.clear_session_completion(session);
         assert!(notifications.unseen_completions.is_empty());
     }

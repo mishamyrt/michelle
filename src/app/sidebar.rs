@@ -176,7 +176,7 @@ pub(super) struct SidebarDragPreview {
     bounds: Bounds<Pixels>,
     cursor_offset: gpui::Point<Pixels>,
     collapsed: bool,
-    working: bool,
+    task_counts: Option<SidebarTaskCounts>,
 }
 
 fn sidebar_row_offsets(rows: &[SidebarRow]) -> Vec<Pixels> {
@@ -533,6 +533,39 @@ impl SidebarDragPreview {
     }
 }
 
+fn render_sidebar_task_counts(counts: SidebarTaskCounts, theme: &Theme) -> Div {
+    div()
+        .ml(px(6.0))
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .text_style(TextStyle::BODY)
+        .text_color(theme.text_secondary)
+        .children(
+            [
+                (counts.active, None, theme.text),
+                (counts.succeeded, Some("checkmark.circle"), theme.success),
+                (counts.failed, Some("exclamationmark.circle"), theme.danger),
+            ]
+            .into_iter()
+            .filter(|(count, _, _)| *count > 0)
+            .map(|(count, symbol, color)| {
+                let indicator = match symbol {
+                    Some(symbol) => icon(symbol, 14.0, color).into_any_element(),
+                    None => motion::spinner_slow(14.0, color).into_any_element(),
+                };
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(indicator)
+                    .child(count.to_string())
+            }),
+        )
+}
+
 impl Render for SidebarDrag {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(cx);
@@ -567,9 +600,11 @@ impl Render for SidebarDrag {
                 },
                 &theme.ui_colors(),
             )
-            .when(preview.working, |header| {
-                header.child(motion::spinner_slow(14.0, theme.text))
-            })
+            .children(
+                preview
+                    .task_counts
+                    .map(|counts| render_sidebar_task_counts(counts, &theme)),
+            )
             .into_any_element(),
         };
         div()
@@ -1198,6 +1233,21 @@ impl Michelle {
         }
     }
 
+    fn sidebar_header_task_counts(
+        &self,
+        row: SidebarRow,
+        collapsed: bool,
+    ) -> Option<SidebarTaskCounts> {
+        if !collapsed {
+            return None;
+        }
+        self.sidebar_model
+            .header_task_counts
+            .borrow()
+            .get(&row)
+            .copied()
+    }
+
     fn render_sidebar_group_header(
         &self,
         group: SidebarGroup,
@@ -1206,12 +1256,7 @@ impl Michelle {
     ) -> Div {
         let theme = Theme::current(cx);
         let collapsed = self.sidebar_ui.collapsed_groups.contains(&group);
-        let working = collapsed
-            && self
-                .sidebar_model
-                .working_headers
-                .borrow()
-                .contains(&SidebarRow::Header(group));
+
         let group_key = group.element_key();
         let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
         let header_focus = self
@@ -1282,15 +1327,10 @@ impl Michelle {
                 ),
             )
         })
-        .when(working, |element| {
-            element.child(
-                div()
-                    .ml(px(6.0))
-                    .w(px(14.0))
-                    .flex_none()
-                    .child(motion::spinner_slow(14.0, theme.text)),
-            )
-        })
+        .children(
+            self.sidebar_header_task_counts(SidebarRow::Header(group), collapsed)
+                .map(|counts| render_sidebar_task_counts(counts, &theme)),
+        )
         .on_click(cx.listener(move |this, _, _, cx| {
             this.toggle_sidebar_group(group, cx);
         }))
@@ -1429,12 +1469,7 @@ impl Michelle {
         let collapsed = group.map_or(self.state.sidebar_projects_collapsed, |group| {
             group.collapsed
         });
-        let working = collapsed
-            && self
-                .sidebar_model
-                .working_headers
-                .borrow()
-                .contains(&SidebarRow::Collection(id));
+
         let menu = self.menu_handle(format!("project-collection-{id:?}"), cx);
         let keyboard_menu = menu.clone();
         let group_name = SharedString::from(format!("project-collection-header-{id:?}"));
@@ -1490,9 +1525,10 @@ impl Michelle {
                         )))
                     }),
             )
-            .when(working, |header| {
-                header.child(motion::spinner_slow(14.0, theme.text))
-            })
+            .children(
+                self.sidebar_header_task_counts(SidebarRow::Collection(id), collapsed)
+                    .map(|counts| render_sidebar_task_counts(counts, &theme)),
+            )
             .when(interactive && !renaming, |header| {
                 header
                     .track_focus(menu.trigger_focus_handle())
@@ -1798,12 +1834,7 @@ impl Michelle {
                                     bounds: drag_bounds.get(),
                                     cursor_offset: offset,
                                     collapsed,
-                                    working: collapsed
-                                        && this
-                                            .sidebar_model
-                                            .working_headers
-                                            .borrow()
-                                            .contains(&row),
+                                    task_counts: this.sidebar_header_task_counts(row, collapsed),
                                 });
                                 this.sidebar_ui.drag_preview = drag.preview.clone();
                                 this.focus_sidebar_row(row, window, cx);
@@ -1984,7 +2015,7 @@ impl Michelle {
             .when(
                 session.status == SessionStatus::Idle
                     && self.notifications.unseen_completions.contains(&session_id),
-                |element| element.child(icon("checkmark", 12.0, theme.success)),
+                |element| element.child(icon("checkmark.circle", 14.0, theme.success)),
             )
             .when(session.status == SessionStatus::Background, |element| {
                 element.child(icon(
@@ -2392,7 +2423,7 @@ mod tests {
     }
 
     #[test]
-    fn working_headers_include_hidden_tasks_and_clear_when_they_settle() {
+    fn header_task_counts_include_collapsed_tasks_and_clear_when_they_settle() {
         let root = Path::new("/tmp/.michelle/projects");
         let project = Uuid::from_u128(1);
         let projectless = Uuid::from_u128(2);
@@ -2426,22 +2457,133 @@ mod tests {
         draft.status = SessionStatus::Connecting;
         state.sessions.push(draft);
         assert_eq!(
-            sidebar_working_headers(&state, Some(root)),
-            HashSet::from([
-                SidebarRow::Header(SidebarGroup::Project(project)),
-                SidebarRow::Header(SidebarGroup::Projectless),
-                SidebarRow::Collection(Some(collection)),
+            sidebar_header_task_counts(&state, &HashSet::new(), Some(root)),
+            HashMap::from([
+                (
+                    SidebarRow::Header(SidebarGroup::Project(project)),
+                    SidebarTaskCounts {
+                        active: 1,
+                        ..Default::default()
+                    }
+                ),
+                (
+                    SidebarRow::Header(SidebarGroup::Projectless),
+                    SidebarTaskCounts {
+                        active: 1,
+                        ..Default::default()
+                    }
+                ),
+                (
+                    SidebarRow::Collection(Some(collection)),
+                    SidebarTaskCounts {
+                        active: 1,
+                        ..Default::default()
+                    }
+                ),
             ])
         );
         state.sidebar_hidden_projects.insert(project);
         assert_eq!(
-            sidebar_working_headers(&state, Some(root)),
-            HashSet::from([SidebarRow::Header(SidebarGroup::Projectless)])
+            sidebar_header_task_counts(&state, &HashSet::new(), Some(root)),
+            HashMap::from([(
+                SidebarRow::Header(SidebarGroup::Projectless),
+                SidebarTaskCounts {
+                    active: 1,
+                    ..Default::default()
+                }
+            )])
         );
         for session in &mut state.sessions {
             session.status = SessionStatus::Idle;
         }
-        assert!(sidebar_working_headers(&state, Some(root)).is_empty());
+        assert!(sidebar_header_task_counts(&state, &HashSet::new(), Some(root)).is_empty());
+    }
+
+    #[test]
+    fn header_task_counts_mix_active_and_unseen_results_until_chats_are_opened() {
+        let project = Uuid::from_u128(1);
+        let other_project = Uuid::from_u128(2);
+        let collection = Uuid::from_u128(3);
+        let mut state = PersistedState::empty();
+        state.sidebar_project_groups.push(SidebarProjectGroup {
+            id: collection,
+            name: "Work".into(),
+            projects: vec![project, other_project],
+            collapsed: true,
+        });
+        let mut notifications = notifications::model::NotificationsModel::new(None);
+        for (project, status, unseen) in [
+            (project, SessionStatus::Working, false),
+            (project, SessionStatus::Connecting, false),
+            (project, SessionStatus::Idle, true),
+            (project, SessionStatus::Idle, false),
+            (project, SessionStatus::Failed, true),
+            (project, SessionStatus::Failed, false),
+            (project, SessionStatus::Waiting, true),
+            (project, SessionStatus::Background, true),
+            (other_project, SessionStatus::Idle, true),
+        ] {
+            let mut session = AgentSession::new(project, ProviderKind::Codex);
+            session.detail_loaded = false;
+            session.status = status;
+            if unseen {
+                notifications.record_session_completion(session.id, None);
+            }
+            state.sessions.push(session);
+        }
+        let project_header = SidebarRow::Header(SidebarGroup::Project(project));
+        let collection_header = SidebarRow::Collection(Some(collection));
+        let counts = sidebar_header_task_counts(&state, &notifications.unseen_completions, None);
+        assert_eq!(
+            counts[&project_header],
+            SidebarTaskCounts {
+                active: 2,
+                succeeded: 1,
+                failed: 1
+            }
+        );
+        assert_eq!(
+            counts[&collection_header],
+            SidebarTaskCounts {
+                active: 2,
+                succeeded: 2,
+                failed: 1
+            }
+        );
+
+        // Expanding a collection does not acknowledge its chats' results.
+        state.sidebar_project_groups[0].collapsed = false;
+        assert_eq!(
+            sidebar_header_task_counts(&state, &notifications.unseen_completions, None),
+            counts
+        );
+
+        notifications.clear_session_completion(state.sessions[2].id);
+        notifications.clear_session_completion(state.sessions[4].id);
+        let counts = sidebar_header_task_counts(&state, &notifications.unseen_completions, None);
+        assert_eq!(
+            counts[&project_header],
+            SidebarTaskCounts {
+                active: 2,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            counts[&collection_header],
+            SidebarTaskCounts {
+                active: 2,
+                succeeded: 1,
+                failed: 0
+            }
+        );
+        notifications.clear_session_completion(state.sessions[8].id);
+        for session in &mut state.sessions {
+            session.status = SessionStatus::Idle;
+            notifications.clear_session_completion(session.id);
+        }
+        assert!(
+            sidebar_header_task_counts(&state, &notifications.unseen_completions, None).is_empty()
+        );
     }
 
     #[test]
@@ -2970,7 +3112,7 @@ mod tests {
             bounds: Bounds::default(),
             cursor_offset: gpui::Point::default(),
             collapsed: false,
-            working: false,
+            task_counts: None,
         };
         let mut manual = preview(original.clone(), SidebarOrdering::Manual);
         let other_y = manual.offsets[3];
@@ -3088,7 +3230,7 @@ mod tests {
             bounds: Bounds::default(),
             cursor_offset: gpui::Point::default(),
             collapsed: false,
-            working: false,
+            task_counts: None,
         };
         let original = Rc::new(vec![
             a,
@@ -3233,7 +3375,7 @@ mod tests {
                     bounds: Bounds::default(),
                     cursor_offset: gpui::Point::default(),
                     collapsed: false,
-                    working: false,
+                    task_counts: None,
                 };
                 let y = preview.offsets[6]
                     + sidebar_row_height(first) * if after { 0.75 } else { 0.25 };
@@ -3327,7 +3469,7 @@ mod tests {
             bounds: Bounds::default(),
             cursor_offset: gpui::Point::default(),
             collapsed: false,
-            working: false,
+            task_counts: None,
         };
         assert!(!preview.move_session(px(1.0)));
         assert!(preview.session_destination.is_none());

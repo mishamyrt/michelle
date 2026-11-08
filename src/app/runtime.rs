@@ -2993,6 +2993,8 @@ impl Michelle {
             .submission_preparations
             .remove(&session_id);
         if failed_to_start {
+            self.notifications
+                .record_session_completion(session_id, self.state.selected_session);
             self.capture_latest_turn_checkpoint_for(session_id);
             self.start_pending_checkpoint_captures(cx);
         }

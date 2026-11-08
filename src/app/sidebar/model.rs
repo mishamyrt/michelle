@@ -7,7 +7,14 @@ pub(in crate::app) struct SidebarModel {
     pub(in crate::app) projectless_projects: RefCell<HashSet<Uuid>>,
     pub(in crate::app) session_moves: HashSet<Uuid>,
     pub(in crate::app) pending_session_drops: HashMap<Uuid, sidebar::SidebarSessionDrop>,
-    pub(in crate::app) working_headers: RefCell<HashSet<SidebarRow>>,
+    pub(in crate::app) header_task_counts: RefCell<HashMap<SidebarRow, SidebarTaskCounts>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(in crate::app) struct SidebarTaskCounts {
+    pub(in crate::app) active: usize,
+    pub(in crate::app) succeeded: usize,
+    pub(in crate::app) failed: usize,
 }
 
 impl Michelle {
@@ -37,12 +44,10 @@ impl Michelle {
             }
             fingerprint = mix_uuid(fingerprint, session.id);
             fingerprint = mix_uuid(fingerprint, session.project_id);
+            fingerprint = mix(fingerprint, session.status as u64);
             fingerprint = mix(
                 fingerprint,
-                u64::from(matches!(
-                    session.status,
-                    SessionStatus::Connecting | SessionStatus::Working
-                )),
+                u64::from(self.notifications.unseen_completions.contains(&session.id)),
             );
             if self.state.sidebar_ordering == SidebarOrdering::Manual {
                 fingerprint = mix(fingerprint, session.created_at);
@@ -99,8 +104,9 @@ impl Michelle {
         );
         if self.sidebar_model.rows_fingerprint.get() != Some(fingerprint) {
             *self.sidebar_model.rows_snapshot.borrow_mut() = Rc::new(self.sidebar_rows());
-            *self.sidebar_model.working_headers.borrow_mut() = sidebar_working_headers(
+            *self.sidebar_model.header_task_counts.borrow_mut() = sidebar_header_task_counts(
                 &self.state,
+                &self.notifications.unseen_completions,
                 crate::projectless::workspace_root().as_deref(),
             );
             self.sidebar_model.rows_fingerprint.set(Some(fingerprint));
@@ -1055,10 +1061,11 @@ pub(in crate::app) fn sidebar_project_is_projectless(
     projectless_root.is_some_and(|root| project.path.starts_with(root))
 }
 
-pub(in crate::app) fn sidebar_working_headers(
+pub(in crate::app) fn sidebar_header_task_counts(
     state: &PersistedState,
+    unseen_completions: &HashSet<Uuid>,
     projectless_root: Option<&Path>,
-) -> HashSet<SidebarRow> {
+) -> HashMap<SidebarRow, SidebarTaskCounts> {
     let projectless_projects = state
         .projects
         .iter()
@@ -1071,27 +1078,46 @@ pub(in crate::app) fn sidebar_working_headers(
             collections.entry(*project).or_insert(collection.id);
         }
     }
-    let mut headers = HashSet::new();
+    let mut headers = HashMap::<_, SidebarTaskCounts>::new();
     for session in state.sessions.iter().filter(|session| {
-        session.has_started()
-            && !state.sidebar_hidden_projects.contains(&session.project_id)
-            && matches!(
-                session.status,
-                SessionStatus::Connecting | SessionStatus::Working
-            )
+        session.has_started() && !state.sidebar_hidden_projects.contains(&session.project_id)
     }) {
+        let counts = match session.status {
+            SessionStatus::Connecting | SessionStatus::Working => SidebarTaskCounts {
+                active: 1,
+                ..Default::default()
+            },
+            SessionStatus::Idle if unseen_completions.contains(&session.id) => SidebarTaskCounts {
+                succeeded: 1,
+                ..Default::default()
+            },
+            SessionStatus::Failed if unseen_completions.contains(&session.id) => {
+                SidebarTaskCounts {
+                    failed: 1,
+                    ..Default::default()
+                }
+            }
+            _ => continue,
+        };
         let projectless = projectless_projects.contains(&session.project_id);
-        if !projectless {
-            headers.insert(SidebarRow::Collection(
-                collections.get(&session.project_id).copied(),
-            ));
-        }
         let group = if projectless {
             SidebarGroup::Projectless
         } else {
             SidebarGroup::Project(session.project_id)
         };
-        headers.insert(SidebarRow::Header(group));
+        for row in [
+            Some(SidebarRow::Header(group)),
+            (!projectless)
+                .then(|| SidebarRow::Collection(collections.get(&session.project_id).copied())),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let total = headers.entry(row).or_default();
+            total.active += counts.active;
+            total.succeeded += counts.succeeded;
+            total.failed += counts.failed;
+        }
     }
     headers
 }
