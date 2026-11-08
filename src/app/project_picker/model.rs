@@ -7,6 +7,21 @@ pub(in crate::app) struct ProjectPickerModel {
     pub(in crate::app) matcher: RefCell<nucleo_matcher::Matcher>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::app) enum ProjectPickerRow {
+    Header(SharedString),
+    Project(Uuid, SharedString),
+}
+
+impl ProjectPickerRow {
+    pub(super) fn project_id(&self) -> Option<Uuid> {
+        match self {
+            Self::Header(_) => None,
+            Self::Project(id, _) => Some(*id),
+        }
+    }
+}
+
 impl ProjectPickerModel {
     pub(in crate::app) fn new() -> Self {
         Self {
@@ -85,19 +100,19 @@ pub(super) fn visible_project_entries(
         .filter(|project| !project.is_projectless())
         .map(|project| {
             let label = project_label(&project.name, group_names.get(&project.id).copied());
-            (project.id, label)
+            (project.id, project.name.clone(), label)
         });
     let query = query.trim();
     if query.is_empty() {
-        return ordered.map(|(id, label)| (id, label.into())).collect();
+        return ordered.map(|(id, name, _)| (id, name.into())).collect();
     }
 
     let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
     let mut utf32 = Vec::new();
     let mut scored = ordered
-        .filter_map(|(id, name)| {
-            let score = pattern.score(Utf32Str::new(&name, &mut utf32), matcher)?;
-            Some((score, name.chars().count(), id, SharedString::from(name)))
+        .filter_map(|(id, name, label)| {
+            let score = pattern.score(Utf32Str::new(&label, &mut utf32), matcher)?;
+            Some((score, label.chars().count(), id, SharedString::from(name)))
         })
         .collect::<Vec<_>>();
     // Stable, so full ties hold their unfiltered order.
@@ -106,4 +121,43 @@ pub(super) fn visible_project_entries(
         .into_iter()
         .map(|(_, _, project_id, name)| (project_id, name))
         .collect()
+}
+
+/// Keep each group together, ordered by its first (selected or best-matching) project.
+pub(super) fn group_project_entries(
+    entries: Vec<(Uuid, SharedString)>,
+    groups: &[SidebarProjectGroup],
+) -> Vec<ProjectPickerRow> {
+    let membership = groups
+        .iter()
+        .enumerate()
+        .flat_map(|(index, group)| group.projects.iter().map(move |id| (*id, index)))
+        .collect::<HashMap<_, _>>();
+    let mut buckets = vec![Vec::new(); groups.len() + 1];
+    let mut order = Vec::new();
+    for (id, name) in entries {
+        let index = membership.get(&id).copied().unwrap_or(groups.len());
+        if buckets[index].is_empty() {
+            order.push(index);
+        }
+        buckets[index].push(ProjectPickerRow::Project(id, name));
+    }
+    let has_groups = buckets[..groups.len()].iter().any(|rows| !rows.is_empty());
+    let mut rows = Vec::new();
+    for index in order {
+        if let Some(group) = groups.get(index) {
+            rows.push(ProjectPickerRow::Header(group.name.clone().into()));
+        } else if has_groups {
+            rows.push(ProjectPickerRow::Header(tr!("sidebar.projects").into()));
+        }
+        rows.append(&mut buckets[index]);
+    }
+    rows
+}
+
+pub(super) fn project_row_index(rows: &[ProjectPickerRow], action_index: usize) -> Option<usize> {
+    rows.iter()
+        .enumerate()
+        .filter_map(|(index, row)| row.project_id().map(|_| index))
+        .nth(action_index)
 }

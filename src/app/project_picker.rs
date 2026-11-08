@@ -7,8 +7,9 @@
 //! filter field, one keyboard cursor and one list. Rows are only ranked while
 //! a panel is open; a closed picker costs what any other closed menu does.
 
-use crate::ui::SelectableRow;
-use crate::ui::squircle::SquircleExt;
+use crate::ui::squircle::{SquircleExt, SquircleStyled, squircle};
+use crate::ui::{IconSize, SelectableRow, SfSymbol};
+use gpui::BoxShadow;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 
@@ -16,13 +17,13 @@ use super::*;
 use crate::ui::primitives::navigation::next_picker_highlight;
 
 pub(super) mod model;
-use model::visible_project_entries;
+use model::{ProjectPickerRow, group_project_entries, project_row_index, visible_project_entries};
 
 pub(in crate::app) struct ProjectPickerUi {
     pub(in crate::app) search: Entity<TextInput>,
     pub(in crate::app) highlight: Option<usize>,
     pub(in crate::app) list_state: ListState,
-    pub(in crate::app) rows: RefCell<Vec<Uuid>>,
+    pub(in crate::app) rows: RefCell<Vec<ProjectPickerRow>>,
     pub(in crate::app) scrollbar: Rc<ScrollbarState>,
 }
 
@@ -41,11 +42,36 @@ impl ProjectPickerUi {
     }
 }
 
-const PROJECT_PICKER_ROW_HEIGHT: f32 = 26.0;
-/// Rows drawn before the list scrolls. Whole rows only: the edge fade is the
-/// cue that more follow.
+const PROJECT_PICKER_ROW_HEIGHT: f32 = 28.0;
+/// Rows drawn before the list scrolls, including group headings.
 const PROJECT_PICKER_VISIBLE_ROWS: f32 = 11.0;
-const PROJECT_PICKER_WIDTH: f32 = 300.0;
+const PROJECT_PICKER_WIDTH: f32 = 320.0;
+
+fn styled_project_picker_row(
+    row: SelectableRow,
+    highlighted: bool,
+    theme: &Theme,
+) -> SelectableRow {
+    row.h(px(PROJECT_PICKER_ROW_HEIGHT))
+        .px(px(11.0))
+        .gap(px(4.0))
+        .rounded(px(8.0))
+        .highlighted(highlighted)
+        .checkmark_at_start()
+        .font_weight(FontWeight::MEDIUM)
+        .bg(if highlighted {
+            theme.accent
+        } else {
+            gpui::transparent_black()
+        })
+        .text_color(if highlighted {
+            gpui::white()
+        } else {
+            theme.text
+        })
+        .hover(|style| style.bg(theme.accent).text_color(gpui::white()))
+        .active(|style| style.opacity(1.0))
+}
 
 /// Where a picker is drawn, which decides its anchoring and how a choice
 /// lands. The composer's variants also carry its draft to the new project.
@@ -158,13 +184,14 @@ impl Michelle {
         let selected_project = self.state.selected_project;
         let projectless_selected = self.selected_project().is_some_and(Project::is_projectless);
         let projects = Rc::new(if handle.is_open() {
-            visible_project_entries(
+            let entries = visible_project_entries(
                 &self.state.projects,
                 &self.state.sidebar_project_groups,
                 selected_project,
                 self.project_picker_ui.search.read(cx).content(),
                 &mut self.project_picker.matcher.borrow_mut(),
-            )
+            );
+            group_project_entries(entries, &self.state.sidebar_project_groups)
         } else {
             Vec::new()
         });
@@ -174,7 +201,8 @@ impl Michelle {
         let actions = Rc::new(
             projects
                 .iter()
-                .map(|(project_id, _)| ProjectPickerAction::Select(*project_id))
+                .filter_map(ProjectPickerRow::project_id)
+                .map(ProjectPickerAction::Select)
                 .chain([
                     ProjectPickerAction::NewProject,
                     ProjectPickerAction::NoProject,
@@ -185,6 +213,7 @@ impl Michelle {
             .project_picker_ui
             .highlight
             .filter(|index| *index < actions.len());
+        let highlighted_action = highlight.and_then(|index| actions.get(index)).copied();
         let weak = cx.entity().downgrade();
         let search = self.project_picker_ui.search.clone();
         let list_state = self.project_picker_ui.list_state.clone();
@@ -194,7 +223,8 @@ impl Michelle {
             trigger,
             handle,
             site.align(),
-            move |popover, _window, _cx| {
+            move |popover, window, app_cx| {
+                let search_focused = search.read(app_cx).is_visually_focused(window);
                 let rows = if projects.is_empty() {
                     div()
                         .h(px(64.0))
@@ -218,22 +248,40 @@ impl Michelle {
                         .w_full()
                         .h(px(height))
                         .flex_none()
-                        .px(px(4.0))
                         .child(
                             list(list_state.clone(), move |index, _window, _cx| {
-                                let Some((project_id, name)) = list_projects.get(index) else {
+                                let Some(row) = list_projects.get(index) else {
                                     return div().into_any_element();
+                                };
+                                let (project_id, name) = match row {
+                                    ProjectPickerRow::Header(name) => {
+                                        return div()
+                                            .h(px(PROJECT_PICKER_ROW_HEIGHT))
+                                            .flex()
+                                            .pl(px(10.0))
+                                            .pr(px(10.0))
+                                            .items_center()
+                                            .text_style(TextStyle::SUBHEADLINE.bold())
+                                            .text_color(theme.text_tertiary)
+                                            .truncate()
+                                            .child(name.clone())
+                                            .into_any_element();
+                                    }
+                                    ProjectPickerRow::Project(id, name) => (id, name),
                                 };
                                 let project_id = *project_id;
                                 let select_weak = list_weak.clone();
                                 let select_popover = list_popover.clone();
-                                SelectableRow::new(
-                                    SharedString::from(format!("project-row-{project_id}")),
-                                    name.clone(),
+                                styled_project_picker_row(
+                                    SelectableRow::new(
+                                        SharedString::from(format!("project-row-{project_id}")),
+                                        name.clone(),
+                                    )
+                                    .selected(selected_project == Some(project_id)),
+                                    highlighted_action
+                                        == Some(ProjectPickerAction::Select(project_id)),
+                                    &theme,
                                 )
-                                .h(px(PROJECT_PICKER_ROW_HEIGHT))
-                                .selected(selected_project == Some(project_id))
-                                .highlighted(highlight == Some(index))
                                 .on_click(move |_, window, cx| {
                                     select_popover.close(window, cx);
                                     window.refresh();
@@ -249,16 +297,6 @@ impl Michelle {
                             })
                             .size_full(),
                         )
-                        .child(scrollbar::edge_fade(
-                            list_state.clone(),
-                            scrollbar::FadeEdge::Top,
-                            theme.raised,
-                        ))
-                        .child(scrollbar::edge_fade(
-                            list_state.clone(),
-                            scrollbar::FadeEdge::Bottom,
-                            theme.raised,
-                        ))
                         .child(scrollbar::vertical(&list_state, &scrollbar_state))
                         .into_any_element()
                 };
@@ -271,28 +309,27 @@ impl Michelle {
                     let weak = weak.clone();
                     let popover = popover.clone();
                     let index = actions.iter().position(|candidate| *candidate == action);
-                    SelectableRow::new(id, label)
-                        .h(px(PROJECT_PICKER_ROW_HEIGHT))
-                        .mx(px(4.0))
-                        .selected(selected)
-                        .highlighted(highlight.is_some() && highlight == index)
-                        .leading(icon(icon_path, 12.0, theme.text_secondary))
-                        .on_click(move |_, window, cx| {
-                            popover.close(window, cx);
-                            window.refresh();
-                            let _ = weak.update(cx, |this, cx| {
-                                this.apply_project_picker_action(action, site, cx);
-                            });
-                        })
+                    styled_project_picker_row(
+                        SelectableRow::new(id, label).selected(selected),
+                        highlight.is_some() && highlight == index,
+                        &theme,
+                    )
+                    .leading(SfSymbol::new(icon_path).size(IconSize::Small))
+                    .on_click(move |_, window, cx| {
+                        popover.close(window, cx);
+                        window.refresh();
+                        let _ = weak.update(cx, |this, cx| {
+                            this.apply_project_picker_action(action, site, cx);
+                        });
+                    })
                 };
 
                 let navigate = |key: &'static str| {
                     let weak = weak.clone();
                     let action_count = actions.len();
-                    let row_count = projects.len();
                     move |cx: &mut App| {
                         let _ = weak.update(cx, |this, cx| {
-                            this.move_project_picker_highlight(key, action_count, row_count, cx);
+                            this.move_project_picker_highlight(key, action_count, cx);
                         });
                     }
                 };
@@ -306,21 +343,22 @@ impl Michelle {
 
                 div()
                     .w(px(PROJECT_PICKER_WIDTH))
-                    // A deferred panel inherits its trigger's text style, and
-                    // the empty state's trigger sits in a 20pt medium
-                    // headline. Pin the rows' metrics for the filter field.
-                    .text_size(sp(12.5))
-                    .line_height(sp(15.0))
-                    .font_weight(FontWeight::NORMAL)
-                    .rounded(px(13.0))
-                    .squircle()
-                    .overflow_hidden()
-                    .border(px(0.5))
-                    .border_color(theme.border)
-                    .bg(theme.raised)
+                    .relative()
+                    .p(px(5.0))
+                    .rounded(px(12.0))
+                    .text_style(TextStyle::BODY)
                     .shadow_lg()
                     .flex()
                     .flex_col()
+                    .child(
+                        squircle()
+                            .rounded(px(12.0))
+                            .bg(theme.raised)
+                            .border(px(0.5))
+                            .border_color(theme.border_strong)
+                            .border_inside()
+                            .absolute_expand(),
+                    )
                     .on_action(move |_: &SelectNextEntry, _, cx| next(cx))
                     .on_action(move |_: &SelectPreviousEntry, _, cx| previous(cx))
                     // Nothing here cycles tabs, so tab steps through the rows
@@ -351,25 +389,33 @@ impl Michelle {
                     })
                     .child(
                         div()
-                            .px(px(12.0))
-                            .pt(px(10.0))
-                            .pb(px(8.0))
+                            .id("project-picker-search")
+                            .w_full()
+                            .h(px(32.0))
                             .flex_none()
+                            .mb(px(10.0))
+                            .px(px(10.0))
+                            .squircle()
+                            .rounded(px(9.0))
+                            .border(px(0.5))
+                            .shadow(if search_focused {
+                                vec![
+                                    BoxShadow::new(px(0.0), px(0.0), theme.accent)
+                                        .spread_radius(px(1.5))
+                                        .inset(),
+                                    BoxShadow::new(px(0.0), px(2.0), theme.accent.alpha(0.25))
+                                        .blur_radius(px(3.0)),
+                                ]
+                            } else {
+                                vec![]
+                            })
+                            .border_color(theme.border_strong)
+                            .bg(theme.raised)
                             .flex()
                             .items_center()
-                            .child(
-                                div()
-                                    .w_full()
-                                    .h(px(28.0))
-                                    .px(px(10.0))
-                                    .rounded(px(9.0))
-                                    .bg(theme.surface)
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .child(icon("magnifyingglass", 12.0, theme.text_secondary))
-                                    .child(div().flex_1().min_w_0().child(search.clone())),
-                            ),
+                            .gap(px(8.0))
+                            .child(icon("magnifyingglass", 14.0, theme.text_tertiary))
+                            .child(div().min_w_0().flex_1().child(search.clone())),
                     )
                     .child(rows)
                     .child(div().mx(px(6.0)).my(px(4.0)).h(px(1.0)).bg(theme.border))
@@ -387,7 +433,6 @@ impl Michelle {
                         tr!("project.no_project"),
                         projectless_selected,
                     ))
-                    .child(div().h(px(4.0)))
                     .into_any_element()
             },
         )
@@ -395,15 +440,12 @@ impl Michelle {
 
     /// Keep the virtualized list's item count in step with the filtered rows.
     /// Rows have one fixed height, so a changed set only needs its count.
-    fn sync_project_picker_rows(&self, rows: &[(Uuid, SharedString)]) {
+    fn sync_project_picker_rows(&self, rows: &[ProjectPickerRow]) {
         let mut cached = self.project_picker_ui.rows.borrow_mut();
-        if cached
-            .iter()
-            .eq(rows.iter().map(|(project_id, _)| project_id))
-        {
+        if cached.as_slice() == rows {
             return;
         }
-        *cached = rows.iter().map(|(project_id, _)| *project_id).collect();
+        *cached = rows.to_vec();
         self.project_picker_ui
             .list_state
             .reset_with_uniform_height(rows.len(), px(PROJECT_PICKER_ROW_HEIGHT));
@@ -415,7 +457,6 @@ impl Michelle {
         &mut self,
         key: &str,
         action_count: usize,
-        row_count: usize,
         cx: &mut Context<Self>,
     ) {
         let current = self
@@ -427,10 +468,10 @@ impl Michelle {
         };
         self.project_picker_ui.highlight = Some(next);
         // The pinned actions sit outside the list and are always visible.
-        if next < row_count {
+        if let Some(row_index) = project_row_index(&self.project_picker_ui.rows.borrow(), next) {
             self.project_picker_ui
                 .list_state
-                .scroll_to_reveal_item(next);
+                .scroll_to_reveal_item(row_index);
         }
         cx.notify();
     }
@@ -508,14 +549,18 @@ mod tests {
         for query in ["geo front", "FRONT GEO"] {
             let entries = visible_project_entries(&projects, &groups, None, query, &mut matcher);
             assert_eq!(entries[0].0, projects[0].id);
-            assert_eq!(names(&entries), vec!["geoportal • frontend"]);
+            assert_eq!(names(&entries), vec!["frontend"]);
+            assert_eq!(
+                group_project_entries(entries, &groups),
+                vec![
+                    ProjectPickerRow::Header("geoportal".into()),
+                    ProjectPickerRow::Project(projects[0].id, "frontend".into()),
+                ]
+            );
         }
 
         let entries = visible_project_entries(&projects, &groups, None, "geo", &mut matcher);
-        assert_eq!(
-            names(&entries),
-            vec!["geoportal • backend", "geoportal • frontend"]
-        );
+        assert_eq!(names(&entries), vec!["backend", "frontend"]);
 
         let entries = visible_project_entries(&projects, &groups, None, "frontend", &mut matcher);
         assert_eq!(entries.len(), 2);
@@ -526,7 +571,78 @@ mod tests {
             visible_project_entries(&projects, &groups, None, "geo front", &mut matcher).is_empty()
         );
         let entries = visible_project_entries(&projects, &groups, None, "maps front", &mut matcher);
-        assert_eq!(names(&entries), vec!["Maps • frontend"]);
+        assert_eq!(names(&entries), vec!["frontend"]);
+    }
+
+    #[test]
+    fn project_picker_groups_projects_and_skips_headers_for_actions() {
+        let projects = vec![
+            project("loose"),
+            project("web"),
+            project("cli"),
+            project("web"),
+        ];
+        let groups = vec![
+            SidebarProjectGroup {
+                id: Uuid::new_v4(),
+                name: "Work".into(),
+                projects: vec![projects[1].id, projects[2].id],
+                collapsed: true,
+            },
+            SidebarProjectGroup {
+                id: Uuid::new_v4(),
+                name: "Personal".into(),
+                projects: vec![projects[3].id],
+                collapsed: false,
+            },
+            SidebarProjectGroup {
+                id: Uuid::new_v4(),
+                name: "Empty".into(),
+                projects: vec![],
+                collapsed: false,
+            },
+        ];
+        let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
+        let entries =
+            visible_project_entries(&projects, &groups, Some(projects[2].id), "", &mut matcher);
+        let rows = group_project_entries(entries, &groups);
+        assert_eq!(
+            rows,
+            vec![
+                ProjectPickerRow::Header("Work".into()),
+                ProjectPickerRow::Project(projects[2].id, "cli".into()),
+                ProjectPickerRow::Project(projects[1].id, "web".into()),
+                ProjectPickerRow::Header(tr!("sidebar.projects").into()),
+                ProjectPickerRow::Project(projects[0].id, "loose".into()),
+                ProjectPickerRow::Header("Personal".into()),
+                ProjectPickerRow::Project(projects[3].id, "web".into()),
+            ]
+        );
+        assert_eq!(
+            rows.iter()
+                .filter_map(ProjectPickerRow::project_id)
+                .collect::<Vec<_>>(),
+            vec![
+                projects[2].id,
+                projects[1].id,
+                projects[0].id,
+                projects[3].id
+            ]
+        );
+        for (action, row) in [1, 2, 4, 6].into_iter().enumerate() {
+            assert_eq!(project_row_index(&rows, action), Some(row));
+        }
+        // The pinned actions are selectable but never scroll the project list.
+        assert_eq!(project_row_index(&rows, 4), None);
+        assert_eq!(project_row_index(&rows, 5), None);
+
+        let entries = visible_project_entries(&projects, &groups, None, "loose", &mut matcher);
+        assert_eq!(
+            group_project_entries(entries, &groups),
+            vec![ProjectPickerRow::Project(projects[0].id, "loose".into())]
+        );
+        let entries = visible_project_entries(&projects, &groups, None, "missing", &mut matcher);
+        assert!(group_project_entries(entries, &groups).is_empty());
     }
 }
 
