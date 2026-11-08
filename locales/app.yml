@@ -1653,6 +1653,8 @@ background.status.lost:
 background.unavailable:
   en: This work is no longer available.
 
+files.copy_path:
+  en: Copy Absolute Path
 files.unsaved_changes:
   en: Unsaved changes — %{shortcut} to save
 files.no_project_open:

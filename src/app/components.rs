@@ -149,6 +149,37 @@ fn format_message_time_at(created_at: u64, now: DateTime<Local>, locale: &str) -
 }
 
 impl Michelle {
+    pub(super) fn render_file_path_copy_button(
+        &self,
+        id: String,
+        path: &str,
+        hover_group: &'static str,
+        cx: &mut Context<Self>,
+    ) -> Option<IconButton> {
+        let path = self.selected_workspace_path()?.join(path);
+        let focus = self.transcript_control_focus(id.clone(), cx);
+        let theme = Theme::current(cx);
+        Some(
+            IconButton::new(
+                SharedString::from(id),
+                icon("doc.on.doc", 15.0, theme.text_tertiary),
+            )
+            .track_focus(&focus)
+            .size(px(24.0))
+            .rounded(px(5.0))
+            .opacity(0.0)
+            .group_hover(hover_group, |style| style.opacity(1.0))
+            .focus_visible(|style| style.opacity(1.0).border_1().border_color(theme.accent))
+            .tooltip(tr!("files.copy_path"))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_activation(cx, move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(
+                    path.to_string_lossy().into_owned(),
+                ));
+            }),
+        )
+    }
+
     pub(super) fn message_footer_focuses(
         &self,
         message_id: Uuid,

@@ -821,6 +821,7 @@ background.status.stopped: Остановлено
 background.status.lost: Нет подключения
 background.unavailable: Эта работа больше недоступна.
 
+files.copy_path: Скопировать абсолютный путь
 files.unsaved_changes: "Несохранённые изменения — %{shortcut}, чтобы сохранить"
 files.no_project_open: Проект не открыт
 files.no_project_open_description: Откройте проект, чтобы просмотреть его файлы

@@ -2471,6 +2471,7 @@ impl Michelle {
         };
         div()
             .id(SharedString::from(format!("{id_prefix}-{index}")))
+            .group("review-diff-file-header")
             .w_full()
             .min_w_0()
             .h(px(REVIEW_DIFF_FILE_HEADER_HEIGHT))
@@ -2499,6 +2500,12 @@ impl Michelle {
                     .tooltip(Tooltip::text(file.path.clone()))
                     .child(file.path.clone()),
             )
+            .children(self.render_file_path_copy_button(
+                format!("{id_prefix}-copy-{}", file.path),
+                &file.path,
+                "review-diff-file-header",
+                cx,
+            ))
             .child(
                 div()
                     .text_size(px(12.5))

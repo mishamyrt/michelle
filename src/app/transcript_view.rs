@@ -1589,6 +1589,7 @@ impl Michelle {
         for file in files.iter().take(visible_count) {
             file_rows = file_rows.child(
                 div()
+                    .group("changed-file-row")
                     .h(px(32.0))
                     .px(px(16.0))
                     .flex()
@@ -1608,6 +1609,12 @@ impl Michelle {
                             .tooltip(Tooltip::text(file.path.clone()))
                             .child(file.path.clone()),
                     )
+                    .children(self.render_file_path_copy_button(
+                        format!("changed-file-copy-{turn_id}-{}", file.path),
+                        &file.path,
+                        "changed-file-row",
+                        cx,
+                    ))
                     .child(
                         div()
                             .flex_none()
