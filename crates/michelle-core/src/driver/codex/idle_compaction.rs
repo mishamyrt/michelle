@@ -24,7 +24,10 @@ impl IdleCompaction {
         match self.deadline {
             Some(deadline) => match commands.recv_deadline(deadline) {
                 Ok(command) => Ok(command),
-                Err(RecvTimeoutError::Timeout) => Ok(CommandMessage::Prompt("/compact".to_owned())),
+                Err(RecvTimeoutError::Timeout) => Ok(CommandMessage::Prompt {
+                    text: "/compact".to_owned(),
+                    automatic_compaction: true,
+                }),
                 Err(RecvTimeoutError::Disconnected) => Err(RecvError),
             },
             None => commands.recv(),
@@ -93,9 +96,10 @@ mod tests {
             Ok(CommandMessage::RefreshBackgroundWork)
         ));
         assert_eq!(idle.deadline, deadline);
-        assert!(
-            matches!(idle.recv(&received), Ok(CommandMessage::Prompt(text)) if text == "/compact")
-        );
+        assert!(matches!(
+            idle.recv(&received),
+            Ok(CommandMessage::Prompt { text, automatic_compaction: true }) if text == "/compact"
+        ));
 
         idle.prompt(true);
         idle.turn_started();
@@ -111,10 +115,13 @@ mod tests {
         idle.turn_finished(true, Some(200_001), Instant::now() - CACHE_LIFETIME);
         let (commands, received) = unbounded();
         commands
-            .send(CommandMessage::Prompt("Continue".to_owned()))
+            .send(CommandMessage::Prompt {
+                text: "Continue".to_owned(),
+                automatic_compaction: false,
+            })
             .unwrap();
         assert!(
-            matches!(idle.recv(&received), Ok(CommandMessage::Prompt(text)) if text == "Continue")
+            matches!(idle.recv(&received), Ok(CommandMessage::Prompt { text, automatic_compaction: false }) if text == "Continue")
         );
         idle.prompt(false);
         assert!(idle.deadline.is_none());

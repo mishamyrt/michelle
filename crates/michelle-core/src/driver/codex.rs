@@ -45,7 +45,10 @@ const DISABLE_CODEX_NODE_REPL_COMMAND: &str = "mcp_servers.node_repl.command=\"/
 const DISABLE_CODEX_NODE_REPL: &str = "mcp_servers.node_repl.enabled=false";
 
 enum CommandMessage {
-    Prompt(String),
+    Prompt {
+        text: String,
+        automatic_compaction: bool,
+    },
     Steer(String),
     TurnStarted,
     TurnFinished {
@@ -301,6 +304,7 @@ impl CodexDriver {
         let pending_steers = Arc::new(Mutex::new(HashMap::<u64, String>::new()));
         let background_rpcs = Arc::new(Mutex::new(BackgroundRpcState::default()));
         let goal_rpcs = Arc::new(Mutex::new(GoalRpcState::default()));
+        let automatic_compaction_request = Arc::new(Mutex::new(None));
         let title_generation = Arc::new(Mutex::new(CodexTitleGeneration {
             enabled: provider_session_id.is_none(),
             launched: false,
@@ -314,6 +318,7 @@ impl CodexDriver {
         let writer_pending_steers = pending_steers.clone();
         let writer_background_rpcs = background_rpcs.clone();
         let writer_goal_rpcs = goal_rpcs.clone();
+        let writer_automatic_compaction_request = automatic_compaction_request.clone();
         let writer_title_generation = title_generation.clone();
         let writer_events = events.clone();
         let cwd_string = cwd.display().to_string();
@@ -427,7 +432,10 @@ impl CodexDriver {
                 let mut idle_compaction = idle_compaction::IdleCompaction::default();
                 while let Ok(command) = idle_compaction.recv(&command_rx) {
                     let message = match command {
-                        CommandMessage::Prompt(text) => {
+                        CommandMessage::Prompt {
+                            text,
+                            automatic_compaction,
+                        } => {
                             idle_compaction.prompt(text.trim() == "/compact");
                             let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
                                 let _ = writer_events.send(DriverEvent::Error(tr!(
@@ -437,6 +445,10 @@ impl CodexDriver {
                             };
                             next_request_id += 1;
                             if text.trim() == "/compact" {
+                                if automatic_compaction {
+                                    *writer_automatic_compaction_request.lock() =
+                                        Some(next_request_id);
+                                }
                                 json!({
                                     "method": "thread/compact/start",
                                     "id": next_request_id,
@@ -779,7 +791,10 @@ impl CodexDriver {
         let reader_thread = thread::Builder::new()
             .name("michelle-codex-reader".into())
             .spawn(move || {
-                let mut stream_state = CodexStreamState::default();
+                let mut stream_state = CodexStreamState {
+                    automatic_compaction_request,
+                    ..CodexStreamState::default()
+                };
                 for line in BufReader::new(stdout).lines() {
                     match line {
                         Ok(line) if !line.trim().is_empty() => {
@@ -1025,7 +1040,10 @@ fn handle_goal_response(
 
 impl DriverControl for CodexDriver {
     fn prompt(&self, prompt: String) {
-        let _ = self.commands.send(CommandMessage::Prompt(prompt));
+        let _ = self.commands.send(CommandMessage::Prompt {
+            text: prompt,
+            automatic_compaction: false,
+        });
     }
 
     fn supports_steer(&self) -> bool {
@@ -1386,6 +1404,7 @@ const CODEX_CITATION_SEPARATOR: char = '\u{e202}';
 
 #[derive(Default)]
 struct CodexStreamState {
+    automatic_compaction_request: Arc<Mutex<Option<u64>>>,
     context_tokens: Option<u64>,
     citations: HashMap<String, String>,
     citation_numbers: HashMap<String, usize>,
@@ -1676,6 +1695,12 @@ fn handle_codex_message(
     // the same numeric ID as one of Michelle's earlier requests. Only messages
     // without a method are responses to Michelle-originated requests.
     let is_response = value.get("method").is_none();
+    if is_response && value.get("error").is_some() {
+        let mut request = stream_state.automatic_compaction_request.lock();
+        if request.is_some() && *request == value.get("id").and_then(Value::as_u64) {
+            *request = None;
+        }
+    }
     let pending_goal = is_response
         .then(|| value.get("id").and_then(Value::as_u64))
         .flatten()
@@ -1830,7 +1855,10 @@ fn handle_codex_message(
                 }
             }
             let _ = commands.send(CommandMessage::TurnStarted);
-            let _ = events.send(DriverEvent::TurnStarted);
+            // Idle compaction is maintenance, not a new user-facing reply.
+            if stream_state.automatic_compaction_request.lock().is_none() {
+                let _ = events.send(DriverEvent::TurnStarted);
+            }
         }
         "item/agentMessage/delta" => {
             if let Some(delta) = params.get("delta").and_then(Value::as_str) {
@@ -1949,10 +1977,19 @@ fn handle_codex_message(
                 context_tokens: stream_state.context_tokens,
                 completed_at: Instant::now(),
             });
-            let _ = events.send(DriverEvent::TurnFinished {
-                success: status == "completed",
-                summary: error,
-            });
+            if stream_state
+                .automatic_compaction_request
+                .lock()
+                .take()
+                .is_none()
+            {
+                let _ = events.send(DriverEvent::TurnFinished {
+                    success: status == "completed",
+                    summary: error,
+                });
+            } else if let Some(error) = error {
+                let _ = events.send(DriverEvent::Error(error));
+            }
         }
         "thread/name/updated" => {
             let current_thread_id = thread_id.lock().clone();
@@ -2595,10 +2632,28 @@ mod tests {
                 driver.prompt("/compact \n".into());
             }
             let mut progress = Vec::new();
+            let mut started = false;
             loop {
                 match received.recv_timeout(Duration::from_secs(5)).unwrap() {
-                    DriverEvent::RichActivity(activity) => progress.push(activity),
+                    DriverEvent::TurnStarted => {
+                        assert!(
+                            !automatic,
+                            "automatic compaction started a user-facing turn"
+                        );
+                        started = true;
+                    }
+                    DriverEvent::RichActivity(activity) => {
+                        let complete = activity.complete;
+                        progress.push(activity);
+                        if automatic && complete {
+                            break;
+                        }
+                    }
                     DriverEvent::TurnFinished { success, .. } => {
+                        assert!(
+                            !automatic,
+                            "automatic compaction finished a user-facing turn"
+                        );
                         assert!(success);
                         break;
                     }
@@ -2607,6 +2662,7 @@ mod tests {
                     _ => {}
                 }
             }
+            assert_eq!(started, !automatic);
             assert_eq!(progress.len(), 2);
             assert_eq!(progress[0].source_id.as_deref(), Some("compact-1"));
             assert_eq!(progress[0].source_id, progress[1].source_id);
@@ -2621,10 +2677,13 @@ mod tests {
                 DriverEvent::Error(error) if error == "Compaction failed"
             ));
             driver.prompt("Continue".into());
+            let mut started = false;
             loop {
                 match received.recv_timeout(Duration::from_secs(5)).unwrap() {
+                    DriverEvent::TurnStarted => started = true,
                     DriverEvent::TextDelta(text) => assert_eq!(text, "OK"),
                     DriverEvent::TurnFinished { success, .. } => {
+                        assert!(started, "the next user turn must still report its start");
                         assert!(success);
                         break;
                     }
@@ -2908,6 +2967,53 @@ mod tests {
                     if context_tokens == tokens
             ));
         }
+    }
+
+    #[test]
+    fn rejected_automatic_compaction_does_not_silence_the_next_turn() {
+        let harness = GoalHarness::new();
+        let mut stream_state = CodexStreamState::default();
+        *stream_state.automatic_compaction_request.lock() = Some(42);
+        for (message, pending) in [
+            (
+                json!({"id": 41, "error": {"message": "Unrelated error"}}),
+                Some(42),
+            ),
+            (
+                json!({"id": 42, "error": {"message": "Compaction failed"}}),
+                None,
+            ),
+            (
+                json!({"method": "turn/started", "params": {"turn": {"id": "next"}}}),
+                None,
+            ),
+            (
+                json!({"method": "turn/completed", "params": {"turn": {"status": "completed"}}}),
+                None,
+            ),
+        ] {
+            handle_codex_message(
+                message,
+                &harness.thread_id,
+                &harness.turn_id,
+                &harness.turn_ids,
+                &harness.rollbacks,
+                &harness.steers,
+                &harness.background,
+                &harness.goals,
+                &harness.commands,
+                &harness.events,
+                &mut stream_state,
+            );
+            assert_eq!(*stream_state.automatic_compaction_request.lock(), pending);
+        }
+        let events = harness.received.try_iter().collect::<Vec<_>>();
+        assert!(matches!(events.as_slice(), [
+            DriverEvent::Error(unrelated),
+            DriverEvent::Error(compaction),
+            DriverEvent::TurnStarted,
+            DriverEvent::TurnFinished { success: true, .. },
+        ] if unrelated == "Unrelated error" && compaction == "Compaction failed"));
     }
 
     fn goal_json() -> Value {
