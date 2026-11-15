@@ -953,10 +953,14 @@ impl Michelle {
     }
 
     /// The thread-goal chip: present only while the provider reports a goal,
-    /// it pairs a target icon with the status phrase (and budget consumption)
-    /// and opens the goal dialog. `/goal` is the keyboard route to the same
-    /// surface.
-    pub(super) fn render_goal_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// it shows a target icon, adding status and consumption in a wide chat
+    /// column, and opens the goal dialog. `/goal` is the keyboard route to
+    /// the same surface.
+    pub(super) fn render_goal_control(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let session = self.selected_session()?;
         let goal = session.thread_goal.as_ref()?;
         let session_id = session.id;
@@ -970,12 +974,13 @@ impl Michelle {
         .flatten()
         .map_or(0, |observed| observed.elapsed().as_secs() as i64);
         let label = super::goal_dialog::goal_chip_label(goal, live_elapsed_seconds);
-        let objective = goal.objective.clone();
+        let tooltip = format!("{label}\n{}", goal.objective);
         let weak = cx.entity().downgrade();
         Some(
             div()
                 .id("composer-goal")
                 .h(px(24.0))
+                .flex_none()
                 .px(px(7.0))
                 .rounded(px(6.0))
                 .squircle()
@@ -986,9 +991,12 @@ impl Michelle {
                 .text_style(TextStyle::CAPTION_2)
                 .text_color(color)
                 .child(chip_icon("scope", color))
-                .child(div().max_w(px(220.0)).truncate().child(label))
+                .when(
+                    self.chat_viewport_width(window) >= CONTENT_MAX_WIDTH,
+                    |element| element.child(div().max_w(px(220.0)).truncate().child(label)),
+                )
                 .hover(|element| element.bg(theme.overlay))
-                .tooltip(Tooltip::text(objective))
+                .tooltip(Tooltip::text(tooltip))
                 .on_click(move |_, _, cx| {
                     let _ = weak.update(cx, |this, cx| {
                         this.request_goal_dialog(session_id, None, false, cx);
@@ -1561,7 +1569,7 @@ impl Michelle {
                         .children(self.render_model_traits_control(cx))
                         .children(self.render_agent_preset_control(cx))
                         .child(self.render_access_control(cx))
-                        .children(self.render_goal_control(cx))
+                        .children(self.render_goal_control(window, cx))
                         .child(div().flex_1())
                         .child(match submit_action {
                             ComposerSubmitAction::Preparing => div()

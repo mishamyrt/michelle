@@ -97,6 +97,7 @@ impl Michelle {
         let objective = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
+                .auto_height()
                 .placeholder(tr!("goal.objective_placeholder"))
         });
         if let Some(content) = content {
@@ -268,6 +269,8 @@ impl Michelle {
             )
             .child(
                 TextArea::new("goal-dialog-objective", dialog.objective.clone())
+                    .h_auto()
+                    .min_h(px(112.0))
                     .text_size(px(self.state.content_font_size))
                     .line_height(px(self.state.content_font_size * 1.5)),
             );

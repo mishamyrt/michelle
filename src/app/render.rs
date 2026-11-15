@@ -136,7 +136,7 @@ impl Michelle {
     /// Width left for the chat column once the panels take theirs — the
     /// widths they are painted at this frame, so a transcript measured
     /// mid-slide matches the column it is laid out in.
-    fn chat_viewport_width(&self, window: &Window) -> f32 {
+    pub(super) fn chat_viewport_width(&self, window: &Window) -> f32 {
         f32::from(window.viewport_size().width)
             - self.shell_ui.sidebar_rendered_width
             - self.shell_ui.right_panel_rendered_width
