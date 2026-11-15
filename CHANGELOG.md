@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1](https://github.com/mishamyrt/michelle/compare/v0.2.0..v0.2.1) - 2026-11-15
+
+### 🚀 Features
+
+- Remove move to group from menu
+- Improve branch selector
+
+### 🐛 Bug Fixes
+
+- Correctly adapt goal
+
+### 📚 Documentation
+
+- Add installation notes
+
 ## [0.2.0](https://github.com/mishamyrt/michelle/compare/..v0.2.0) - 2026-11-15
 
 ### 🚀 Features
