@@ -1,177 +1,97 @@
 # Changelog
 
-All notable changes to Michelle. This file is the source of truth for release
-notes: the release workflow extracts the section matching the version in
-`Cargo.toml` and publishes it on GitHub and alongside the downloads.
+All notable changes to this project will be documented in this file.
 
-Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
-`## [<version>]` section at the top for each release, matching the version you
-set in `Cargo.toml`.
+## [0.2.0](https://github.com/mishamyrt/michelle/compare/..v0.2.0) - 2026-11-15
 
-Write release notes for the final product users receive, not the development
-history. When a feature is still unreleased, fold its fixes and refinements into
-the original feature bullet instead of adding separate entries for them.
+### 🚀 Features
 
-## [unreleased]
+- *(mobile)* Add service tier options to task composer
+- *(mobile)* Move model selection to searchable header sheet
+- *(mobile)* Show attachment previews in composer and messages
+- *(mobile)* Add command and file pickers to composer
+- Re-brand
+- Add reasoning hotkey
+- Add project selector hotkey
+- Replace mono font with Lilex
+- Tune terminal font size
+- Add projects persistance
+- Tune theme colors
+- Tune app icon
+- Enable computer use
+- Add sidebar focus hotkey
+- Add sidebar group re-ordering
+- Add project grouping
+- Tune theme colors
+- Change sidebar spinner active color
+- Remove all builds except macOS
+- Remove analytics
+- Full rename
+- Fine tune sidebar
+- Remove auto-update
+- Add project progress
+- Update icons again
+- Remove cn and ja locales, add ru
+- Add toml themes support
+- Add opencode2 support
+- Align chat progress time
+- Remove browser
+- Add sidecar touchscreen support
+- Add visual re-ordering
+- Tune text color
+- Add squircle support
+- Remove date grouping
+- Migrate to SF Symbols
+- Redesign
+- Adjust message styles
+- Tune message bubble
+- Adjust toolbar
+- Adjust transcript
+- Add compaction
+- Tune terminal theme
+- Tune project picker
+- Tune idle compaction
+- Add marmaid render
+- Add success indicator
+- Commonize ui
+- Remove Move to Project
+- Add chat edge fade
+- Add more statuses
+- Add pinned projects
+- Improve model picker
+- Improve trait selector
+- Rework project picker
+- Add path copy
+- Avoid auto-compaction notification
 
-- Remove in-app updates
-- Support the OpenCode 2.0 release, which now installs as `opencode`: OpenCode runs on its shared background service, OpenCode 2 beta and OpenCode 1 tasks continue as OpenCode tasks, and OpenCode's free models work in Michelle tasks
-- Fix rewinding or branching an OpenCode task after steering it mid-turn, which forked OpenCode's conversation at the wrong turn
-- Fix OpenCode tasks going silent when the OpenCode service restarts; a turn it interrupted now continues in place once the service is back
+### 🐛 Bug Fixes
 
-## [0.1.19]
+- Add IME composition offsets in UTF-16 before converting (#23)
+- *(spawn)* Normalize SIGCHLD for provider children (#54)
+- Set markdown message width (#85)
+- *(waku-core)* Prefer PATHEXT over the extensionless npm shim on Windows (#132)
+- *(composer)* Invoke provider skills with native syntax (#113)
+- Send Cursor ACP model selection through session/set_config_option (#63)
+- Unblock daemon terminal shutdown
+- Skip usage copies from forked Codex sessions (#39)
+- *(waku-core)* Separate Codex reasoning parts in the transcript (#146)
+- *(waku-core)* Guard Claude task output on Windows
+- Skip revoked signing identities in bundle.sh (#228)
+- Avoid sidebar text clipping on large font size
+- Place new chats to top on manual sorting
+- Align model selector
+- Align chat in project view
+- Improve project delete
+- Terminal hotkey and encoding
+- Correctly display cyrillic paths
 
-- Render inline and block LaTeX math in Markdown, with a Copy Expression action and a setting to show the source
-- Fix OpenCode 2 context usage to reflect the latest request instead of cumulative session totals, and cap the meter at 100%
-- Clear model search when selecting a provider or Favorites tab
-- Make loading spinners smoother with animations at up to 60 FPS
+### 🚜 Refactor
 
-## [0.1.18]
+- *(ui)* Share toggle and activation primitives (#91)
+- Rework typography
 
-- Fix Codex session forking
-- Add OpenCode 2 support, add reasoning effort option for both OpenCode and OpenCode 2
-- Fix memory usage for long-running sessions
+### 📚 Documentation
 
-## [0.1.17]
+- Add fork info
 
-- Fix the OpenCode Resume list showing only sessions started outside a git checkout; it now lists sessions from every project
-- Hold Claude's turn open while it waits on background work
-
-## [0.1.16]
-
-- Import and continue conversations started in agent CLIs with `/resume` or the command palette across every provider, in both Michelle and Michelle Web
-- Linux: add signed in-app updates with clean relaunch and automatic rollback
-- Copy Michelle task IDs and agent CLI thread IDs from task info or the command palette
-- Keep each response's actions and changed-file summary after its final tool activity
-- Keep the selected task visible when navigating the sidebar
-- Let nested transcript and command-output scrollers hand wheel gestures to the page only at their boundaries
-- Keep multiline background-work titles on one line in summaries and panel headers
-
-## [0.1.15]
-
-- Codex thread goals: type /goal to set a persistent objective the task keeps pursuing — before or after the first message — with its autonomous pursuit streaming into the transcript, a status chip showing live budget or elapsed time, and a dialog to edit, pause, resume, or clear the goal (also in Michelle Web)
-- Discover provider-native slash commands and skills from installed agent CLIs, including multiline YAML descriptions
-- Add reasoning effort selection for Grok
-- Reconnect remote daemon sessions automatically after connection interruptions
-- Fix Command/Ctrl+Enter steering after a provider response starts streaming
-- Fix transcript file links on Windows
-- Fix OpenCode dropping the first streamed event and hanging during cancellation on Windows
-
-## [0.1.14]
-
-- Group sidebar tasks by project or update date, order them newest or oldest first, and collapse sections
-- Find in page: Search the full transcript by keywords using cmd-f or ctrl-f
-- Switch between recent tasks with Ctrl+Tab and Ctrl+Shift+Tab
-- Carry the current access mode into new tasks and remember it between launches
-- Fix OpenCode access-mode permissions and restore pending permission prompts when resuming sessions
-- Show Codex file reads, listings, and searches as file activity instead of raw commands
-- Keep long panel and background-work titles on one truncated line
-- Increase the minimum UI text size for better legibility
-
-## [0.1.13]
-
-- Add Vercel Fx support
-- Support DeepSeek Harness 0.1.1 without opening its web UI
-- Collapse earlier activity groups when a running turn moves on to newer transcript output
-
-## [0.1.12]
-
-- Invoke Codex, Pi, and Oh My Pi skills with their native syntax
-- Stream live output from Claude background tasks
-- Steer the oldest queued follow-up with Command/Ctrl+Enter in an empty composer
-- Fix model and reasoning option selection for Cursor
-- Fix npm-installed provider detection on Windows
-- Fix daemon terminal sessions hanging during shutdown
-- Exclude copied history from forked Codex sessions from usage totals
-- Keep separate Codex reasoning sections on separate lines
-
-## [0.1.11]
-
-- Highlight Markdown in the file editor, and toggle between source and a rendered preview
-- Add UI and code font size settings
-- macOS: Add "Open in.." button to open project folder in selected application
-
-## [0.1.10]
-
-- Add Kimi Code support
-- Add Oh My Pi support
-- Fix markdown table rendering
-
-## [0.1.8]
-
-- Fix `PATH` resolution on Windows
-
-## [0.1.4]
-
-- Fix text selection in diff view
-
-## [0.1.3]
-
-- Pin Codex and Claude commit message generation to cheap models: gpt-5.6-luna and claude-4.5-haiku
-- Animate sidebars
-- Render provider file edits as inline diffs in the transcript
-- Fix claude task title generation
-
-## [0.1.2]
-
-- Fix regression: user bubble should fit its content width
-
-## [0.1.1]
-
-- Give nested Markdown the full message width
-- Cap composer height and scroll overflow with an overlay scrollbar
-- Keep drag-selecting text past the input bounds
-- Fix char boundary panic when sliding the live reasoning window
-
-## [0.1.0]
-
-- Add standalone Michelle daemon and browser client
-- Add Linux support (X11 and Wayland, you need to build from source for now)
-- Answer agent questions directly in the composer
-- Redesign queued follow-ups as composer cards with per-message steering
-- Add DeepSeek agent preset selection (Standard, Code, Minimal, and Creator)
-- Add Claude context window and ultracode effort options
-- Add /fast command to toggle fast mode for Codex
-- Show the latest activity in live transcript headers
-- Add soft wrapping and keyboard copy feedback
-- Add terminal overlay scrollbar and measure cell width from the font
-- Restore window position, size, and display across launches
-- Contain wheel scrolling in activity and command output viewports
-- Smooth streaming markdown and reduce CPU usage while streaming
-
-## [0.0.13]
-
-- Add DeepSeek Harness provider
-- Render user message as Markdown and linkify bare URLs
-- Share one resident OpenCode serve per workspace across sessions
-
-## [0.0.12]
-
-- Inherit the login-shell environment for provider commands
-- Fix model traits across provider switches
-- Keep branch change counts current and include untracked files
-- Normalize SIGCHLD for provider children
-- Fix Grok model discovery
-
-## [0.0.11]
-
-- Fix provider detection for CLIs installed through shell PATH managers such as
-  nvm and fnm
-- Show models registered by Pi extensions
-- Fix the model picker closing when entering a space in search
-- Fix duplicate transcript history when resuming ACP sessions
-
-## [0.0.10]
-
-- Fix crash in due to IME composition
-- Fix typo
-
-## [0.0.9]
-
-- Add OpenCode Go support in usage popover
-- Fix app icon
-- Fix Cursor model detection
-
-## [0.0.8]
-
-- Initial release
+<!-- generated by git-cliff -->

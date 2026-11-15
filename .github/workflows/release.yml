@@ -5,14 +5,12 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-  release:
-    types: [published]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'release' && 'homebrew' || 'build' }}
+  group: ${{ github.workflow }}
   cancel-in-progress: false
 
 env:
@@ -21,7 +19,6 @@ env:
 jobs:
   version:
     name: Resolve version
-    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -154,8 +151,8 @@ jobs:
             dist/Michelle-${{ needs.version.outputs.version }}.zip
           if-no-files-found: error
 
-  draft-release:
-    name: Draft GitHub release
+  release:
+    name: Publish GitHub release
     needs: [version, macos]
     if: needs.version.outputs.published != 'true'
     runs-on: ubuntu-latest
@@ -191,9 +188,8 @@ jobs:
 
       - uses: softprops/action-gh-release@v3
         with:
-          draft: true
-          # A manual run has no tag yet; publishing the draft creates this one
-          # at the commit that was built.
+          draft: false
+          # A manual run creates the tag at the commit that was built.
           tag_name: ${{ needs.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ needs.version.outputs.tag }}
@@ -206,15 +202,14 @@ jobs:
 
   homebrew:
     name: Publish Homebrew cask
-    if: github.event_name == 'release'
+    needs: [version, release]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      TAG: ${{ github.event.release.tag_name }}
+      TAG: ${{ needs.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@v2
