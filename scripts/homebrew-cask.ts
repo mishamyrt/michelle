@@ -18,9 +18,13 @@ export function renderHomebrewCask(tag: string, sha256: string, downloadUrl: str
   homepage "https://github.com/mishamyrt/michelle"
 
   depends_on arch: :arm64
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Michelle.app"
+
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/Michelle.app"]
+  end
 end
 `;
 }
