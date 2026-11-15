@@ -77,7 +77,8 @@ impl Michelle {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let is_model_picker = id == MODEL_PICKER_MENU_ID;
+        let is_searchable_picker =
+            id == MODEL_PICKER_MENU_ID || id == branch_picker::BRANCH_PICKER_MENU_ID;
         let menus = self.shell_ui.menus.borrow();
         let Some(handle) = menus.get(id).cloned() else {
             return;
@@ -96,7 +97,7 @@ impl Michelle {
             for menu in other_open {
                 menu.close(window, cx);
             }
-            if is_model_picker {
+            if is_searchable_picker {
                 crate::ui::menu::toggle_popover(&handle, MenuAlign::AboveLeft, window, cx);
             } else {
                 crate::ui::menu::toggle_dropdown(&handle, MenuAlign::AboveLeft, window, cx);

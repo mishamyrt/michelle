@@ -354,8 +354,8 @@ page filtering and persistence stay in Settings.
 
 `SelectableRow` accepts prepared content plus optional leading/trailing elements.
 `selected` draws a checkmark; `highlighted` paints the keyboard cursor independently.
-`checkmark_at_start` reserves the model and project menus' leading checkmark column.
-Branch rows use the trailing mark. Local geometry and state refinements remain
+`checkmark_at_start` reserves the model, project and branch menus' leading checkmark column.
+Local geometry and state refinements remain
 explicit; model rows retain their squircle highlight and inherited foreground.
 Disabled rows keep the ghost foreground and omit semantic activation and pointer
 state styles. Raw handlers keep their owner's guards. Picker search fields and

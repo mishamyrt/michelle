@@ -286,6 +286,7 @@ impl Render for Michelle {
             .on_action(cx.listener(Self::cancel_task_switch_action))
             .on_action(cx.listener(Self::focus_composer_action))
             .on_action(cx.listener(Self::focus_sidebar_action))
+            .on_action(cx.listener(Self::toggle_branch_picker_action))
             .on_action(cx.listener(Self::toggle_model_picker_action))
             .on_action(cx.listener(Self::toggle_model_traits_action))
             .on_action(cx.listener(Self::toggle_usage_panel_action))

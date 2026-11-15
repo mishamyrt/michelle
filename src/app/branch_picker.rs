@@ -1,11 +1,48 @@
 //! Branch picker: search, create form, virtualized rows and keyboard navigation.
 use super::*;
-use crate::ui::SelectableRow;
+use crate::ui::squircle::{SquircleExt, SquircleStyled, squircle};
+use crate::ui::{IconSize, SelectableRow, SfSymbol};
 use crate::ui::{StyledTypography, TextStyle};
+use gpui::BoxShadow;
 pub(super) mod model;
 use model::visible_branch_entries;
-const BRANCH_PICKER_MENU_ID: &str = "workspace-branch-picker";
-const BRANCH_PICKER_ROW_HEIGHT: f32 = 26.0;
+pub(super) const BRANCH_PICKER_MENU_ID: &str = "workspace-branch-picker";
+const BRANCH_PICKER_ROW_HEIGHT: f32 = 28.0;
+
+fn branch_picker_enabled(session: Option<&AgentSession>, operation_pending: bool) -> bool {
+    !operation_pending && session.is_some_and(|session| !session.is_busy())
+}
+
+fn styled_branch_picker_row(
+    row: SelectableRow,
+    highlighted: bool,
+    disabled: bool,
+    theme: &Theme,
+) -> SelectableRow {
+    row.h(px(BRANCH_PICKER_ROW_HEIGHT))
+        .px(px(11.0))
+        .gap(px(4.0))
+        .rounded(px(8.0))
+        .highlighted(highlighted)
+        .disabled(disabled)
+        .checkmark_at_start()
+        .font_weight(FontWeight::MEDIUM)
+        .bg(if highlighted && !disabled {
+            theme.accent
+        } else {
+            gpui::transparent_black()
+        })
+        .text_color(if disabled {
+            theme.text_ghost
+        } else if highlighted {
+            gpui::white()
+        } else {
+            theme.text
+        })
+        .hover(|style| style.bg(theme.accent).text_color(gpui::white()))
+        .active(|style| style.opacity(1.0))
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) enum BranchPickerMode {
     #[default]
@@ -46,6 +83,29 @@ impl BranchPickerUi {
 }
 
 impl Michelle {
+    pub(super) fn toggle_branch_picker_action(
+        &mut self,
+        _: &crate::ToggleBranchPicker,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_ui.page.is_some()
+            || !branch_picker_enabled(self.selected_session(), self.branches.operation_pending)
+            || !self
+                .selected_project()
+                .is_some_and(|project| !project.is_projectless())
+        {
+            return;
+        }
+        let Some(path) = self.selected_workspace_path().map(Path::to_path_buf) else {
+            return;
+        };
+        if self.branch_snapshot_for_workspace(&path, cx).is_none() {
+            return;
+        }
+        self.toggle_composer_menu(BRANCH_PICKER_MENU_ID, window, cx);
+    }
+
     pub(in crate::app) fn render_branch_selector(
         &mut self,
         cx: &mut Context<Self>,
@@ -56,7 +116,7 @@ impl Michelle {
         let workspace_path = self.workspace_path_for_session(session)?.to_path_buf();
         self.selected_project()
             .filter(|project| !project.is_projectless())?;
-        let branch_enabled = !session.is_busy() && !self.branches.operation_pending;
+        let branch_enabled = branch_picker_enabled(Some(session), self.branches.operation_pending);
         let planned_worktree = matches!(workspace, SessionWorkspace::NewWorktree { .. });
         let snapshot = self.branch_snapshot_for_workspace(&workspace_path, cx)?;
         let selected_branch = match &workspace {
@@ -169,7 +229,7 @@ impl Michelle {
             trigger,
             &handle,
             MenuAlign::AboveLeft,
-            move |popover, _window, _cx| {
+            move |popover, window, cx| {
                 let popover = popover.clone();
                 let next_actions = actions.clone();
                 let previous_actions = actions.clone();
@@ -179,11 +239,42 @@ impl Michelle {
                 let previous_weak = weak.clone();
                 let confirm_weak = weak.clone();
                 let confirm_popover = popover.clone();
+                let picker_input =
+                    |id: &'static str, input: &Entity<TextInput>, symbol: &'static str| {
+                        let focused = input.read(cx).is_visually_focused(window);
+                        div()
+                            .id(id)
+                            .w_full()
+                            .h(px(32.0))
+                            .flex_none()
+                            .px(px(10.0))
+                            .squircle()
+                            .rounded(px(9.0))
+                            .border(px(0.5))
+                            .border_color(theme.border_strong)
+                            .bg(theme.raised)
+                            .shadow(if focused {
+                                vec![
+                                    BoxShadow::new(px(0.0), px(0.0), theme.accent)
+                                        .spread_radius(px(1.5))
+                                        .inset(),
+                                    BoxShadow::new(px(0.0), px(2.0), theme.accent.alpha(0.25))
+                                        .blur_radius(px(3.0)),
+                                ]
+                            } else {
+                                vec![]
+                            })
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(icon(symbol, 14.0, theme.text_tertiary))
+                            .child(div().min_w_0().flex_1().child(input.clone()))
+                    };
 
                 let body = if mode == BranchPickerMode::Create {
                     div()
                         .w_full()
-                        .p(px(14.0))
+                        .p(px(5.0))
                         .child(
                             div()
                                 .flex()
@@ -196,17 +287,12 @@ impl Michelle {
                                 .child(tr!("branches.create_and_checkout")),
                         )
                         .child(
-                            div()
-                                .mt(px(12.0))
-                                .h(px(36.0))
-                                .px(px(10.0))
-                                .rounded(px(9.0))
-                                .border_1()
-                                .border_color(theme.border_strong)
-                                .bg(theme.surface)
-                                .flex()
-                                .items_center()
-                                .child(div().flex_1().min_w_0().child(create_input.clone())),
+                            picker_input(
+                                "branch-picker-create-input",
+                                &create_input,
+                                "arrow.triangle.branch",
+                            )
+                            .mt(px(12.0)),
                         )
                         .child(
                             div()
@@ -242,7 +328,6 @@ impl Michelle {
                             .w_full()
                             .h(px(height))
                             .flex_none()
-                            .px(px(4.0))
                             .child(
                                 list(branch_list.clone(), move |index, _window, _cx| {
                                     let Some(branch) = list_branches.get(index) else {
@@ -260,24 +345,23 @@ impl Michelle {
                                                     if name == &branch.name
                                             )
                                         });
-                                    let color = if disabled {
-                                        theme.text_ghost
-                                    } else {
-                                        theme.text
-                                    };
-                                    let row = SelectableRow::new(
-                                        SharedString::from(format!("branch-row-{}", branch.name)),
-                                        SharedString::from(branch.name.clone()),
+                                    let row = styled_branch_picker_row(
+                                        SelectableRow::new(
+                                            SharedString::from(format!(
+                                                "branch-row-{}",
+                                                branch.name
+                                            )),
+                                            SharedString::from(branch.name.clone()),
+                                        )
+                                        .selected(selected),
+                                        highlighted,
+                                        disabled,
+                                        &theme,
                                     )
-                                    .h(px(BRANCH_PICKER_ROW_HEIGHT))
-                                    .selected(selected)
-                                    .highlighted(highlighted)
-                                    .disabled(disabled)
-                                    .leading(icon(
-                                        "arrow.triangle.branch",
-                                        12.0,
-                                        color,
-                                    ));
+                                    .leading(
+                                        SfSymbol::new("arrow.triangle.branch")
+                                            .size(IconSize::Small),
+                                    );
                                     if disabled {
                                         row.into_any_element()
                                     } else {
@@ -308,17 +392,17 @@ impl Michelle {
 
                     let create_row = allow_create.then(|| {
                         let create_weak = weak.clone();
-                        SelectableRow::new(
-                            "create-workspace-branch",
-                            tr!("branches.create_and_checkout_ellipsis"),
-                        )
-                        .mx(px(4.0))
-                        .h(px(BRANCH_PICKER_ROW_HEIGHT))
-                        .highlighted(
+                        styled_branch_picker_row(
+                            SelectableRow::new(
+                                "create-workspace-branch",
+                                tr!("branches.create_and_checkout_ellipsis"),
+                            ),
                             highlight.and_then(|index| actions.get(index))
                                 == Some(&BranchPickerAction::Create),
+                            false,
+                            &theme,
                         )
-                        .leading(icon("plus", 12.0, theme.text_secondary))
+                        .leading(SfSymbol::new("plus").size(IconSize::Small))
                         .on_click(move |_, window, cx| {
                             let _ = create_weak.update(cx, |this, cx| {
                                 this.begin_branch_creation(window, cx);
@@ -331,35 +415,16 @@ impl Michelle {
                         .flex()
                         .flex_col()
                         .child(
-                            div()
-                                .h(px(52.0))
-                                .px(px(12.0))
-                                .pt(px(10.0))
-                                .pb(px(8.0))
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .w_full()
-                                        .h(px(34.0))
-                                        .px(px(10.0))
-                                        .rounded(px(9.0))
-                                        .bg(theme.surface)
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(8.0))
-                                        .child(icon("magnifyingglass", 15.0, theme.text_secondary))
-                                        .child(div().flex_1().min_w_0().child(search.clone())),
-                                ),
+                            picker_input("branch-picker-search", &search, "magnifyingglass")
+                                .mb(px(10.0)),
                         )
                         .child(
                             div()
-                                .px(px(14.0))
-                                .pt(px(3.0))
-                                .pb(px(7.0))
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::MEDIUM)
+                                .h(px(BRANCH_PICKER_ROW_HEIGHT))
+                                .px(px(10.0))
+                                .flex()
+                                .items_center()
+                                .text_style(TextStyle::SUBHEADLINE.bold())
                                 .text_color(theme.text_tertiary)
                                 .child(tr!("branches.title")),
                         )
@@ -368,22 +433,29 @@ impl Michelle {
                             element
                                 .child(div().mx(px(6.0)).my(px(4.0)).h(px(1.0)).bg(theme.border))
                                 .child(create_row)
-                                .child(div().h(px(4.0)))
                         })
                         .into_any_element()
                 };
 
                 div()
-                    .w(px(360.0))
+                    .w(px(320.0))
                     .max_h(px(390.0))
-                    .rounded(px(13.0))
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(theme.border_strong)
-                    .bg(theme.raised)
+                    .relative()
+                    .p(px(5.0))
+                    .rounded(px(12.0))
+                    .text_style(TextStyle::BODY)
                     .shadow_lg()
                     .flex()
                     .flex_col()
+                    .child(
+                        squircle()
+                            .rounded(px(12.0))
+                            .bg(theme.raised)
+                            .border(px(0.5))
+                            .border_color(theme.border_strong)
+                            .border_inside()
+                            .absolute_expand(),
+                    )
                     .on_action(move |_: &SelectNextEntry, _, cx| {
                         let _ = next_weak.update(cx, |this, cx| {
                             this.move_branch_picker_highlight("down", &next_actions, cx);
@@ -565,4 +637,26 @@ pub(super) fn subscribe_search(search_input: &Entity<TextInput>, cx: &mut Contex
         },
     )
     .detach();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn branch_picker_cannot_bypass_busy_or_pending_state() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        assert!(!branch_picker_enabled(None, false));
+        assert!(branch_picker_enabled(Some(&session), false));
+        assert!(!branch_picker_enabled(Some(&session), true));
+
+        session.status = SessionStatus::Working;
+        assert!(!branch_picker_enabled(Some(&session), false));
+        session.status = SessionStatus::Connecting;
+        assert!(!branch_picker_enabled(Some(&session), false));
+
+        session.status = SessionStatus::Idle;
+        session.workspace = SessionWorkspace::NewWorktree { base_branch: None };
+        assert!(branch_picker_enabled(Some(&session), false));
+    }
 }
