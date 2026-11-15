@@ -487,8 +487,6 @@ sidebar.new_group:
   en: New Group
 sidebar.new_group_name:
   en: New group
-sidebar.move_to_group:
-  en: Move to Group
 sidebar.remove_project_title:
   en: Remove project “%{name}”?
 sidebar.remove_project_description:

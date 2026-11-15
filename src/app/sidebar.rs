@@ -1530,39 +1530,7 @@ impl Michelle {
             )
             .icon(if pinned { "pin.slash" } else { "pin" }),
         );
-        let selected = self.state.sidebar_group_for_project(project);
-        let groups = self
-            .state
-            .sidebar_project_groups
-            .iter()
-            .map(|group| (Some(group.id), group.name.clone()))
-            .chain(std::iter::once((None, tr!("sidebar.projects"))))
-            .collect::<Vec<_>>();
-        items.push(MenuItem::Separator);
-        let remove = weak.clone();
-        items.push(MenuItem::submenu_with_value(
-            tr!("sidebar.move_to_group"),
-            groups
-                .iter()
-                .find(|(id, _)| *id == selected)
-                .map(|(_, name)| name.clone())
-                .unwrap_or_default(),
-            move |_| {
-                groups
-                    .iter()
-                    .map(|(id, name)| {
-                        let weak = weak.clone();
-                        let id = *id;
-                        MenuItem::new(name.clone(), move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.move_sidebar_project_to_collection(project, id, cx);
-                            });
-                        })
-                        .selected(id == selected)
-                    })
-                    .collect()
-            },
-        ));
+        let remove = weak;
         items.push(MenuItem::Separator);
         items.push(MenuItem::new(tr!("common.remove"), move |window, cx| {
             let _ = remove.update(cx, |this, cx| {
