@@ -295,18 +295,18 @@ mod tests {
         cx.simulate_event(stream.event(TouchPhase::Ended, start).unwrap());
         assert_eq!(clicks.get(), 1);
 
-        cx.simulate_event(stream.event(TouchPhase::Started, start).unwrap());
-        for y in [170.0, 140.0, 110.0] {
-            // GPUI estimates velocity using real Instant samples, rather than
-            // the test executor's virtual clock.
-            std::thread::sleep(Duration::from_millis(16));
-            cx.simulate_event(
-                stream
-                    .event(TouchPhase::Moved, point(px(100.0), px(y)))
-                    .unwrap(),
-            );
-        }
-        cx.simulate_event(stream.event(TouchPhase::Ended, stream.position).unwrap());
+        // GPUI samples real time; executor work between events can look like a stopped finger.
+        let end = point(px(100.0), px(110.0));
+        cx.update(|window, cx| {
+            for (phase, position) in [
+                (TouchPhase::Started, start),
+                (TouchPhase::Moved, end),
+                (TouchPhase::Ended, end),
+            ] {
+                let event = stream.event(phase, position).unwrap();
+                window.dispatch_event(PlatformInput::Touch(event), cx);
+            }
+        });
         let released = list.scroll_px_offset_for_scrollbar().y;
         assert!(released < px(0.0));
         assert_eq!(clicks.get(), 1, "a swipe must not click");

@@ -3,6 +3,13 @@ set -eu
 
 profile="${1:-debug}"
 cargo_target_dir="${CARGO_TARGET_DIR:-target}"
+codesign_options="runtime"
+codesign_timestamp="--timestamp"
+if [ "${MICHELLE_CODESIGN_SELF_SIGNED:-0}" = "1" ]; then
+  # Self-signed certificates have no Team ID for Cua library validation.
+  codesign_options="0"
+  codesign_timestamp="--timestamp=none"
+fi
 debug_identity_cache=".michelle-cache/codesign/debug-identity"
 codesign_identity_from_environment=0
 if [ -n "${MICHELLE_CODESIGN_IDENTITY:-}" ]; then
@@ -86,7 +93,7 @@ helper_fingerprint="$({
     "$cua_sdk_directory/cua-host.h" \
     resources/computer-use/CUA-LICENSE \
     resources/computer-use/Info.plist
-  printf '%s\n' "cua-in-process-v1" "$helper_name" "$bundle_identifier.computer-use" "$codesign_identity" "$(uname -m)-apple-macos13.0"
+  printf '%s\n' "cua-in-process-v1" "$helper_name" "$bundle_identifier.computer-use" "$codesign_identity" "$codesign_options" "$(uname -m)-apple-macos13.0"
   xcrun swiftc -version
 } | shasum -a 256 | awk '{ print $1 }')"
 helper_cache_root=".michelle-cache/computer-use/$profile"
@@ -128,11 +135,11 @@ if [ ! -d "$cached_helper_bundle" ]; then
     codesign --force --sign - "$cached_helper_contents/Frameworks/libcua_driver_sdk.dylib"
     codesign --force --sign - "$cached_helper_staging"
   elif [ "$profile" = "release" ]; then
-    codesign --force --options runtime --timestamp --sign "$codesign_identity" "$cached_helper_contents/Frameworks/libcua_driver_sdk.dylib"
-    codesign --force --options runtime --timestamp --sign "$codesign_identity" "$cached_helper_staging"
+    codesign --force --options "$codesign_options" "$codesign_timestamp" --sign "$codesign_identity" "$cached_helper_contents/Frameworks/libcua_driver_sdk.dylib"
+    codesign --force --options "$codesign_options" "$codesign_timestamp" --sign "$codesign_identity" "$cached_helper_staging"
   else
-    codesign --force --options runtime --sign "$codesign_identity" "$cached_helper_contents/Frameworks/libcua_driver_sdk.dylib"
-    codesign --force --options runtime --sign "$codesign_identity" "$cached_helper_staging"
+    codesign --force --options "$codesign_options" --sign "$codesign_identity" "$cached_helper_contents/Frameworks/libcua_driver_sdk.dylib"
+    codesign --force --options "$codesign_options" --sign "$codesign_identity" "$cached_helper_staging"
   fi
   mkdir -p "$helper_cache_root"
   mv "$helper_cache_staging" "$helper_cache_entry"
@@ -175,12 +182,12 @@ if [ "$codesign_identity" = "-" ]; then
     codesign --force --sign - "$bundle"
   fi
 elif [ "$profile" = "release" ]; then
-  codesign --force --options runtime --timestamp --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
-  codesign --force --options runtime --timestamp --identifier "$bundle_identifier.daemon" --sign "$codesign_identity" "$daemon_executable"
-  codesign --force --options runtime --timestamp --sign "$codesign_identity" "$bundle"
+  codesign --force --options "$codesign_options" "$codesign_timestamp" --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
+  codesign --force --options "$codesign_options" "$codesign_timestamp" --identifier "$bundle_identifier.daemon" --sign "$codesign_identity" "$daemon_executable"
+  codesign --force --options "$codesign_options" "$codesign_timestamp" --sign "$codesign_identity" "$bundle"
 else
-  codesign --force --options runtime --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
-  codesign --force --options runtime --sign "$codesign_identity" "$bundle"
+  codesign --force --options "$codesign_options" --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
+  codesign --force --options "$codesign_options" --sign "$codesign_identity" "$bundle"
 fi
 if [ "$profile" = "release" ]; then
   codesign --verify --strict --verbose=2 "$repl_executable"

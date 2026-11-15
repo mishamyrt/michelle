@@ -5,12 +5,14 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'release' && 'homebrew' || 'build' }}
   cancel-in-progress: false
 
 env:
@@ -19,6 +21,7 @@ env:
 jobs:
   version:
     name: Resolve version
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -82,6 +85,13 @@ jobs:
           rustup toolchain install 1.98.1 --profile minimal
           rustup default 1.98.1
 
+      - name: Install Metal toolchain
+        run: |
+          if ! xcrun --toolchain Metal metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun --toolchain Metal metal --version
+
       - uses: oven-sh/setup-bun@v2
 
       - name: Install create-dmg
@@ -93,41 +103,47 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: macos-latest-rust-1.98.1-release-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-rust-1.98.1-release-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            macos-latest-rust-1.98.1-release-
+            ${{ runner.os }}-${{ runner.arch }}-rust-1.98.1-release-
 
-      - name: Import Apple Developer Certificate
+      - name: Import self-signed code signing certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
-          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security set-keychain-settings -t 3600 -u build.keychain
-          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          security find-identity -v -p codesigning build.keychain
-          rm certificate.p12
+          : "${APPLE_CERTIFICATE:?Set APPLE_CERTIFICATE to a Base64-encoded .p12 with its private key}"
+          umask 077
+          certificate_path="$RUNNER_TEMP/certificate.p12"
+          keychain_path="$RUNNER_TEMP/build.keychain-db"
+          keychain_password=$(openssl rand -base64 24)
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" "$HOME/Library/Keychains/login.keychain-db"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 7200 "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path"
+          # Without -v: a self-signed identity need not be a trusted root.
+          identity=$(security find-identity -p codesigning "$keychain_path" \
+            | awk '/\) [0-9A-Fa-f]+ "/ { print $2; exit }')
+          if [[ ! "$identity" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+            echo "::error::The .p12 must contain a code signing certificate and its private key"
+            exit 1
+          fi
+          echo "MICHELLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+          rm -f "$certificate_path"
 
-      - name: Store notary credentials
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Build, sign, and package DMG
+        run: bun run release --local --self-signed
+
+      - name: Remove signing keychain
+        if: always()
         run: |
-          xcrun notarytool store-credentials NOTARY \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID"
-
-      - name: Release
-        env:
-          MICHELLE_SIGNING_IDENTITY: ${{ secrets.MICHELLE_SIGNING_IDENTITY }}
-        run: bun run release --local
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          if [ -f "$RUNNER_TEMP/build.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/build.keychain-db"
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
@@ -187,3 +203,57 @@ jobs:
             artifacts/*.dmg
             artifacts/*.md
             artifacts/*.zip
+
+  homebrew:
+    name: Publish Homebrew cask
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Download release DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" \
+            --pattern "Michelle-${TAG#v}.dmg" \
+            --dir assets \
+            --repo "$GITHUB_REPOSITORY"
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v6
+        with:
+          repository: mishamyrt/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Generate cask from published DMG
+        run: |
+          version="${TAG#v}"
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/Michelle-${version}.dmg"
+          curl --fail --location --silent --show-error "$url" --output "$RUNNER_TEMP/michelle-public.dmg"
+          checksum=$(sha256sum "assets/Michelle-${version}.dmg" | cut -d ' ' -f 1)
+          printf '%s  %s\n' "$checksum" "$RUNNER_TEMP/michelle-public.dmg" | sha256sum --check
+          mkdir -p homebrew-tap/Casks
+          bun scripts/homebrew-cask.ts "$TAG" "$checksum" "$url" > homebrew-tap/Casks/michelle.rb
+
+      - name: Publish cask update
+        working-directory: homebrew-tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/michelle.rb
+          if git diff --cached --quiet; then
+            echo "Cask already matches $TAG"
+            exit 0
+          fi
+          git -c commit.gpgsign=false commit -m "michelle ${TAG#v}"
+          git push

@@ -28,16 +28,15 @@ Usage:
   bun run release [options]
 
 The default run builds a signed, notarized DMG and zip archive, then uploads
-them with release notes to Cloudflare R2. Set MICHELLE_DOWNLOAD_URL_PREFIX to
-the bucket's public URL when publishing to R2. The GitHub release workflow uses
---local and publishes the files itself.
+them with release notes to Cloudflare R2. The GitHub release workflow uses
+--local and publishes the files itself. Download links point to GitHub Releases.
 
 Options:
   --local                       Build, notarize, and write the DMG + zip
                                 without publishing to R2
   --force                       Publish even if this version is already in R2
   --output <path>               DMG output path (default: dist/Michelle-<version>.dmg)
-  --signing-identity <name>     Developer ID Application identity selector
+  --signing-identity <name>     Code signing identity name or SHA-1 fingerprint
                                 (or MICHELLE_SIGNING_IDENTITY; required unless --adhoc)
   --notary-profile <name>       notarytool keychain profile
                                 (default: NOTARY; or MICHELLE_NOTARY_PROFILE)
@@ -48,15 +47,15 @@ Options:
   --skip-build                  Reuse target/release/michelle, michelle_js_repl, and
                                 michelle-daemon
   --skip-notarize               Unnotarized signed DMG (implies --local)
+  --self-signed                 Sign without hardened runtime or a timestamp
+                                (implies --skip-notarize and --local)
   --adhoc                       Ad-hoc sign, no notarization (implies --local)
   --help                        Show this help
 
 Environment:
-  MICHELLE_SIGNING_IDENTITY         Developer ID Application identity selector
+  MICHELLE_SIGNING_IDENTITY         Code signing identity name or SHA-1 fingerprint
   MICHELLE_R2_REMOTE                rclone remote name (default: r2)
   MICHELLE_R2_BUCKET                R2 bucket name (default: michelle-releases)
-  MICHELLE_DOWNLOAD_URL_PREFIX      base URL served by the bucket
-                                (default: this version's GitHub release URL)
 
 Before the first production release:
   xcrun notarytool store-credentials NOTARY   # notarization credentials
@@ -73,6 +72,7 @@ const { values } = parseArgs({
     "notary-profile": { type: "string" },
     output: { type: "string", short: "o" },
     "signing-identity": { type: "string" },
+    "self-signed": { type: "boolean" },
     "skip-build": { type: "boolean" },
     "skip-notarize": { type: "boolean" },
     "volume-name": { type: "string" },
@@ -122,7 +122,8 @@ function derivedBuildNumber(version: string): string {
 }
 
 const adhoc = values.adhoc ?? false;
-const skipNotarize = values["skip-notarize"] ?? false;
+const selfSigned = values["self-signed"] ?? false;
+const skipNotarize = selfSigned || (values["skip-notarize"] ?? false);
 const configuredSigningIdentity =
   values["signing-identity"] ?? process.env.MICHELLE_SIGNING_IDENTITY;
 const notaryProfile =
@@ -146,6 +147,9 @@ const rcloneFlags = ["--s3-no-check-bucket"];
 
 if (adhoc && values["signing-identity"]) {
   throw new Error("Use either --adhoc or --signing-identity, not both.");
+}
+if (adhoc && selfSigned) {
+  throw new Error("Use either --adhoc or --self-signed, not both.");
 }
 if (!adhoc && !configuredSigningIdentity) {
   throw new Error(
@@ -190,9 +194,7 @@ if (!cargoPackage) {
 }
 
 const version = cargoPackage.version;
-const downloadUrlPrefix =
-  process.env.MICHELLE_DOWNLOAD_URL_PREFIX ??
-  `https://github.com/mishamyrt/michelle/releases/download/v${version}/`;
+const downloadUrlPrefix = `https://github.com/mishamyrt/michelle/releases/download/v${version}/`;
 const shortVersion = version.split("-", 1)[0];
 const buildNumber = explicitBuildNumber ?? derivedBuildNumber(version);
 const dmgName = `${appName}-${version}.dmg`;
@@ -214,8 +216,7 @@ if (publishing) {
     if (detail.includes("directory not found")) {
       throw new Error(
         `R2 bucket "${r2Bucket}" does not exist on remote "${r2Remote}". ` +
-          "Create it in the Cloudflare dashboard and set " +
-          "MICHELLE_DOWNLOAD_URL_PREFIX to its public URL, then re-run.",
+          "Create it in the Cloudflare dashboard, then re-run.",
       );
     }
     throw new Error(`Cannot reach ${r2Destination}: ${detail}`);
@@ -376,7 +377,7 @@ try {
       ? "Assembling the app bundle"
       : "Building and assembling the app bundle",
   );
-  await $`env MICHELLE_CODESIGN_IDENTITY=${identity} MICHELLE_SKIP_CARGO_BUILD=${values["skip-build"] ? "1" : "0"} ${join(projectRoot, "scripts", "bundle.sh")} release`;
+  await $`env MICHELLE_CODESIGN_IDENTITY=${identity} MICHELLE_CODESIGN_SELF_SIGNED=${selfSigned ? "1" : "0"} MICHELLE_SKIP_CARGO_BUILD=${values["skip-build"] ? "1" : "0"} ${join(projectRoot, "scripts", "bundle.sh")} release`;
   for (const artifact of [
     join(contentsDirectory, "MacOS", executableName),
     bundledDaemonExecutable,
@@ -403,7 +404,7 @@ try {
   if (adhoc) {
     await $`codesign --force --sign - ${appBundle}`;
   } else {
-    await $`codesign --force --options runtime --timestamp --sign ${identity} ${appBundle}`;
+    await $`codesign --force --options ${selfSigned ? "0" : "runtime"} ${selfSigned ? "--timestamp=none" : "--timestamp"} --sign ${identity} ${appBundle}`;
   }
   await $`codesign --verify --deep --strict --verbose=2 ${appBundle}`;
 
@@ -422,7 +423,7 @@ try {
   if (adhoc) {
     await $`codesign --force --sign - ${outputPath}`;
   } else {
-    await $`codesign --force --timestamp --sign ${identity} ${outputPath}`;
+    await $`codesign --force ${selfSigned ? "--timestamp=none" : "--timestamp"} --sign ${identity} ${outputPath}`;
   }
   await $`codesign --verify --verbose=2 ${outputPath}`;
 
@@ -517,8 +518,8 @@ try {
     );
   } else {
     console.warn(
-      "\nCreated a Developer ID-signed DMG without notarization. " +
-        "Gatekeeper will reject it on other Macs until it is notarized.",
+      "\nCreated a signed DMG without notarization. " +
+        "Gatekeeper may block it on other Macs.",
     );
   }
 

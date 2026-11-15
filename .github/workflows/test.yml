@@ -1,8 +1,9 @@
-name: Tests
+name: Lint and tests
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,8 +24,15 @@ jobs:
 
       - name: Install Rust
         run: |
-          rustup toolchain install 1.98.1 --profile minimal
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
           rustup default 1.98.1
+
+      - name: Install Metal toolchain
+        run: |
+          if ! xcrun --toolchain Metal metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun --toolchain Metal metal --version
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -36,12 +44,24 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: macos-latest-rust-1.98.1-cargo-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-rust-1.98.1-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            macos-latest-rust-1.98.1-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-rust-1.98.1-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets
+
+      - name: Test release scripts
+        run: bun test scripts
+
+      - name: Check translations
+        run: bun scripts/check-locales.ts
 
       - name: Run tests
-        run: cargo test --locked
+        run: cargo test --locked --workspace
 
       - name: Verify in-process Cua SDK and REPL lifecycle
         run: |
