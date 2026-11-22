@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::model::{AgentSession, MessageRole};
+use crate::model::{AgentSession, MessageRole, ReviewReply};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ComposerDraftAttachment {
@@ -23,11 +23,13 @@ pub struct ComposerDraft {
     pub text: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<ComposerDraftAttachment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_reply: Option<ReviewReply>,
 }
 
 impl ComposerDraft {
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.attachments.is_empty()
+        self.text.is_empty() && self.attachments.is_empty() && self.review_reply.is_none()
     }
 }
 

@@ -7,6 +7,7 @@ pub(in crate::app) struct ComposerModel {
     pub(in crate::app) draft_store: ComposerDraftStore,
     pub(in crate::app) draft_save_generation: u64,
     pub(in crate::app) attachments: Vec<ComposerAttachment>,
+    pub(in crate::app) review_reply: Option<crate::model::ReviewReply>,
     pub(in crate::app) sources: sources::ComposerSources,
 }
 
@@ -40,6 +41,8 @@ pub(in crate::app) struct ComposerSubmission {
     pub(in crate::app) prompt: String,
     pub(in crate::app) display_content: Option<String>,
     pub(in crate::app) attachments: Vec<MessageAttachment>,
+    pub(in crate::app) review_reply: Option<crate::model::ReviewReply>,
+    pub(in crate::app) review_fix: Option<crate::app::right_panel::annotations::ReviewFix>,
 }
 
 impl ComposerSubmission {
@@ -48,11 +51,16 @@ impl ComposerSubmission {
             prompt,
             display_content: None,
             attachments: Vec::new(),
+            review_reply: None,
+            review_fix: None,
         }
     }
 
     pub(in crate::app) fn into_queued_message(self) -> QueuedMessage {
-        QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments)
+        let mut message =
+            QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments);
+        message.review_reply = self.review_reply;
+        message
     }
 
     pub(in crate::app) fn from_queued_message(message: QueuedMessage) -> Self {
@@ -60,6 +68,8 @@ impl ComposerSubmission {
             prompt: message.content,
             display_content: message.display_content,
             attachments: message.attachments,
+            review_reply: message.review_reply,
+            review_fix: None,
         }
     }
 
@@ -114,6 +124,22 @@ impl Michelle {
         if self.model_picker_has_no_providers() {
             return None;
         }
+        if self
+            .composer_model
+            .review_reply
+            .as_ref()
+            .is_some_and(|reply| {
+                self.selected_session()
+                    .is_none_or(|session| !session.accepts_review_reply(reply.thread))
+            })
+        {
+            self.composer_ui
+                .input
+                .update(cx, |input, cx| input.set_content(prompt.to_owned(), cx));
+            self.show_toast(tr!("review.chat_context_unavailable"));
+            cx.notify();
+            return None;
+        }
         if prompt.trim() == "/compact"
             && self
                 .selected_session()
@@ -152,11 +178,14 @@ impl Michelle {
             .collect::<Vec<_>>();
         let submission = merged_submission(prompt, &mentions)?;
         let display_content = (!attachments.is_empty()).then(|| prompt.trim().to_owned());
+        let review_reply = self.composer_model.review_reply.take();
         self.discard_current_composer_draft(cx);
         Some(ComposerSubmission {
             prompt: submission,
             display_content,
             attachments,
+            review_reply,
+            review_fix: None,
         })
     }
 
@@ -294,6 +323,7 @@ impl Michelle {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        self.composer_model.review_reply = submission.review_reply;
         self.composer_model.attachments = submission
             .attachments
             .into_iter()
@@ -363,7 +393,9 @@ impl Michelle {
                 // the text field is empty. Preserve the shortcut's
                 // previous no-op behavior until that draft is sent or
                 // cleared.
-                if self.composer_model.attachments.is_empty() {
+                if self.composer_model.attachments.is_empty()
+                    && self.composer_model.review_reply.is_none()
+                {
                     self.steer_oldest_queued_message(cx);
                 }
             }

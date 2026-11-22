@@ -235,6 +235,7 @@ impl Michelle {
         let crate::persistence::ComposerDraft {
             text: initial_composer_text,
             attachments: initial_composer_attachments,
+            review_reply: initial_review_reply,
         } = initial_composer_draft;
         if !initial_composer_text.is_empty() {
             composer.update(cx, |input, cx| input.set_content(initial_composer_text, cx));
@@ -727,6 +728,10 @@ impl Michelle {
                 right_panel_model: right_panel::model::RightPanelModel {
                     session_states: HashMap::new(),
                     file_editors: HashMap::new(),
+                    reviews: HashMap::new(),
+                    review_open: false,
+                    review_selection: None,
+                    review_editor: None,
                     diff_source: ReviewDiffSource::default(),
                     diff_snapshot: None,
                     diff_loading: false,
@@ -776,6 +781,7 @@ impl Michelle {
                     navigation_previews: RefCell::new(HashMap::new()),
                     assistant_footer_cache: RefCell::new(HashMap::new()),
                     assistant_footer_fingerprint: Cell::new(None),
+                    chat_reviews: Default::default(),
                     message_markdown: RefCell::new(HashMap::new()),
                     activity_markdown: RefCell::new(HashMap::new()),
                     reasoning_window_starts: RefCell::new(HashMap::new()),
@@ -791,6 +797,7 @@ impl Michelle {
                     copied_message_generation: 0,
                     copied_activity_feedback: HashMap::new(),
                     copied_activity_generation: 0,
+                    review_findings_expanded: HashMap::new(),
                     message_edit: None,
                     rows: transcript_rows,
                     anchored_transcript_rows,
@@ -845,6 +852,7 @@ impl Michelle {
                     draft_store: composer_draft_store,
                     draft_save_generation: 0,
                     attachments: composer_attachments,
+                    review_reply: initial_review_reply,
                     sources: composer::sources::ComposerSources {
                         slash_commands: QueryCache::new(2 * MAX_CACHED_WORKSPACES),
                         slash_command_index: Rc::new(Vec::new()),

@@ -982,6 +982,8 @@ impl Backend for MichelleBackend {
                     prompt,
                     turn_id,
                     message_id,
+                    review_reply,
+                    ..
                 } = &command
                 {
                     // Publish the submission into the runtime's event stream
@@ -995,6 +997,7 @@ impl Backend for MichelleBackend {
                         message: prompt.clone(),
                         turn_id: turn_id.unwrap_or_else(Uuid::new_v4),
                         message_id: message_id.unwrap_or_else(Uuid::new_v4),
+                        review_thread: review_reply.as_ref().map(|reply| reply.thread),
                     })?)?;
                 }
                 handle_driver_command(&driver, command)
@@ -1049,6 +1052,7 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
         existing.service_tier = incoming.service_tier;
         existing.context_window = incoming.context_window;
         existing.agent_preset = incoming.agent_preset;
+        existing.dismissed_review_findings = incoming.dismissed_review_findings;
         existing.updated_at = incoming.updated_at;
         existing.last_reply_at = incoming.last_reply_at.or(existing.last_reply_at);
     }
@@ -1851,7 +1855,18 @@ fn handle_driver_command(
     command: Command,
 ) -> anyhow::Result<ResponsePayload> {
     match command {
-        Command::Prompt { prompt, .. } => driver.prompt(prompt),
+        Command::Prompt {
+            prompt,
+            review_reply,
+            review_fixes,
+            ..
+        } => {
+            let prompt = match review_fixes {
+                Some(fixes) => crate::review_chat::fix_prompt(&prompt, &fixes),
+                None => crate::review_chat::provider_prompt(prompt, review_reply),
+            };
+            driver.prompt(prompt);
+        }
         Command::Steer { prompt } => driver.steer(prompt),
         Command::Cancel => driver.cancel(),
         Command::CancelComputerUse => driver.cancel_computer_use(),
@@ -2047,9 +2062,15 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             message,
             turn_id,
             message_id,
+            review_thread,
         } => (
             "promptSubmitted",
-            json!({ "message": message, "turnId": turn_id, "messageId": message_id }),
+            serde_json::to_value(SubmittedPromptWire {
+                message,
+                turn_id,
+                message_id,
+                review_thread,
+            })?,
         ),
         DriverEvent::SteerAccepted { message } => ("steerAccepted", json!({ "message": message })),
         DriverEvent::SteerRejected { message, reason } => (
@@ -2134,6 +2155,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 message: submitted.message,
                 turn_id: submitted.turn_id,
                 message_id: submitted.message_id,
+                review_thread: submitted.review_thread,
             }
         }
         "steerAccepted" => {
@@ -2171,12 +2193,14 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SubmittedPromptWire {
     message: String,
     turn_id: Uuid,
     message_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_thread: Option<michelle_protocol::model::ReviewThreadRef>,
 }
 
 #[derive(Deserialize)]
@@ -2585,10 +2609,15 @@ mod tests {
     fn wire_event_round_trip_preserves_prompt_submission_identity() {
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
+        let review = michelle_protocol::model::ReviewThreadRef {
+            message_id: Uuid::new_v4(),
+            finding_index: 1,
+        };
         let wire = event_to_wire(DriverEvent::PromptSubmitted {
             message: "ship it".into(),
             turn_id,
             message_id,
+            review_thread: Some(review),
         })
         .unwrap();
         assert_eq!(wire.kind, "promptSubmitted");
@@ -2597,8 +2626,8 @@ mod tests {
         assert_eq!(wire.payload["messageId"], message_id.to_string());
         assert!(matches!(
             event_from_wire(wire).unwrap(),
-            DriverEvent::PromptSubmitted { message, turn_id: decoded_turn, message_id: decoded_message }
-                if message == "ship it" && decoded_turn == turn_id && decoded_message == message_id
+            DriverEvent::PromptSubmitted { message, turn_id: decoded_turn, message_id: decoded_message, review_thread: Some(decoded_review) }
+                if message == "ship it" && decoded_turn == turn_id && decoded_message == message_id && decoded_review == review
         ));
     }
 }

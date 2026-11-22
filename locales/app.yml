@@ -1759,6 +1759,99 @@ file_picker.file:
 file_picker.typed_file:
   en: "%{type} file"
 
+review.chat_reply:
+  en: "Reply"
+review.chat_request_fix:
+  en: Fix this finding.
+review.chat_no_open:
+  en: There are no open findings to fix.
+review.chat_remove_context:
+  en: Remove attached finding
+review.chat_context_unavailable:
+  en: This finding is unavailable. Remove it from the draft or reopen it in the review.
+review.title:
+  en: "Review"
+review.start:
+  en: "Start New Review"
+review.resume:
+  en: "Open Last Review"
+review.close:
+  en: "Close Review"
+review.add:
+  en: "Add Comment"
+review.comment_placeholder:
+  en: "Write a review comment…"
+review.save_draft:
+  en: "Save Draft"
+review.draft:
+  en: "Draft"
+review.you:
+  en: "You"
+review.agent:
+  en: "Codex"
+review.run_codex:
+  en: "Review with Codex"
+review.ask_codex:
+  en: "Ask Codex"
+review.working:
+  en: "Waiting for Codex…"
+review.no_findings:
+  en: "Codex found no issues."
+review.reply:
+  en: "Reply"
+review.publish:
+  en: "Open Finding"
+review.dismiss:
+  en: "Dismiss"
+review.dismissed:
+  en: "Dismissed"
+review.reopen:
+  en: "Reopen"
+review.fix:
+  en: "Fix"
+review.fix_all:
+  en: "Fix Open Findings (%{count})"
+review.fix_sent:
+  en: "Fix requested"
+review.fix_diff:
+  en: "Open Fix Diff"
+review.fix_not_ready:
+  en: "The fix diff is not available yet."
+review.bulk_selection:
+  en: "Selected findings: %{count}"
+review.send_fixes:
+  en: "Request Fixes"
+review.included:
+  en: "Included"
+review.excluded:
+  en: "Excluded"
+review.fix_prompt:
+  en: "Fix review findings (%{count})"
+review.select_line:
+  en: "Select line %{line} for review"
+review.unavailable:
+  en: "No saved review is available for this workspace."
+review.save_failed:
+  en: "Could not save review: %{error}"
+review.agent_failed:
+  en: "Could not complete review: %{error}"
+review.fix_failed:
+  en: "Could not start review fixes: %{error}"
+review.open_count:
+  en: "Open findings: %{count}"
+review.checkout:
+  en: "Switch to %{branch} to fix"
+review.wait_for_workspace:
+  en: "Open an idle task in the reviewed workspace to request fixes."
+
+diff.compare_branches:
+  en: Compare Branches…
+diff.swap_branches:
+  en: Swap Branches
+diff.review_base:
+  en: "Base · %{branch}"
+diff.review_target:
+  en: "Review · %{branch}"
 diff.no_changes:
   en: No changes
 diff.no_changes_description:

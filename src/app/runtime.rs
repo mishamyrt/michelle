@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) mod model;
 
-fn workspace_ack(
+pub(super) fn workspace_ack(
     workspace: &michelle_client::WorkspaceClient,
     operation: michelle_client::WorkspaceOperation,
 ) -> anyhow::Result<()> {
@@ -174,6 +174,7 @@ fn prepare_submission(
     session_id: Uuid,
     prompt: &str,
     turn_count: usize,
+    review_guard: Option<michelle_client::workspace::ReviewFixGuard>,
 ) -> anyhow::Result<PreparedSubmission> {
     let workspace = match workspace {
         SessionWorkspace::NewWorktree { base_branch } => {
@@ -200,6 +201,15 @@ fn prepare_submission(
         workspace => workspace,
     };
     let project_path = workspace.path().unwrap_or(&project.path);
+    if let Some(guard) = review_guard {
+        workspace_ack(
+            &workspace_client,
+            michelle_client::WorkspaceOperation::ValidateReviewFix {
+                cwd: project_path.to_path_buf(),
+                guard,
+            },
+        )?;
+    }
 
     // Every turn gets its own immutable starting snapshot. Reusing the prior
     // response's ending ref would attribute branch switches or terminal edits
@@ -1029,7 +1039,7 @@ impl Michelle {
                 .remove(session_id);
             self.sessions.runtime.runtimes.remove(session_id);
             self.sessions.runtime.background_work.remove(session_id);
-            self.remove_right_panel_session_state(*session_id);
+            self.remove_right_panel_session_state(*session_id, cx);
             self.task_switcher.remove(*session_id);
         }
         self.state.projects = snapshot.projects;
@@ -1767,6 +1777,8 @@ impl Michelle {
                 prompt: provider_prompt,
                 display_content,
                 attachments: edit.attachments,
+                review_fix: None,
+                review_reply: None,
             },
             cx,
         );
@@ -2434,6 +2446,7 @@ impl Michelle {
                         session_id,
                         &naming_prompt,
                         next_turn_count,
+                        None,
                     )
                 })
                 .await;
@@ -2605,6 +2618,12 @@ impl Michelle {
         let Some(session) = self.selected_session().cloned() else {
             return;
         };
+        if submission.review_reply.is_some()
+            || self.chat_review_fixes(&session, &submission).is_some()
+        {
+            self.submit_submission_for_session(session.id, submission, cx);
+            return;
+        }
         if !session.is_busy() {
             self.submit_composer_submission(submission, cx);
             return;
@@ -2683,6 +2702,24 @@ impl Michelle {
         else {
             return;
         };
+        if submission
+            .review_reply
+            .as_ref()
+            .is_some_and(|reply| !session.accepts_review_reply(reply.thread))
+        {
+            return;
+        }
+        if submission.review_fix.is_some()
+            && (session.is_busy()
+                || !session.queued_messages.is_empty()
+                || self.ending_checkpoint_pending(session_id)
+                || self.goal_model.runtime_starts.contains(&session_id)
+                || matches!(session.workspace, SessionWorkspace::NewWorktree { .. }))
+        {
+            self.show_toast(tr!("review.wait_for_workspace"));
+            cx.notify();
+            return;
+        }
         if self.ending_checkpoint_pending(session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
@@ -2702,6 +2739,14 @@ impl Michelle {
         }
         let prompt = submission.prompt.clone();
         let human_prompt = submission.human_prompt();
+        let review_fixes = self.chat_review_fixes(session, &submission);
+        if review_fixes.as_deref() == Some("") {
+            if selected {
+                self.show_toast(tr!("review.chat_no_open"));
+                cx.notify();
+            }
+            return;
+        }
         let next_turn_count = session.turns.len() + 1;
         let project_id = session.project_id;
         let workspace = session.workspace.clone();
@@ -2750,6 +2795,9 @@ impl Michelle {
                 submission.display_content.clone(),
                 submission.attachments.clone(),
             );
+            if let Some(turn) = session.turns.last_mut() {
+                turn.review_thread = submission.review_reply.as_ref().map(|reply| reply.thread);
+            }
             session.status = SessionStatus::Connecting;
             session.updated_at = unix_time();
             selected.then_some(TranscriptAnchor {
@@ -2797,6 +2845,7 @@ impl Michelle {
         cx.notify();
 
         let preparation_prompt = human_prompt;
+        let review_guard = submission.review_fix.as_ref().map(|fix| fix.guard.clone());
         let workspace_client = michelle_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |michelle, cx| {
             let prepared = cx
@@ -2810,11 +2859,18 @@ impl Michelle {
                         session_id,
                         &preparation_prompt,
                         next_turn_count,
+                        review_guard,
                     )
                 })
                 .await;
             let _ = michelle.update(cx, move |michelle, cx| {
-                michelle.finish_submission_preparation(session_id, submission, prepared, cx);
+                michelle.finish_submission_preparation(
+                    session_id,
+                    submission,
+                    prepared,
+                    review_fixes,
+                    cx,
+                );
             });
         })
         .detach();
@@ -2825,6 +2881,7 @@ impl Michelle {
         session_id: Uuid,
         submission: ComposerSubmission,
         prepared: anyhow::Result<PreparedSubmission>,
+        review_fixes: Option<String>,
         cx: &mut Context<Self>,
     ) {
         if !self
@@ -2873,8 +2930,12 @@ impl Michelle {
                         self.transcript_ui.anchor_following.set(false);
                     }
                     self.splice_transcript_rows_after_visibility_change(&previous_kinds);
-                    self.restore_composer_submission(submission, cx);
-                    self.show_toast(tr!("errors.create_worktree", error = error));
+                    if submission.review_fix.is_some() {
+                        self.show_toast(tr!("review.fix_failed", error = error));
+                    } else {
+                        self.restore_composer_submission(submission, cx);
+                        self.show_toast(tr!("errors.create_worktree", error = error));
+                    }
                 }
                 cx.notify();
                 return;
@@ -2961,7 +3022,11 @@ impl Michelle {
         // while templates expand and skills adopt provider-native syntax.
         // Claude's commands pass through untouched; its CLI owns expansion.
         let prompt = submission.prompt;
-        let driver_prompt = self.resolve_provider_submission(provider, &prompt);
+        let driver_prompt = if submission.review_reply.is_some() {
+            prompt
+        } else {
+            self.resolve_provider_submission(provider, &prompt)
+        };
         // The turn and its user message landed at accept time. Their ids go
         // with the prompt so every other client attached to the runtime
         // mirrors the same rows instead of minting its own.
@@ -2974,7 +3039,18 @@ impl Michelle {
             .unwrap_or((None, None));
         let mut failed_to_start = false;
         match driver {
-            Ok(driver) => driver.prompt(driver_prompt, turn_id, message_id),
+            Ok(driver) => {
+                driver.prompt(
+                    driver_prompt,
+                    turn_id,
+                    message_id,
+                    submission.review_reply,
+                    review_fixes,
+                );
+                if let (Some(turn), Some(fix)) = (turn_id, submission.review_fix) {
+                    self.record_review_fix(session_id, turn, fix, cx);
+                }
+            }
             Err(error) => {
                 failed_to_start = true;
                 let message = tr!("errors.start_agent", error = error);

@@ -1215,6 +1215,60 @@ fn codex_title_turn_params(thread_id: &str, user_message: &str) -> Value {
 /// Codex Desktop's client-owned behavior with an isolated ephemeral turn, then
 /// hand the result back to the main writer for `thread/name/set`.
 fn generate_codex_title(binary: &Path, cwd: &Path, prompt: &str) -> anyhow::Result<String> {
+    let raw = run_codex_one_shot(
+        binary,
+        cwd,
+        "michelle-title",
+        codex_title_thread_params(cwd),
+        |thread_id| codex_title_turn_params(thread_id, prompt),
+        CODEX_TITLE_TIMEOUT,
+    )?;
+    normalize_codex_title(&raw).ok_or_else(|| anyhow!("Codex returned an empty task title"))
+}
+
+pub(crate) fn review_snapshot(
+    binary: &Path,
+    cwd: &Path,
+    model: Option<&str>,
+    instructions: &str,
+    prompt: &str,
+    schema: Value,
+) -> anyhow::Result<String> {
+    let mut thread_params = codex_title_thread_params(cwd);
+    thread_params["serviceName"] = json!("michelle-review");
+    thread_params["baseInstructions"] = json!(instructions);
+    thread_params["developerInstructions"] = json!(instructions);
+    match model {
+        Some(model) => thread_params["model"] = json!(model),
+        None => {
+            thread_params.as_object_mut().unwrap().remove("model");
+        }
+    }
+    run_codex_one_shot(
+        binary,
+        cwd,
+        "michelle-review",
+        thread_params,
+        |thread_id| {
+            let mut params = codex_title_turn_params(thread_id, prompt);
+            let params_object = params.as_object_mut().unwrap();
+            params_object.remove("effort");
+            params_object.insert("outputSchema".to_owned(), schema.clone());
+            params
+        },
+        Duration::from_secs(105),
+    )
+}
+
+fn run_codex_one_shot(
+    binary: &Path,
+    cwd: &Path,
+    client: &str,
+    thread_params: Value,
+    turn_params: impl FnOnce(&str) -> Value,
+    timeout: Duration,
+) -> anyhow::Result<String> {
+    let mut turn_params = Some(turn_params);
     let mut command = crate::command_env::command(binary);
     let command = command
         .args(["app-server", "--stdio"])
@@ -1222,19 +1276,18 @@ fn generate_codex_title(binary: &Path, cwd: &Path, prompt: &str) -> anyhow::Resu
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child =
-        crate::command_env::spawn(command).context("failed to start Codex title generation")?;
+    let mut child = crate::command_env::spawn(command).context("failed to start Codex request")?;
     let mut stdin = child
         .stdin
         .take()
-        .ok_or_else(|| anyhow!("Codex title generation stdin is unavailable"))?;
+        .ok_or_else(|| anyhow!("Codex request stdin is unavailable"))?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| anyhow!("Codex title generation stdout is unavailable"))?;
+        .ok_or_else(|| anyhow!("Codex request stdout is unavailable"))?;
     let (messages, message_rx) = unbounded::<Value>();
     let reader = thread::Builder::new()
-        .name("michelle-codex-title-reader".into())
+        .name("michelle-codex-one-shot-reader".into())
         .spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if let Ok(value) = serde_json::from_str::<Value>(&line) {
@@ -1251,8 +1304,8 @@ fn generate_codex_title(binary: &Path, cwd: &Path, prompt: &str) -> anyhow::Resu
                 "id": 0,
                 "params": {
                     "clientInfo": {
-                        "name": "michelle-title",
-                        "title": "Michelle Title",
+                        "name": client,
+                        "title": client,
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "capabilities": {"experimentalApi": true}
@@ -1266,40 +1319,50 @@ fn generate_codex_title(binary: &Path, cwd: &Path, prompt: &str) -> anyhow::Resu
             &json!({
                 "method": "thread/start",
                 "id": 1,
-                "params": codex_title_thread_params(cwd)
+                "params": thread_params
             }),
         )?;
 
-        let deadline = Instant::now() + CODEX_TITLE_TIMEOUT;
+        let deadline = Instant::now() + timeout;
         let mut title_thread_id = None::<String>;
         let mut generated = None::<String>;
         loop {
             let remaining = deadline
                 .checked_duration_since(Instant::now())
-                .ok_or_else(|| anyhow!("Codex title generation timed out"))?;
+                .ok_or_else(|| anyhow!("Codex request timed out"))?;
             let value = message_rx
                 .recv_timeout(remaining)
-                .context("Codex title generation stopped before completion")?;
+                .context("Codex request stopped before completion")?;
 
             if value.get("id").and_then(Value::as_u64) == Some(1) && value.get("method").is_none() {
                 if let Some(error) = value.pointer("/error/message").and_then(Value::as_str) {
-                    return Err(anyhow!("Codex could not open a title thread: {error}"));
+                    return Err(anyhow!("Codex could not open an isolated thread: {error}"));
                 }
                 let thread_id = value
                     .pointer("/result/thread/id")
                     .and_then(Value::as_str)
                     .ok_or_else(|| anyhow!("Codex returned no title thread ID"))?
                     .to_owned();
+                let Some(turn_params) = turn_params.take() else {
+                    continue;
+                };
                 title_thread_id = Some(thread_id.clone());
                 write_json_line(
                     &mut stdin,
                     &json!({
                         "method": "turn/start",
                         "id": 2,
-                        "params": codex_title_turn_params(&thread_id, prompt)
+                        "params": turn_params(&thread_id)
                     }),
                 )?;
                 continue;
+            }
+
+            if value.get("id").and_then(Value::as_u64) == Some(2)
+                && value.get("method").is_none()
+                && let Some(error) = value.pointer("/error/message").and_then(Value::as_str)
+            {
+                return Err(anyhow!("Codex could not start the request: {error}"));
             }
 
             if value.get("method").and_then(Value::as_str) == Some("item/completed")
@@ -1325,13 +1388,10 @@ fn generate_codex_title(binary: &Path, cwd: &Path, prompt: &str) -> anyhow::Resu
                     let message = value
                         .pointer("/params/turn/error/message")
                         .and_then(Value::as_str)
-                        .unwrap_or("the title turn did not complete");
-                    return Err(anyhow!("Codex title generation failed: {message}"));
+                        .unwrap_or("the isolated turn did not complete");
+                    return Err(anyhow!("Codex request failed: {message}"));
                 }
-                return generated
-                    .as_deref()
-                    .and_then(normalize_codex_title)
-                    .ok_or_else(|| anyhow!("Codex returned an empty task title"));
+                return generated.ok_or_else(|| anyhow!("Codex returned an empty result"));
             }
         }
     })();

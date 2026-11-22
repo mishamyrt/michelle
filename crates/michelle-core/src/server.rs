@@ -1586,6 +1586,22 @@ mod tests {
             DaemonClient::connect(&address.to_string(), "wrong-secret".into()).is_err(),
             "the server must reject a client before it can issue requests"
         );
+        let (mut old_client, _) = tungstenite::connect(format!("ws://{address}/v1")).unwrap();
+        write_json(
+            &mut old_client,
+            &ClientMessage::Hello {
+                protocol_version: 7,
+                token: "secret".into(),
+                client_id: Uuid::new_v4(),
+                resume_from: Vec::new(),
+            },
+        )
+        .unwrap();
+        let rejection = old_client.read().unwrap().into_text().unwrap();
+        assert!(matches!(
+            serde_json::from_str::<ServerMessage>(rejection.as_str()).unwrap(),
+            ServerMessage::Rejected { message } if message.contains("protocol 7 is unsupported")
+        ));
         let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
         let session_id = Uuid::new_v4();
         let runtime_id = Uuid::new_v4();
@@ -1708,6 +1724,8 @@ mod tests {
                     prompt: "streamed from the first client".into(),
                     turn_id: None,
                     message_id: None,
+                    review_reply: None,
+                    review_fixes: None,
                 },
             )
             .unwrap();
@@ -2431,6 +2449,8 @@ mod tests {
                     prompt: "after start".into(),
                     turn_id: None,
                     message_id: None,
+                    review_reply: None,
+                    review_fixes: None,
                 },
             },
             second_client_outgoing,

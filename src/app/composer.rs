@@ -71,6 +71,53 @@ impl Michelle {
         }
     }
 
+    fn render_composer_review_reply(
+        &self,
+        reply: &crate::model::ReviewReply,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let label = SharedString::from(reply.finding.lines().next().unwrap_or_default().to_owned());
+        div().px(px(16.0)).pb(px(4.0)).flex().child(
+            div()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .pl(px(8.0))
+                .pr(px(2.0))
+                .rounded(px(6.0))
+                .squircle()
+                .bg(theme.overlay)
+                .text_style(TextStyle::SUBHEADLINE)
+                .text_color(theme.text_secondary)
+                .child(icon("bubble.left", 11.0, theme.text_secondary))
+                .child(
+                    div()
+                        .id("composer-review-finding")
+                        .min_w_0()
+                        .truncate()
+                        .tooltip(Tooltip::text(label.clone()))
+                        .child(label),
+                )
+                .child(
+                    IconButton::new(
+                        "composer-review-remove",
+                        icon("xmark", 9.0, theme.text_secondary),
+                    )
+                    .size(px(22.0))
+                    .flex_none()
+                    .tooltip(tr!("review.chat_remove_context"))
+                    .on_activation(cx, |this, window, cx| {
+                        this.composer_model.review_reply = None;
+                        this.schedule_composer_draft_save(cx);
+                        window.focus(&this.composer_focus(cx), cx);
+                        cx.notify();
+                    }),
+                ),
+        )
+    }
+
     pub(super) fn toggle_composer_menu(
         &self,
         id: &str,
@@ -1233,7 +1280,12 @@ impl Michelle {
             } else {
                 message.visible_content().to_owned()
             };
-            let steer_control = steerable.then(|| {
+            let steer_control = (steerable
+                && message.review_reply.is_none()
+                && !transcript_view::review::is_explicit_review_fix_request(
+                    message.visible_content(),
+                ))
+            .then(|| {
                 div()
                     .id(SharedString::from(format!(
                         "queued-message-steer-{message_id}"
@@ -1334,6 +1386,20 @@ impl Michelle {
                             .text_size(px(12.5))
                             .text_color(theme.text)
                             .child(SharedString::from(content)),
+                    )
+                    .when(
+                        message.review_reply.as_ref().is_some_and(|reply| {
+                            session.dismissed_review_findings.contains(&reply.thread)
+                        }),
+                        |row| {
+                            row.child(
+                                div()
+                                    .flex_none()
+                                    .text_style(TextStyle::SUBHEADLINE)
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("review.dismissed")),
+                            )
+                        },
                     )
                     .child(
                         div()
@@ -1541,6 +1607,9 @@ impl Michelle {
                         }))
                 })
                 .children(autocomplete)
+                .when_some(self.composer_model.review_reply.as_ref(), |card, reply| {
+                    card.child(self.render_composer_review_reply(reply, &theme, cx))
+                })
                 .when(!self.composer_model.attachments.is_empty(), |card| {
                     card.child(self.render_composer_attachments(window, cx))
                 })

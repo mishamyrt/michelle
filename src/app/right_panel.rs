@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use super::*;
 use crate::ui::{ActivationExt, EmptyState, IconButton};
 
+pub(super) mod annotations;
 pub(super) mod files;
 pub(super) mod model;
 mod review;
@@ -358,6 +359,18 @@ pub(super) fn render_diff_code_row(
     style: DiffRowStyle,
     theme: &Theme,
 ) -> AnyElement {
+    render_diff_code_row_with_gutter(line, index, key_prefix, selection, style, theme, None)
+}
+
+fn render_diff_code_row_with_gutter(
+    line: &crate::review_diff::Line,
+    index: usize,
+    key_prefix: &str,
+    selection: &TranscriptSelection,
+    style: DiffRowStyle,
+    theme: &Theme,
+    review_control: Option<AnyElement>,
+) -> AnyElement {
     let semantic_body_opacity = if theme.is_dark { 0.20 } else { 0.12 };
     let semantic_gutter_opacity = if theme.is_dark { 0.15 } else { 0.09 };
     let (marker, body_background, gutter_background, edge, number_color) = match &line.kind {
@@ -402,12 +415,16 @@ pub(super) fn render_diff_code_row(
         .when_some(gutter_background, |gutter, background| {
             gutter.bg(background)
         })
-        .child(
-            shown_line
-                .map(|line| line.to_string())
-                .or_else(|| style.marker_fallback.then(|| marker.to_owned()))
-                .unwrap_or_default(),
-        );
+        .child(review_control.unwrap_or_else(|| {
+            div()
+                .child(
+                    shown_line
+                        .map(|line| line.to_string())
+                        .or_else(|| style.marker_fallback.then(|| marker.to_owned()))
+                        .unwrap_or_default(),
+                )
+                .into_any_element()
+        }));
     let body = div()
         .min_h(px(style.row_height))
         .self_stretch()
@@ -2242,15 +2259,25 @@ impl Michelle {
                 self.right_panel_ui.diff_selection.clone(),
             ))
             .child(toolbar)
+            .when_some(
+                self.render_review_branch_selectors(cx),
+                |panel, selectors| panel.child(selectors),
+            )
+            .when_some(self.render_review_controls(cx), |panel, controls| {
+                panel.child(controls)
+            })
+            .when_some(self.render_review_summary(cx), |panel, summary| {
+                panel.child(summary)
+            })
             .child(content)
             .child(self.right_panel_diff_selection_input())
     }
 
     fn render_right_panel_diff_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let selected = self.right_panel_model.diff_source;
+        let selected = self.right_panel_model.diff_source.clone();
         let latest_turn = self.latest_review_turn_source();
-        let source_label = self.review_diff_source_label(selected);
+        let source_label = self.review_diff_source_label(&selected);
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle("right-panel-diff-source", cx);
         let source = dropdown_menu(
@@ -2262,17 +2289,17 @@ impl Michelle {
             "right-panel-diff-source-menu",
             &handle,
             MenuAlign::BelowLeft,
-            move |_| {
+            move |app| {
                 let mut items = Vec::new();
-                let last_turn_source = latest_turn.unwrap_or_default();
+                let last_turn_source = latest_turn.clone().unwrap_or_default();
                 let last_turn_weak = weak.clone();
                 items.push(
                     MenuItem::new(tr!("diff.source_last_turn"), move |_, cx| {
                         let _ = last_turn_weak.update(cx, |this, cx| {
-                            this.set_right_panel_diff_source(last_turn_source, cx)
+                            this.set_right_panel_diff_source(last_turn_source.clone(), cx)
                         });
                     })
-                    .selected(latest_turn == Some(selected))
+                    .selected(latest_turn.as_ref() == Some(&selected))
                     .disabled(latest_turn.is_none()),
                 );
                 items.push(MenuItem::Separator);
@@ -2285,13 +2312,14 @@ impl Michelle {
                     (ReviewDiffSource::Staged, tr!("diff.source_staged")),
                 ] {
                     let choice_weak = weak.clone();
+                    let is_selected = choice == selected;
                     items.push(
                         MenuItem::new(label, move |_, cx| {
                             let _ = choice_weak.update(cx, |this, cx| {
-                                this.set_right_panel_diff_source(choice, cx)
+                                this.set_right_panel_diff_source(choice.clone(), cx)
                             });
                         })
-                        .selected(choice == selected),
+                        .selected(is_selected),
                     );
                 }
                 items.push(MenuItem::Separator);
@@ -2300,15 +2328,57 @@ impl Michelle {
                     (ReviewDiffSource::Branch, tr!("diff.source_branch")),
                 ] {
                     let choice_weak = weak.clone();
+                    let is_selected = choice == selected;
                     items.push(
                         MenuItem::new(label, move |_, cx| {
                             let _ = choice_weak.update(cx, |this, cx| {
-                                this.set_right_panel_diff_source(choice, cx)
+                                this.set_right_panel_diff_source(choice.clone(), cx)
                             });
                         })
-                        .selected(choice == selected),
+                        .selected(is_selected),
                     );
                 }
+                let comparison = weak.upgrade().and_then(|entity| {
+                    let this = entity.read(app);
+                    let branches = this.review_branch_snapshot()?;
+                    let target = branches
+                        .current
+                        .as_deref()
+                        .or_else(|| branches.branches.first().map(|branch| branch.name.as_str()))?;
+                    let base = branches
+                        .default_branch
+                        .as_deref()
+                        .filter(|base| *base != target)
+                        .or_else(|| {
+                            branches
+                                .branches
+                                .iter()
+                                .find(|branch| branch.name != target)
+                                .map(|branch| branch.name.as_str())
+                        })?;
+                    Some(ReviewDiffSource::CompareBranches {
+                        base: base.into(),
+                        target: target.into(),
+                    })
+                });
+                let enabled = comparison.is_some();
+                let compare_weak = weak.clone();
+                items.push(
+                    MenuItem::new(tr!("diff.compare_branches"), move |_, cx| {
+                        let _ = compare_weak.update(cx, |this, cx| {
+                            if let Some(source) = comparison.clone()
+                                && !matches!(
+                                    this.right_panel_model.diff_source,
+                                    ReviewDiffSource::CompareBranches { .. }
+                                )
+                            {
+                                this.set_right_panel_diff_source(source, cx);
+                            }
+                        });
+                    })
+                    .disabled(!enabled)
+                    .selected(matches!(selected, ReviewDiffSource::CompareBranches { .. })),
+                );
                 items
             },
         );
@@ -2368,7 +2438,12 @@ impl Michelle {
                 )
             })
             .child(div().flex_1())
-            .child(refresh)
+            .when(!self.right_panel_model.review_open, |row| {
+                row.child(self.render_review_entry(cx))
+            })
+            .when(!self.right_panel_model.review_open, |row| {
+                row.child(refresh)
+            })
             .into_any_element()
     }
 
@@ -2696,14 +2771,19 @@ impl Michelle {
                 .into_any_element(),
             crate::review_diff::LineKind::Context
             | crate::review_diff::LineKind::Addition
-            | crate::review_diff::LineKind::Deletion => render_diff_code_row(
-                line,
-                index,
-                "review-diff",
-                &self.right_panel_ui.diff_selection,
-                style,
-                &theme,
-            ),
+            | crate::review_diff::LineKind::Deletion => {
+                let gutter = self.render_review_line_selector(file, line, index, cx);
+                let code = render_diff_code_row_with_gutter(
+                    line,
+                    index,
+                    "review-diff",
+                    &self.right_panel_ui.diff_selection,
+                    style,
+                    &theme,
+                    gutter,
+                );
+                self.render_review_line_discussions(code, file, line, cx)
+            }
         }
     }
 
@@ -2937,6 +3017,7 @@ impl Michelle {
                     return div().h(px(30.0)).into_any_element();
                 };
                 let path = file.path.clone();
+                let open = self.review_open_count(&path);
                 let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
                 let selected = self.right_panel_ui.diff_selected_file == Some(file_index);
                 let (status, status_color) = match file.status {
@@ -2991,6 +3072,20 @@ impl Michelle {
                                     .tooltip(Tooltip::text(path.clone()))
                                     .child(name),
                             )
+                            .when(open > 0, |row| {
+                                row.child(
+                                    div()
+                                        .id(("review-open-count", file_index))
+                                        .text_size(sp(12.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text_secondary)
+                                        .tooltip(Tooltip::text(tr!(
+                                            "review.open_count",
+                                            count = open
+                                        )))
+                                        .child(open.to_string()),
+                                )
+                            })
                             .child(
                                 div()
                                     .w(px(18.0))
@@ -3036,10 +3131,10 @@ impl Michelle {
         )
     }
 
-    fn review_diff_source_label(&self, source: ReviewDiffSource) -> String {
+    fn review_diff_source_label(&self, source: &ReviewDiffSource) -> String {
         match source {
             ReviewDiffSource::LastTurn { .. }
-                if self.latest_review_turn_source() == Some(source) =>
+                if self.latest_review_turn_source().as_ref() == Some(source) =>
             {
                 tr!("diff.source_last_turn")
             }
@@ -3051,6 +3146,7 @@ impl Michelle {
             ReviewDiffSource::Staged => tr!("diff.source_staged"),
             ReviewDiffSource::Committed => tr!("diff.source_committed"),
             ReviewDiffSource::Branch => tr!("diff.source_branch"),
+            ReviewDiffSource::CompareBranches { .. } => tr!("diff.compare_branches"),
         }
     }
 
@@ -3132,8 +3228,11 @@ impl Michelle {
             .right_panel_model
             .diff_snapshot
             .as_ref()
-            .and_then(|snapshot| snapshot.files.get(file_index))
-            .and_then(|file| file.diff_line)
+            .and_then(|snapshot| {
+                let file = snapshot.files.get(file_index)?;
+                self.first_open_review_row(snapshot, file)
+                    .or(file.diff_line)
+            })
         {
             // `scroll_to_reveal_item` bottom-aligns targets below the viewport,
             // which can reveal only the file header and leave its diff body

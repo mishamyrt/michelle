@@ -12,6 +12,7 @@ pub(in crate::app) struct RightPanelSessionState {
     pub(in crate::app) files_selected_path: Option<String>,
     pub(in crate::app) file_tree_width: f32,
     pub(in crate::app) file_editors: HashMap<String, RightPanelFileEditor>,
+    pub(in crate::app) review_open: bool,
     pub(in crate::app) diff_source: ReviewDiffSource,
     pub(in crate::app) diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     pub(in crate::app) diff_selected_file: Option<usize>,
@@ -31,6 +32,7 @@ impl RightPanelSessionState {
             files_selected_path: None,
             file_tree_width: DEFAULT_FILE_TREE_WIDTH,
             file_editors: HashMap::new(),
+            review_open: false,
             diff_source: ReviewDiffSource::default(),
             diff_snapshot: None,
             diff_selected_file: None,
@@ -49,7 +51,8 @@ impl RightPanelSessionState {
 }
 
 impl Michelle {
-    pub(in crate::app) fn store_selected_right_panel_state(&mut self) {
+    pub(in crate::app) fn store_selected_right_panel_state(&mut self, cx: &mut Context<Self>) {
+        self.save_review_editor(cx);
         let Some(session_id) = self.state.selected_session else {
             return;
         };
@@ -98,7 +101,12 @@ impl Michelle {
         }
     }
 
-    pub(in crate::app) fn remove_right_panel_session_state(&mut self, session_id: Uuid) {
+    pub(in crate::app) fn remove_right_panel_session_state(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        self.remove_saved_review(session_id, cx);
         let state = if self.state.selected_session == Some(session_id) {
             let state = self.take_active_right_panel_state();
             self.replace_active_right_panel_state(RightPanelSessionState::empty(false));
@@ -130,7 +138,8 @@ impl Michelle {
             files_selected_path: self.right_panel_ui.files_selected_path.take(),
             file_tree_width: self.right_panel_ui.file_tree_width,
             file_editors: std::mem::take(&mut self.right_panel_model.file_editors),
-            diff_source: self.right_panel_model.diff_source,
+            review_open: self.right_panel_model.review_open,
+            diff_source: std::mem::take(&mut self.right_panel_model.diff_source),
             diff_snapshot: self.right_panel_model.diff_snapshot.take(),
             diff_selected_file: self.right_panel_ui.diff_selected_file.take(),
             diff_expanded_paths: std::mem::take(&mut self.right_panel_ui.diff_expanded_paths),
@@ -151,6 +160,9 @@ impl Michelle {
         self.right_panel_model.diff_generation =
             self.right_panel_model.diff_generation.wrapping_add(1);
         self.right_panel_ui.diff_selection.clear();
+        self.right_panel_model.review_open = state.review_open;
+        self.right_panel_model.review_selection = None;
+        self.right_panel_model.review_editor = None;
         self.right_panel_model.diff_source = state.diff_source;
         self.right_panel_model.diff_snapshot = state.diff_snapshot;
         self.right_panel_model.diff_loading = false;
@@ -219,6 +231,7 @@ impl Michelle {
         }) else {
             return;
         };
+        self.close_review(cx);
         self.right_panel_model.diff_source = ReviewDiffSource::LastTurn {
             session_id,
             turn_id,
@@ -298,6 +311,9 @@ impl Michelle {
     ) {
         if index >= self.right_panel_ui.surfaces.len() {
             return;
+        }
+        if self.right_panel_ui.surfaces[index] == RightPanelSurface::Diff {
+            self.save_review_editor(cx);
         }
         if let Some(terminal_id) = self.right_panel_ui.surfaces[index].terminal_id() {
             self.right_panel_model.terminals.remove(&terminal_id);

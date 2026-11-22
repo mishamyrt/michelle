@@ -80,6 +80,7 @@ impl Michelle {
                 .iter()
                 .map(crate::persistence::ComposerDraftAttachment::from)
                 .collect(),
+            review_reply: self.composer_model.review_reply.clone(),
         }
     }
 
@@ -116,6 +117,14 @@ impl Michelle {
         let Some(destination) = self.selected_composer_draft_key() else {
             return;
         };
+        if self
+            .composer_model
+            .drafts
+            .get(source)
+            .is_some_and(|draft| draft.review_reply.is_some())
+        {
+            return;
+        }
         if self
             .composer_model
             .drafts
@@ -181,6 +190,7 @@ impl Michelle {
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
+        self.composer_model.review_reply = draft.review_reply;
         self.composer_ui
             .input
             .update(cx, |input, cx| input.set_content(draft.text, cx));

@@ -132,6 +132,7 @@ fn start_import_turn(history: &mut ProviderSessionHistory, timestamp: u64) -> Uu
         started_at: timestamp,
         completed_at: None,
         checkpoint: None,
+        review_thread: None,
     });
     id
 }

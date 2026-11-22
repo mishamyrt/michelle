@@ -6,8 +6,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use uuid::Uuid;
-
 use crate::md::highlight::{Carry, Lang, Token, lang_for_tag, tokenize_line};
 
 const COLLAPSED_CONTEXT_LINES: usize = 3;
@@ -20,20 +18,11 @@ pub const DEFAULT_EXPANSION_LINE_COUNT: usize = 100;
 /// in the tree when rendered lines are capped.
 const MAX_RENDERED_DIFF_LINES: usize = 50_000;
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub enum Source {
-    LastTurn {
-        session_id: Uuid,
-        turn_id: Uuid,
-        turn_count: usize,
-    },
-    #[default]
-    Uncommitted,
-    Unstaged,
-    Staged,
-    Committed,
-    Branch,
-}
+use std::sync::Arc;
+
+use michelle_client::workspace::ReviewDiffData;
+
+pub use michelle_client::workspace::ReviewDiffSource as Source;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FileStatus {
@@ -119,6 +108,7 @@ pub struct Line {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Snapshot {
     pub source: Source,
+    pub data: Option<Arc<ReviewDiffData>>,
     pub files: Vec<File>,
     pub lines: Vec<Line>,
     pub additions: u64,
@@ -288,6 +278,17 @@ pub fn parse_collected(
     snapshot
 }
 
+pub fn from_workspace(data: Arc<ReviewDiffData>) -> Snapshot {
+    let mut snapshot = parse_collected(
+        data.source.clone(),
+        &data.numstat,
+        &data.patch,
+        data.complete_context,
+    );
+    snapshot.data = Some(data);
+    snapshot
+}
+
 /// A snapshot over the file changes a provider reported for one tool call.
 ///
 /// The normalization that produced those bodies already ran when the tool
@@ -327,25 +328,6 @@ pub fn from_file_changes(changes: &[crate::model::ActivityFileChange]) -> Snapsh
         }
     }
     parse(Source::default(), &numstat, &patch, false)
-}
-
-pub fn wire_source(source: Source) -> michelle_client::workspace::ReviewDiffSource {
-    match source {
-        Source::LastTurn {
-            session_id,
-            turn_id,
-            turn_count,
-        } => michelle_client::workspace::ReviewDiffSource::LastTurn {
-            session_id,
-            turn_id,
-            turn_count,
-        },
-        Source::Uncommitted => michelle_client::workspace::ReviewDiffSource::Uncommitted,
-        Source::Unstaged => michelle_client::workspace::ReviewDiffSource::Unstaged,
-        Source::Staged => michelle_client::workspace::ReviewDiffSource::Staged,
-        Source::Committed => michelle_client::workspace::ReviewDiffSource::Committed,
-        Source::Branch => michelle_client::workspace::ReviewDiffSource::Branch,
-    }
 }
 
 fn parse(source: Source, numstat: &str, patch: &str, complete_context: bool) -> Snapshot {
@@ -556,6 +538,7 @@ fn parse(source: Source, numstat: &str, patch: &str, complete_context: bool) -> 
     let deletions = files.iter().map(|file| file.deletions).sum();
     Snapshot {
         source,
+        data: None,
         files,
         lines,
         additions,

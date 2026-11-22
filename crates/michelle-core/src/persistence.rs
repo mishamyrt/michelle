@@ -1233,6 +1233,7 @@ impl StateStore {
         session.transcript_blocks = stored.transcript_blocks;
         session.turns = stored.turns;
         session.queued_messages = stored.queued_messages;
+        session.dismissed_review_findings = stored.dismissed_review_findings;
         session.workspace = stored.workspace;
         session.provider_cursor = stored.provider_cursor;
         session.runtime_mode = stored.runtime_mode;
@@ -1537,6 +1538,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         transcript_blocks: Vec::new(),
         turns: Vec::new(),
         queued_messages: Vec::new(),
+        dismissed_review_findings: Default::default(),
         detail_loaded: false,
     })
 }
@@ -1828,7 +1830,7 @@ mod tests {
     fn text_draft(text: &str) -> ComposerDraft {
         ComposerDraft {
             text: text.to_owned(),
-            attachments: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -2000,7 +2002,7 @@ mod tests {
     }
 
     #[test]
-    fn composer_drafts_round_trip_text_and_attachment_metadata() {
+    fn composer_drafts_round_trip_text_attachments_and_review_context() {
         let directory = temporary_directory();
         let store = ComposerDraftStore::for_state_path(&directory.join("app.db"));
         let project_id = Uuid::new_v4();
@@ -2014,6 +2016,13 @@ mod tests {
                 is_image: true,
                 blob_reference: None,
             }],
+            review_reply: Some(michelle_protocol::model::ReviewReply {
+                thread: michelle_protocol::model::ReviewThreadRef {
+                    message_id: Uuid::new_v4(),
+                    finding_index: 1,
+                },
+                finding: "Avoid work on the UI thread (src/app.rs:4)".to_owned(),
+            }),
         };
         let mut drafts = ComposerDrafts::default();
         drafts.set(ComposerDraftKey::NewSession(project_id), draft.clone());
@@ -2126,7 +2135,14 @@ mod tests {
             branch: "michelle/investigate".into(),
         };
         state.sessions[0].begin_turn("Ask");
-        state.sessions[0].push_message(MessageRole::Assistant, "an answer");
+        let message_id = state.sessions[0].push_message(MessageRole::Assistant, "an answer");
+        let dismissed = crate::model::ReviewThreadRef {
+            message_id,
+            finding_index: 1,
+        };
+        state.sessions[0]
+            .dismissed_review_findings
+            .insert(dismissed);
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
         store.save(&mut state).unwrap();
 
@@ -2152,6 +2168,7 @@ mod tests {
         let session = &restored.sessions[0];
         assert!(session.detail_loaded);
         assert_eq!(session.turns.len(), 1);
+        assert!(session.dismissed_review_findings.contains(&dismissed));
         assert_eq!(
             session.workspace,
             SessionWorkspace::Worktree {
@@ -2476,6 +2493,7 @@ mod tests {
                     is_image: true,
                     blob_reference: Some(reference),
                 }],
+                review_reply: None,
             },
         );
         ComposerDraftStore::for_state_path(&directory.join("app.db"))

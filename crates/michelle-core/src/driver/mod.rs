@@ -4,7 +4,7 @@ mod acp;
 mod activity;
 mod amp;
 mod claude;
-mod codex;
+pub(crate) mod codex;
 mod computer_use;
 mod deepseek;
 mod opencode;

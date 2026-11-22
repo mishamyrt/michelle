@@ -240,7 +240,7 @@ impl Michelle {
         let session_changed = self.state.selected_session != Some(session_id);
         if session_changed {
             self.capture_and_save_current_composer_draft(cx);
-            self.store_selected_right_panel_state();
+            self.store_selected_right_panel_state(cx);
         }
         self.state.selected_session = Some(session_id);
         self.notifications.clear_session_completion(session_id);

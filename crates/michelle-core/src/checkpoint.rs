@@ -577,7 +577,7 @@ fn session_checkpoint_ref_commits(cwd: &Path, session_id: Uuid) -> SessionCheckp
 ///
 /// Checkpoint ref names are generated, never user text, so they cannot contain
 /// the space or newline this line-oriented format delimits on.
-fn update_refs(cwd: &Path, commands: String) -> anyhow::Result<()> {
+pub(crate) fn update_refs(cwd: &Path, commands: String) -> anyhow::Result<()> {
     if commands.is_empty() {
         return Ok(());
     }

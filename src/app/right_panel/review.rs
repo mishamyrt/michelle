@@ -2,6 +2,116 @@
 use super::*;
 
 impl Michelle {
+    pub(super) fn review_branch_snapshot(&self) -> Option<&BranchSnapshot> {
+        let path = self.selected_workspace_path()?;
+        self.branches
+            .visible_snapshot
+            .as_ref()
+            .filter(|(workspace, _)| workspace == path)
+            .map(|(_, branches)| branches)
+    }
+
+    pub(super) fn render_review_branch_selectors(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let ReviewDiffSource::CompareBranches { base, target } =
+            &self.right_panel_model.diff_source
+        else {
+            return None;
+        };
+        let theme = Theme::current(cx);
+        let swapped = ReviewDiffSource::CompareBranches {
+            base: target.clone(),
+            target: base.clone(),
+        };
+        Some(
+            div()
+                .flex_none()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(12.0))
+                .py(px(6.0))
+                .border_b_1()
+                .border_color(theme.border)
+                .child(self.render_review_branch_selector(base, target, true, cx))
+                .child(self.render_review_branch_selector(target, base, false, cx))
+                .child(self.review_button(
+                    "review-swap-branches",
+                    tr!("diff.swap_branches"),
+                    false,
+                    cx,
+                    move |this, _, cx| this.set_right_panel_diff_source(swapped.clone(), cx),
+                )),
+        )
+    }
+
+    fn render_review_branch_selector(
+        &self,
+        branch: &str,
+        other: &str,
+        is_base: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (id, label) = if is_base {
+            (
+                "review-base-selector",
+                tr!("diff.review_base", branch = branch),
+            )
+        } else {
+            (
+                "review-target-selector",
+                tr!("diff.review_target", branch = branch),
+            )
+        };
+        let handle = self.menu_handle(id, cx);
+        let weak = cx.entity().downgrade();
+        let other = other.to_owned();
+        let branch = branch.to_owned();
+        dropdown_menu(
+            MenuChip::new(id)
+                .label(label)
+                .height(px(28.0))
+                .selected(handle.is_open()),
+            id,
+            &handle,
+            MenuAlign::BelowLeft,
+            move |cx| {
+                let Some(entity) = weak.upgrade() else {
+                    return Vec::new();
+                };
+                let Some(snapshot) = entity.read(cx).review_branch_snapshot() else {
+                    return Vec::new();
+                };
+                snapshot
+                    .branches
+                    .iter()
+                    .map(|entry| {
+                        let name = entry.name.clone();
+                        let selected = name == branch;
+                        let disabled = name == other;
+                        let other = other.clone();
+                        let weak = weak.clone();
+                        MenuItem::new(name.clone(), move |_, cx| {
+                            let (base, target) = if is_base {
+                                (name.clone(), other.clone())
+                            } else {
+                                (other.clone(), name.clone())
+                            };
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_right_panel_diff_source(
+                                    ReviewDiffSource::CompareBranches { base, target },
+                                    cx,
+                                );
+                            });
+                        })
+                        .selected(selected)
+                        .disabled(disabled)
+                    })
+                    .collect()
+            },
+        )
+    }
+
     pub(in crate::app) fn latest_review_turn_source(&self) -> Option<ReviewDiffSource> {
         let session = self.selected_session()?;
         session
@@ -26,6 +136,9 @@ impl Michelle {
     /// patch parsing, and syntax tokenization all stay off the UI thread; the
     /// generation check prevents an old source or session from landing late.
     pub(in crate::app) fn refresh_right_panel_diff(&mut self, cx: &mut Context<Self>) {
+        if self.right_panel_model.review_open {
+            return;
+        }
         let Some(session_id) = self.state.selected_session else {
             self.right_panel_ui.diff_selection.clear();
             self.right_panel_model.diff_snapshot = None;
@@ -47,7 +160,7 @@ impl Michelle {
         self.right_panel_model.diff_generation =
             self.right_panel_model.diff_generation.wrapping_add(1);
         let generation = self.right_panel_model.diff_generation;
-        let source = self.right_panel_model.diff_source;
+        let source = self.right_panel_model.diff_source.clone();
         let had_snapshot = self.right_panel_model.diff_snapshot.is_some();
         let previous_directories = self
             .right_panel_model
@@ -73,20 +186,16 @@ impl Michelle {
                 .background_executor()
                 .spawn({
                     let project_path = project_path.clone();
+                    let source = source.clone();
                     async move {
                         match workspace.request(
                             michelle_client::WorkspaceOperation::CollectReviewDiff {
                                 cwd: project_path,
-                                source: crate::review_diff::wire_source(source),
+                                source,
                             },
                         )? {
                             michelle_client::WorkspaceResult::ReviewDiff { data } => {
-                                Ok(crate::review_diff::parse_collected(
-                                    source,
-                                    &data.numstat,
-                                    &data.patch,
-                                    data.complete_context,
-                                ))
+                                Ok(crate::review_diff::from_workspace(Arc::new(data)))
                             }
                             _ => anyhow::bail!("the daemon returned an invalid diff response"),
                         }
@@ -156,6 +265,7 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) {
         if self.right_panel_model.diff_source != source {
+            self.close_review(cx);
             self.right_panel_ui.diff_selection.clear();
             self.right_panel_model.diff_source = source;
             self.right_panel_model.diff_snapshot = None;
@@ -256,6 +366,7 @@ impl Michelle {
         let Some(expansion) = expansion else {
             return;
         };
+        self.right_panel_model.review_selection = None;
         self.right_panel_ui
             .diff_list_state
             .splice(line_index..line_index + 1, expansion.replacement_count);

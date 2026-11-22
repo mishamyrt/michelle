@@ -5,6 +5,7 @@ use crate::ui::{ActivationExt, DisclosureGroup, IconButton};
 
 mod list;
 pub(super) mod model;
+pub(super) mod review;
 
 pub(super) struct TranscriptUi {
     /// User expansion overrides keyed by persisted transcript block index.
@@ -26,6 +27,7 @@ pub(super) struct TranscriptUi {
     pub(in crate::app) copied_activity_feedback:
         HashMap<(Uuid, ActivityDisclosureSectionKind), u64>,
     pub(in crate::app) copied_activity_generation: u64,
+    pub(in crate::app) review_findings_expanded: HashMap<crate::model::ReviewThreadRef, bool>,
     pub(in crate::app) message_edit: Option<MessageEdit>,
     pub(in crate::app) rows: ListState,
     /// Active turns use top alignment so row remeasurement cannot invoke the
@@ -1241,6 +1243,7 @@ impl Michelle {
                 .selected_session()
                 .and_then(|session| session.messages.get(message_index))
                 .map(|message| {
+                    let review = self.transcript_model.chat_reviews.report(message);
                     let copied = self
                         .transcript_ui
                         .copied_message_feedback
@@ -1326,7 +1329,11 @@ impl Michelle {
                     let view = matches!(message.role, MessageRole::User | MessageRole::Assistant)
                         .then(|| {
                             let view = markdown.entry(message.id).or_default();
-                            view.set_text(message.visible_content(), message.streaming);
+                            let text = review.as_ref().map_or_else(
+                                || message.visible_content(),
+                                |report| report.summary.as_str(),
+                            );
+                            view.set_text(text, message.streaming);
                             &*view
                         });
                     let footer_focuses = self.message_footer_focuses(message.id, cx);
@@ -1367,7 +1374,23 @@ impl Michelle {
                         // pane) keeps the tick from busting sibling islands.
                         motion::pulse_lease(window.current_view(), cx);
                     }
-                    rendered
+                    drop(markdown);
+                    if let Some(report) = review {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .when(!report.summary.is_empty(), |row| row.child(rendered))
+                            .child(self.render_chat_review(
+                                message_index,
+                                message,
+                                &report,
+                                window,
+                                cx,
+                            ))
+                            .into_any_element()
+                    } else {
+                        rendered
+                    }
                 })
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnBlock(block_index) => self

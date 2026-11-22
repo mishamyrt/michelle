@@ -874,6 +874,53 @@ file_picker.folder: Папка
 file_picker.file: Файл
 file_picker.typed_file: "Файл %{type}"
 
+review.chat_reply: Ответить
+review.chat_request_fix: Исправь это замечание.
+review.chat_no_open: Нет открытых замечаний для исправления.
+review.chat_remove_context: Убрать замечание из черновика
+review.chat_context_unavailable: Замечание недоступно. Убери его из черновика или открой снова в ревью.
+review.title: "Ревью"
+review.start: "Начать новое ревью"
+review.resume: "Открыть последнее ревью"
+review.close: "Закрыть ревью"
+review.add: "Добавить комментарий"
+review.comment_placeholder: "Напиши комментарий…"
+review.save_draft: "Сохранить черновик"
+review.draft: "Черновик"
+review.you: "Ты"
+review.agent: "Codex"
+review.run_codex: "Проверить с Codex"
+review.ask_codex: "Спросить Codex"
+review.working: "Ждём ответа Codex…"
+review.no_findings: "Codex не нашёл замечаний."
+review.reply: "Ответить"
+review.publish: "Открыть замечание"
+review.dismiss: "Отклонить"
+review.dismissed: "Отклонено"
+review.reopen: "Открыть снова"
+review.fix: "Исправить"
+review.fix_all: "Исправить открытые (%{count})"
+review.fix_sent: "Отправлено на исправление"
+review.fix_diff: "Открыть дифф правок"
+review.fix_not_ready: "Дифф правок пока недоступен."
+review.bulk_selection: "Выбрано замечаний: %{count}"
+review.send_fixes: "Отправить на исправление"
+review.included: "Включено"
+review.excluded: "Исключено"
+review.fix_prompt: "Исправить замечания ревью (%{count})"
+review.select_line: "Выбрать строку %{line} для ревью"
+review.unavailable: "Для этой рабочей папки нет сохранённого ревью."
+review.save_failed: "Не удалось сохранить ревью: %{error}"
+review.agent_failed: "Не удалось завершить запрос ревью: %{error}"
+review.fix_failed: "Не удалось запустить правки по ревью: %{error}"
+review.open_count: "Открытых замечаний: %{count}"
+review.checkout: "Переключиться на %{branch} для правок"
+review.wait_for_workspace: "Чтобы запустить правки, открой свободную задачу в проверяемой рабочей копии."
+
+diff.compare_branches: Сравнить ветки…
+diff.swap_branches: Поменять местами
+diff.review_base: "База · %{branch}"
+diff.review_target: "Ревью · %{branch}"
 diff.no_changes: Нет изменений
 diff.no_changes_description: В этом источнике нет изменений файлов для просмотра
 diff.filter_files: Фильтр файлов…

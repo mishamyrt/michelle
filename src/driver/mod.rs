@@ -234,11 +234,20 @@ impl RemoteDriverControl {
 }
 
 impl DriverControl for RemoteDriverControl {
-    fn prompt(&self, prompt: String, turn_id: Option<uuid::Uuid>, message_id: Option<uuid::Uuid>) {
+    fn prompt(
+        &self,
+        prompt: String,
+        turn_id: Option<uuid::Uuid>,
+        message_id: Option<uuid::Uuid>,
+        review_reply: Option<crate::model::ReviewReply>,
+        review_fixes: Option<String>,
+    ) {
         self.notify(michelle_client::Command::Prompt {
             prompt,
             turn_id,
             message_id,
+            review_reply,
+            review_fixes,
         });
     }
 

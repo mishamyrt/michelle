@@ -4,6 +4,10 @@ use super::*;
 pub(in crate::app) struct RightPanelModel {
     pub(in crate::app) session_states: HashMap<Uuid, RightPanelSessionState>,
     pub(in crate::app) file_editors: HashMap<String, RightPanelFileEditor>,
+    pub(in crate::app) reviews: HashMap<Uuid, super::annotations::ReviewDocument>,
+    pub(in crate::app) review_open: bool,
+    pub(in crate::app) review_selection: Option<(usize, usize)>,
+    pub(in crate::app) review_editor: Option<super::annotations::ReviewEditor>,
     pub(in crate::app) diff_source: ReviewDiffSource,
     pub(in crate::app) diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     pub(in crate::app) diff_loading: bool,

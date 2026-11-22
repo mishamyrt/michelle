@@ -408,6 +408,7 @@ fn history_from_session(provider: ProviderKind, session: &ParsedSession) -> Prov
                 started_at: entry.timestamp,
                 completed_at: None,
                 checkpoint: None,
+                review_thread: None,
             });
             if let Some(text) = entry.text.as_deref() {
                 let mut message = Message::new_for_turn(MessageRole::User, text, turn_id);

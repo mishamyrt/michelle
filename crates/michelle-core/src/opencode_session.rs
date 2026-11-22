@@ -224,6 +224,7 @@ fn history_from_messages(messages: &[MessageInfo]) -> ProviderSessionHistory {
                         started_at: 0,
                         completed_at: Some(0),
                         checkpoint: None,
+                        review_thread: None,
                     });
                     turn_id = Some(id);
                 }

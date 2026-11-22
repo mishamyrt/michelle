@@ -49,6 +49,7 @@ pub mod opencode_session;
 pub mod persistence;
 pub mod pi_session;
 pub mod projectless;
+mod review_chat;
 pub mod settings;
 pub mod skills;
 mod slash_command_catalog;

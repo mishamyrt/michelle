@@ -705,6 +705,66 @@ impl SessionStatus {
     }
 }
 
+pub fn is_review_request(prompt: &str) -> bool {
+    let first_line = prompt.trim_start().lines().next().unwrap_or_default();
+    let text = first_line
+        .chars()
+        .take(512)
+        .collect::<String>()
+        .to_lowercase();
+    let text = text
+        .strip_prefix("пожалуйста, ")
+        .or_else(|| text.strip_prefix("please "))
+        .unwrap_or(&text);
+    let starts_with_phrase = |phrase: &str| {
+        text.strip_prefix(phrase).is_some_and(|rest| {
+            rest.chars()
+                .next()
+                .is_none_or(|c| c.is_whitespace() || matches!(c, '.' | ':' | ',' | '!' | '?' | '—'))
+        })
+    };
+    // shortcut: recognize direct requests in English and Russian; add phrases as usage warrants.
+    [
+        "проведи ревью",
+        "сделай ревью",
+        "сделай код-ревью",
+        "проведи код-ревью",
+        "проверь код",
+        "можешь провести ревью",
+        "review",
+        "do a code review",
+        "can you review",
+        "could you review",
+        "perform a code review",
+        "code review",
+    ]
+    .iter()
+    .any(|phrase| starts_with_phrase(phrase))
+        || (text.starts_with("проверь ")
+            && [
+                " на производительность",
+                " на корректность",
+                " на регрессии",
+            ]
+            .iter()
+            .any(|part| text.contains(part)))
+}
+
+/// One finding within a Markdown review response.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewThreadRef {
+    pub message_id: Uuid,
+    pub finding_index: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewReply {
+    pub thread: ReviewThreadRef,
+    pub finding: String,
+}
+
 /// A follow-up message queued while the agent is busy. It becomes its own
 /// turn once the current turn settles successfully.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -718,6 +778,8 @@ pub struct QueuedMessage {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<MessageAttachment>,
     pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_reply: Option<ReviewReply>,
 }
 
 impl QueuedMessage {
@@ -728,6 +790,7 @@ impl QueuedMessage {
             display_content: None,
             attachments: Vec::new(),
             created_at: unix_time(),
+            review_reply: None,
         }
     }
 
@@ -839,6 +902,8 @@ pub struct AgentTurn {
     pub completed_at: Option<u64>,
     #[serde(default)]
     pub checkpoint: Option<Checkpoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_thread: Option<ReviewThreadRef>,
 }
 
 /// How full the provider's context window is, from the latest main-thread
@@ -1030,6 +1095,8 @@ pub struct AgentSession {
     pub turns: Vec<AgentTurn>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued_messages: Vec<QueuedMessage>,
+    #[serde(default, skip_serializing_if = "std::collections::HashSet::is_empty")]
+    pub dismissed_review_findings: std::collections::HashSet<ReviewThreadRef>,
     /// Whether the transcript has been read from the database.
     ///
     /// Startup loads only the columns the session list needs, so a session
@@ -1079,6 +1146,7 @@ impl AgentSession {
             transcript_blocks: Vec::new(),
             turns: Vec::new(),
             queued_messages: Vec::new(),
+            dismissed_review_findings: Default::default(),
         }
     }
 
@@ -1115,12 +1183,21 @@ impl AgentSession {
             transcript_blocks: Vec::new(),
             turns: Vec::new(),
             queued_messages: Vec::new(),
+            dismissed_review_findings: Default::default(),
             detail_loaded: false,
         }
     }
 
     pub fn is_busy(&self) -> bool {
         self.status.is_busy()
+    }
+
+    pub fn accepts_review_reply(&self, thread: ReviewThreadRef) -> bool {
+        !self.dismissed_review_findings.contains(&thread)
+            && self
+                .messages
+                .iter()
+                .any(|message| message.id == thread.message_id)
     }
 
     /// Derives [`Self::last_reply_at`] from the turn history when it is not
@@ -1342,6 +1419,7 @@ impl AgentSession {
                 started_at,
                 completed_at: Some(completed_at),
                 checkpoint: None,
+                review_thread: None,
             });
         }
     }
@@ -1368,6 +1446,7 @@ impl AgentSession {
             started_at: now,
             completed_at: None,
             checkpoint: None,
+            review_thread: None,
         });
         self.messages.push(
             Message::new_for_turn(MessageRole::User, prompt, id)
@@ -1395,6 +1474,7 @@ impl AgentSession {
             started_at: now,
             completed_at: None,
             checkpoint: None,
+            review_thread: None,
         });
         self.last_reply_at = Some(now);
         self.updated_at = now;
@@ -1442,6 +1522,7 @@ impl AgentSession {
             started_at: now,
             completed_at: None,
             checkpoint: None,
+            review_thread: None,
         });
         let mut prompt = Message::new_for_turn(MessageRole::User, message, turn_id);
         prompt.id = message_id;
@@ -1578,6 +1659,12 @@ impl AgentSession {
                 .turn_id
                 .is_none_or(|turn_id| retained.contains(&turn_id))
         });
+        if !self.dismissed_review_findings.is_empty() {
+            let retained_messages: std::collections::HashSet<_> =
+                self.messages.iter().map(|message| message.id).collect();
+            self.dismissed_review_findings
+                .retain(|finding| retained_messages.contains(&finding.message_id));
+        }
         self.transcript_blocks.retain(|block| {
             block
                 .turn_id
@@ -1612,13 +1699,30 @@ impl AgentSession {
         for turn in &mut fork.turns {
             turn.id = turn_ids[&turn.id];
         }
+        let mut message_ids = std::collections::HashMap::new();
         for message in &mut fork.messages {
-            message.id = Uuid::new_v4();
+            let new_id = Uuid::new_v4();
+            message_ids.insert(message.id, new_id);
+            message.id = new_id;
             if let Some(turn_id) = message.turn_id {
                 message.turn_id = turn_ids.get(&turn_id).copied();
             }
             message.streaming = false;
         }
+        for turn in &mut fork.turns {
+            turn.review_thread = turn.review_thread.and_then(|mut thread| {
+                thread.message_id = *message_ids.get(&thread.message_id)?;
+                Some(thread)
+            });
+        }
+        fork.dismissed_review_findings = fork
+            .dismissed_review_findings
+            .into_iter()
+            .filter_map(|mut thread| {
+                thread.message_id = *message_ids.get(&thread.message_id)?;
+                Some(thread)
+            })
+            .collect();
         for block in &mut fork.transcript_blocks {
             if let Some(turn_id) = block.turn_id {
                 block.turn_id = turn_ids.get(&turn_id).copied();
@@ -1891,6 +1995,7 @@ pub enum DriverEvent {
         message: String,
         turn_id: Uuid,
         message_id: Uuid,
+        review_thread: Option<ReviewThreadRef>,
     },
     TurnStarted,
     /// The provider's turn ended while detached work it will wake the

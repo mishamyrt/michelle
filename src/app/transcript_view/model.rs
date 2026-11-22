@@ -26,6 +26,7 @@ pub(in crate::app) struct TranscriptModel {
     pub(in crate::app) assistant_footer_fingerprint: Cell<Option<u64>>,
     /// Parsed markdown per assistant message, keeping each response's
     /// incremental parse and flattened blocks alive across frames.
+    pub(in crate::app) chat_reviews: super::review::ChatReviews,
     pub(in crate::app) message_markdown: RefCell<HashMap<Uuid, MarkdownView>>,
     /// Parsed markdown for reasoning activities, keyed by stable activity id.
     pub(in crate::app) activity_markdown: RefCell<HashMap<Uuid, MarkdownView>>,
@@ -1102,7 +1103,7 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         .map_or(0, |index| index + 1)
 }
 
-fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
+pub(super) fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
     match row {
         TranscriptRowKind::Message(index) => session.messages.get(index)?.turn_id,
         TranscriptRowKind::TurnBlock(index) => session.transcript_blocks.get(index)?.turn_id,

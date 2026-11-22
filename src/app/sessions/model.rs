@@ -172,7 +172,7 @@ impl Michelle {
         self.goal_model.observed_at.remove(&session_id);
         self.reset_session_runtime(session_id);
         self.sessions.runtime.background_work.remove(&session_id);
-        self.remove_right_panel_session_state(session_id);
+        self.remove_right_panel_session_state(session_id, cx);
         self.remove_composer_draft(composer_draft_key, cx);
         if self
             .sessions

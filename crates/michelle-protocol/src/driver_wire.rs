@@ -6,7 +6,9 @@ use uuid::Uuid;
 
 use crate::WireDriverEvent;
 use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
-use crate::model::{ActivityKind, DriverEvent, PermissionOption, UserInputQuestion};
+use crate::model::{
+    ActivityKind, DriverEvent, PermissionOption, ReviewThreadRef, UserInputQuestion,
+};
 
 pub fn decode_enum<T: DeserializeOwned>(value: &str) -> anyhow::Result<T> {
     serde_json::from_value(Value::String(value.to_owned()))
@@ -94,9 +96,15 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             message,
             turn_id,
             message_id,
+            review_thread,
         } => (
             "promptSubmitted",
-            json!({ "message": message, "turnId": turn_id, "messageId": message_id }),
+            serde_json::to_value(SubmittedPromptWire {
+                message,
+                turn_id,
+                message_id,
+                review_thread,
+            })?,
         ),
         DriverEvent::SteerAccepted { message } => ("steerAccepted", json!({ "message": message })),
         DriverEvent::SteerRejected { message, reason } => (
@@ -181,6 +189,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 message: submitted.message,
                 turn_id: submitted.turn_id,
                 message_id: submitted.message_id,
+                review_thread: submitted.review_thread,
             }
         }
         "steerAccepted" => {
@@ -218,12 +227,14 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SubmittedPromptWire {
     message: String,
     turn_id: Uuid,
     message_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_thread: Option<ReviewThreadRef>,
 }
 
 #[derive(Deserialize)]

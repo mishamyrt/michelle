@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crossbeam_channel::{Receiver, SendError, Sender, unbounded};
 use michelle_protocol::computer_use::ComputerToolRequest;
 use michelle_protocol::model::{
-    BackgroundWorkKey, DriverEvent, GoalOperation, ProviderResumeCursor, RuntimeMode,
+    BackgroundWorkKey, DriverEvent, GoalOperation, ProviderResumeCursor, ReviewReply, RuntimeMode,
     UserInputAnswer,
 };
 use uuid::Uuid;
@@ -45,8 +45,16 @@ impl DriverHandle {
     /// Send a prompt along with the ids this client gave the turn it opened
     /// and that turn's user message, so the daemon can publish the same
     /// identity to every other client attached to the runtime.
-    pub fn prompt(&self, prompt: String, turn_id: Option<Uuid>, message_id: Option<Uuid>) {
-        self.inner.prompt(prompt, turn_id, message_id);
+    pub fn prompt(
+        &self,
+        prompt: String,
+        turn_id: Option<Uuid>,
+        message_id: Option<Uuid>,
+        review_reply: Option<ReviewReply>,
+        review_fixes: Option<String>,
+    ) {
+        self.inner
+            .prompt(prompt, turn_id, message_id, review_reply, review_fixes);
     }
 
     pub fn supports_steer(&self) -> bool {
@@ -113,7 +121,14 @@ impl DriverHandle {
 }
 
 pub trait DriverControl: Send + Sync {
-    fn prompt(&self, prompt: String, turn_id: Option<Uuid>, message_id: Option<Uuid>);
+    fn prompt(
+        &self,
+        prompt: String,
+        turn_id: Option<Uuid>,
+        message_id: Option<Uuid>,
+        review_reply: Option<ReviewReply>,
+        review_fixes: Option<String>,
+    );
     fn supports_steer(&self) -> bool {
         false
     }

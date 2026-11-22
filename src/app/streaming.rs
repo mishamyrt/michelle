@@ -304,6 +304,7 @@ impl Michelle {
                 message,
                 turn_id,
                 message_id,
+                review_thread,
             } => {
                 // A prompt reached this runtime: another client's submission,
                 // or the echo of this one. The session decides whether that
@@ -313,6 +314,9 @@ impl Michelle {
                 if let Some(session) = self.state.session_mut(session_id)
                     && session.adopt_submitted_prompt(&message, turn_id, message_id)
                 {
+                    if let Some(turn) = session.turns.last_mut() {
+                        turn.review_thread = review_thread;
+                    }
                     self.state.mark_session_dirty(session_id);
                 }
             }

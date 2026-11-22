@@ -7,7 +7,7 @@ use crate::composer::{FileEntry, SlashCommand};
 use crate::git::{AgentInvocation, BranchSnapshot, CommitSnapshot, CreatedWorktree};
 use crate::model::{Checkpoint, ProviderKind};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReviewDiffSource {
     LastTurn {
@@ -15,20 +15,37 @@ pub enum ReviewDiffSource {
         turn_id: Uuid,
         turn_count: usize,
     },
+    #[default]
     Uncommitted,
     Unstaged,
     Staged,
     Committed,
     Branch,
+    CompareBranches {
+        base: String,
+        target: String,
+    },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewDiffData {
     pub source: ReviewDiffSource,
     pub numstat: String,
     pub patch: String,
     pub complete_context: bool,
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub to: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewFixGuard {
+    pub branch: Option<String>,
+    pub to: String,
+    pub paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -155,6 +172,23 @@ pub enum WorkspaceOperation {
         target_session_id: Uuid,
         through_turn_count: usize,
     },
+    ReviewWithCodex {
+        cwd: PathBuf,
+        binary_override: Option<String>,
+        model: Option<String>,
+        from: String,
+        to: String,
+        question: Option<String>,
+    },
+    SetReviewSnapshotRefs {
+        cwd: PathBuf,
+        review_id: Uuid,
+        revisions: Option<[String; 2]>,
+    },
+    ValidateReviewFix {
+        cwd: PathBuf,
+        guard: ReviewFixGuard,
+    },
     CollectReviewDiff {
         cwd: PathBuf,
         source: ReviewDiffSource,
@@ -210,6 +244,9 @@ pub enum WorkspaceResult {
     },
     TurnRefs {
         turn_counts: Vec<usize>,
+    },
+    ReviewResponse {
+        response: String,
     },
     ReviewDiff {
         data: ReviewDiffData,

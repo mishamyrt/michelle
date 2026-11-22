@@ -1336,7 +1336,7 @@ pub fn hydrate_session(
     }
 }
 
-fn write_json_atomically(path: &Path, value: &impl Serialize) -> io::Result<()> {
+pub fn write_json_atomically(path: &Path, value: &impl Serialize) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }

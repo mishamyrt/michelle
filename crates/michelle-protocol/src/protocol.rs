@@ -8,7 +8,7 @@ use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::computer_use::ComputerPermissions;
 use crate::model::{
     AgentSession, GoalOperation, Project, ProviderKind, ProviderProbe, ProviderResumeCursor,
-    ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
+    ProviderSessionHistory, ProviderSessionSummary, ReviewReply, UserInputAnswer,
 };
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
@@ -18,7 +18,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "MICHELLE_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "MICHELLE_DAEMON_ADDRESS";
@@ -95,6 +95,10 @@ pub enum Command {
         turn_id: Option<Uuid>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message_id: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        review_reply: Option<ReviewReply>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        review_fixes: Option<String>,
     },
     Steer {
         prompt: String,
@@ -535,7 +539,7 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 7);
+        assert_eq!(PROTOCOL_VERSION, 8);
     }
 
     #[test]
@@ -582,7 +586,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 7);
+        assert_eq!(PROTOCOL_VERSION, 8);
     }
 
     #[test]
@@ -649,6 +653,7 @@ mod tests {
                 draft: Some(crate::persistence::ComposerDraft {
                     text: "unfinished".into(),
                     attachments: Vec::new(),
+                    review_reply: None,
                 }),
             }],
         };

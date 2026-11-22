@@ -464,6 +464,8 @@ impl Michelle {
         self.transcript_ui.expanded_activity_items.clear();
         self.transcript_ui.expanded_turns.clear();
         self.transcript_ui.expanded_changed_files.clear();
+        self.transcript_ui.review_findings_expanded.clear();
+        self.transcript_model.chat_reviews.clear();
         self.transcript_ui.control_focuses.borrow_mut().clear();
         self.transcript_ui
             .user_message_viewports

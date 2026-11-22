@@ -277,6 +277,7 @@ fn history_from_updates(provider: ProviderKind, updates: &[Value]) -> ProviderSe
                     started_at: 0,
                     completed_at: Some(0),
                     checkpoint: None,
+                    review_thread: None,
                 });
                 history
                     .messages

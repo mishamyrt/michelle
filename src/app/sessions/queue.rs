@@ -1,6 +1,48 @@
 //! Follow-up queue operations and coordination with runtime/checkpoint completion.
 use super::*;
 
+fn next_queued_submission(session: &AgentSession) -> Option<usize> {
+    session.queued_messages.iter().position(|message| {
+        message
+            .review_reply
+            .as_ref()
+            .is_none_or(|reply| session.accepts_review_reply(reply.thread))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{ReviewReply, ReviewThreadRef};
+
+    #[test]
+    fn dismissed_queued_reply_stays_editable_without_blocking_the_next_message() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("Review the cache");
+        let message_id = session.push_message(MessageRole::Assistant, "Finding");
+        let thread = ReviewThreadRef {
+            message_id,
+            finding_index: 0,
+        };
+        let mut reply = QueuedMessage::new("What would you change?");
+        reply.review_reply = Some(ReviewReply {
+            thread,
+            finding: "Finding".into(),
+        });
+        session.queued_messages = vec![reply, QueuedMessage::new("Run the tests")];
+
+        session.dismissed_review_findings.insert(thread);
+        assert_eq!(next_queued_submission(&session), Some(1));
+        session.queued_messages.remove(1);
+        assert_eq!(next_queued_submission(&session), None);
+        assert_eq!(session.queued_messages[0].content, "What would you change?");
+        session.dismissed_review_findings.remove(&thread);
+        assert_eq!(next_queued_submission(&session), Some(0));
+        session.messages.retain(|message| message.id != message_id);
+        assert_eq!(next_queued_submission(&session), None);
+    }
+}
+
 impl Michelle {
     pub(in crate::app) fn defer_queue_drain(&mut self, session_id: Uuid) {
         if !self
@@ -66,7 +108,8 @@ impl Michelle {
         }) else {
             return;
         };
-        self.restore_composer_submission(ComposerSubmission::from_queued_message(message), cx);
+        let submission = ComposerSubmission::from_queued_message(message);
+        self.restore_composer_submission(submission, cx);
         let focus_handle = self.composer_focus(cx);
         window.focus(&focus_handle, cx);
         self.save();
@@ -84,10 +127,13 @@ impl Michelle {
         cx: &mut Context<Self>,
     ) {
         let Some(message) = self.state.session_mut(session_id).and_then(|session| {
-            let index = session
-                .queued_messages
-                .iter()
-                .position(|message| message.id == message_id)?;
+            let index = session.queued_messages.iter().position(|message| {
+                message.id == message_id
+                    && message.review_reply.is_none()
+                    && !transcript_view::review::is_explicit_review_fix_request(
+                        message.visible_content(),
+                    )
+            })?;
             Some(session.queued_messages.remove(index))
         }) else {
             return;
@@ -143,10 +189,13 @@ impl Michelle {
         {
             return;
         }
+        let Some(index) = next_queued_submission(session) else {
+            return;
+        };
         let Some(message) = self
             .state
             .session_mut(session_id)
-            .map(|session| session.queued_messages.remove(0))
+            .map(|session| session.queued_messages.remove(index))
         else {
             return;
         };
