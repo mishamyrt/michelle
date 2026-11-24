@@ -823,6 +823,7 @@ impl Michelle {
                 sidebar_model: sidebar::model::SidebarModel {
                     rows_fingerprint: Cell::new(None),
                     rows_snapshot: RefCell::new(Rc::new(Vec::new())),
+                    activity_sessions: RefCell::new(Vec::new()),
                     projectless_projects: RefCell::new(HashSet::new()),
                     session_moves: HashSet::new(),
                     pending_session_drops: HashMap::new(),

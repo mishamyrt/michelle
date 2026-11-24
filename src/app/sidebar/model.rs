@@ -4,6 +4,8 @@ use super::*;
 pub(in crate::app) struct SidebarModel {
     pub(in crate::app) rows_fingerprint: Cell<Option<u64>>,
     pub(in crate::app) rows_snapshot: RefCell<Rc<Vec<SidebarRow>>>,
+    /// Ordered membership survives collapsing the section.
+    pub(in crate::app) activity_sessions: RefCell<Vec<Uuid>>,
     pub(in crate::app) projectless_projects: RefCell<HashSet<Uuid>>,
     pub(in crate::app) session_moves: HashSet<Uuid>,
     pub(in crate::app) pending_session_drops: HashMap<Uuid, sidebar::SidebarSessionDrop>,
@@ -73,6 +75,13 @@ impl Michelle {
             u64::from(self.state.sidebar_projects_collapsed),
         );
         fingerprint = mix(fingerprint, u64::from(self.state.sidebar_pinned_collapsed));
+        fingerprint = mix(
+            fingerprint,
+            u64::from(self.state.sidebar_activity_collapsed),
+        );
+        if let Some(selected) = self.state.selected_session {
+            fingerprint = mix_uuid(fingerprint, selected);
+        }
         for group in &self.state.sidebar_project_groups {
             fingerprint = mix_uuid(fingerprint, group.id);
             fingerprint = mix(fingerprint, u64::from(group.collapsed));
@@ -222,6 +231,13 @@ impl Michelle {
             }
             sections.push(section);
         }
+        append_sidebar_activity(
+            &mut rows,
+            &self.state,
+            &sorted_sessions,
+            &self.notifications.unseen_completions,
+            &mut self.sidebar_model.activity_sessions.borrow_mut(),
+        );
         append_sidebar_project_collections(
             &mut rows,
             sections,
@@ -323,6 +339,7 @@ impl Michelle {
             }
             SidebarCollection::Projects => &mut self.state.sidebar_projects_collapsed,
             SidebarCollection::Pinned => &mut self.state.sidebar_pinned_collapsed,
+            SidebarCollection::Activity => &mut self.state.sidebar_activity_collapsed,
         };
         let collapse_changed = *value != collapsed;
         *value = collapsed;
@@ -427,7 +444,7 @@ impl Michelle {
                     match target {
                         SidebarCollection::Group(id) => Some(id),
                         SidebarCollection::Projects => None,
-                        SidebarCollection::Pinned => return,
+                        SidebarCollection::Pinned | SidebarCollection::Activity => return,
                     },
                 ) {
                     self.save_sidebar_presentation(cx);
@@ -442,7 +459,7 @@ impl Michelle {
                     SidebarCollection::Projects => {
                         self.move_sidebar_project_to_collection(source, None, cx)
                     }
-                    SidebarCollection::Pinned => {}
+                    SidebarCollection::Pinned | SidebarCollection::Activity => {}
                 }
                 return;
             }
@@ -845,6 +862,7 @@ impl Michelle {
             }
             SidebarCollection::Projects => self.state.move_project_to_sidebar_group(project, None),
             SidebarCollection::Pinned => false,
+            SidebarCollection::Activity => return,
         };
         let mut reordered = false;
         if self.state.sidebar_ordering == SidebarOrdering::Manual {
@@ -1182,6 +1200,48 @@ pub(in crate::app) fn sidebar_header_task_counts(
     headers
 }
 
+pub(super) fn append_sidebar_activity(
+    rows: &mut Vec<SidebarRow>,
+    state: &PersistedState,
+    sorted_sessions: &[&AgentSession],
+    unseen_completions: &HashSet<Uuid>,
+    previous: &mut Vec<Uuid>,
+) {
+    let mut activity = Vec::new();
+    let mut retained = None;
+    for session in sorted_sessions {
+        let priority = match session.status {
+            SessionStatus::Waiting => Some(0),
+            status if status.is_busy() => Some(1),
+            _ if unseen_completions.contains(&session.id) => Some(2),
+            _ => None,
+        };
+        if let Some(priority) = priority
+            && !state.sidebar_hidden_projects.contains(&session.project_id)
+        {
+            activity.push((priority, session.id));
+        } else if state.selected_session == Some(session.id) {
+            retained = previous
+                .iter()
+                .position(|id| *id == session.id)
+                .map(|index| (index, session.id));
+        }
+    }
+    activity.sort_by_key(|(priority, _)| *priority);
+    previous.clear();
+    previous.extend(activity.into_iter().map(|(_, id)| id));
+    if let Some((index, id)) = retained {
+        previous.insert(index.min(previous.len()), id);
+    }
+    if !previous.is_empty() {
+        rows.push(SidebarRow::Collection(SidebarCollection::Activity));
+        if !state.sidebar_activity_collapsed {
+            rows.extend(previous.iter().copied().map(SidebarRow::ActivitySession));
+        }
+        rows.push(SidebarRow::ActivityDivider);
+    }
+}
+
 pub(in crate::app) fn append_sidebar_project_collections(
     rows: &mut Vec<SidebarRow>,
     sections: Vec<Vec<SidebarRow>>,
@@ -1319,7 +1379,8 @@ impl Michelle {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        let collections_changed = !self.state.sidebar_pinned_collapsed
+        let collections_changed = !self.state.sidebar_activity_collapsed
+            || !self.state.sidebar_pinned_collapsed
             || !self.state.sidebar_projects_collapsed
             || self
                 .state
@@ -1328,6 +1389,7 @@ impl Michelle {
                 .any(|group| !group.collapsed);
         self.state.sidebar_projects_collapsed = true;
         self.state.sidebar_pinned_collapsed = true;
+        self.state.sidebar_activity_collapsed = true;
         for group in &mut self.state.sidebar_project_groups {
             group.collapsed = true;
         }

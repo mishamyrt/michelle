@@ -238,6 +238,8 @@ sidebar.ordering_oldest: Сначала старые
 sidebar.ordering_manual: Вручную
 sidebar.projects: Проекты
 sidebar.pinned: Закреплённые
+sidebar.activity: Активность
+sidebar.status_unseen: Непросмотренный результат
 sidebar.pin_project: Закрепить проект
 sidebar.unpin_project: Открепить проект
 sidebar.chats: Чаты

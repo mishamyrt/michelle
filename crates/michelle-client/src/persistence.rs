@@ -346,6 +346,8 @@ struct AppState {
     sidebar_pinned_projects: HashSet<Uuid>,
     #[serde(default)]
     sidebar_pinned_collapsed: bool,
+    #[serde(default)]
+    sidebar_activity_collapsed: bool,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     sidebar_collapsed_projects: HashSet<Uuid>,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
@@ -418,6 +420,8 @@ pub struct PersistedState {
     pub sidebar_pinned_projects: HashSet<Uuid>,
     #[serde(default)]
     pub sidebar_pinned_collapsed: bool,
+    #[serde(default)]
+    pub sidebar_activity_collapsed: bool,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub sidebar_collapsed_projects: HashSet<Uuid>,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
@@ -643,6 +647,7 @@ impl PersistedState {
             sidebar_projects_collapsed: false,
             sidebar_pinned_projects: HashSet::new(),
             sidebar_pinned_collapsed: false,
+            sidebar_activity_collapsed: false,
             sidebar_collapsed_projects: HashSet::new(),
             sidebar_hidden_projects: HashSet::new(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
@@ -790,6 +795,7 @@ impl PersistedState {
             sidebar_projects_collapsed: self.sidebar_projects_collapsed,
             sidebar_pinned_projects: self.sidebar_pinned_projects.clone(),
             sidebar_pinned_collapsed: self.sidebar_pinned_collapsed,
+            sidebar_activity_collapsed: self.sidebar_activity_collapsed,
             sidebar_collapsed_projects: self.sidebar_collapsed_projects.clone(),
             sidebar_hidden_projects: self.sidebar_hidden_projects.clone(),
             right_panel_width: self.right_panel_width,
@@ -830,6 +836,7 @@ impl PersistedState {
         self.sidebar_projects_collapsed = app_state.sidebar_projects_collapsed;
         self.sidebar_pinned_projects = app_state.sidebar_pinned_projects;
         self.sidebar_pinned_collapsed = app_state.sidebar_pinned_collapsed;
+        self.sidebar_activity_collapsed = app_state.sidebar_activity_collapsed;
         self.sidebar_collapsed_projects = app_state.sidebar_collapsed_projects;
         self.sidebar_hidden_projects = app_state.sidebar_hidden_projects;
         self.right_panel_width = app_state.right_panel_width;
@@ -1535,6 +1542,7 @@ mod tests {
         assert!(!state.sidebar_projects_collapsed);
         assert!(state.sidebar_pinned_projects.is_empty());
         assert!(!state.sidebar_pinned_collapsed);
+        assert!(!state.sidebar_activity_collapsed);
         assert!(state.sidebar_collapsed_projects.is_empty());
         assert!(state.sidebar_hidden_projects.is_empty());
         assert_eq!(state.last_runtime_mode, RuntimeMode::FullAccess);

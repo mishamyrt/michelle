@@ -477,6 +477,10 @@ sidebar.projects:
   en: Projects
 sidebar.pinned:
   en: Pinned
+sidebar.activity:
+  en: Activity
+sidebar.status_unseen:
+  en: Unseen result
 sidebar.pin_project:
   en: Pin Project
 sidebar.unpin_project:
