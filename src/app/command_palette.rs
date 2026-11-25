@@ -10,6 +10,7 @@ use gpui::{KeyBinding, StyledText, TextRun, actions};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 
+use super::task_switcher::MAX_RECENT_TASKS;
 use super::*;
 use crate::ui::squircle::{SquircleStyled, squircle};
 use crate::ui::{StyledTypography, TextStyle};
@@ -28,7 +29,18 @@ actions!(
     ]
 );
 
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(namespace = michelle_command_palette, no_json)]
+struct OpenRecentTask(usize);
+
 const SEARCH_CONTEXT: &str = "CommandPalette > TextInput";
+const RECENT_TASK_SHORTCUTS: [(&str, &str, &str); MAX_RECENT_TASKS] = [
+    ("secondary-1", "⌘1", "Ctrl+1"),
+    ("secondary-2", "⌘2", "Ctrl+2"),
+    ("secondary-3", "⌘3", "Ctrl+3"),
+    ("secondary-4", "⌘4", "Ctrl+4"),
+    ("secondary-5", "⌘5", "Ctrl+5"),
+];
 const MAX_TASK_RESULTS: usize = 12;
 const MAX_RESUME_RESULTS: usize = 30;
 const PROVIDER_SESSION_CATALOG_LIMIT: usize = 250;
@@ -66,11 +78,19 @@ pub fn init(cx: &mut App) {
         // and an empty field propagates the keystroke down to it.
         KeyBinding::new("escape", Dismiss, Some("CommandPalette")),
     ]);
+    cx.bind_keys(
+        RECENT_TASK_SHORTCUTS
+            .iter()
+            .enumerate()
+            .map(|(slot, &(key, _, _))| {
+                KeyBinding::new(key, OpenRecentTask(slot), Some("CommandPalette"))
+            }),
+    );
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum PaletteSection {
-    Suggested,
+    RecentTasks,
     Tasks,
     Sessions,
     Providers,
@@ -80,12 +100,12 @@ enum PaletteSection {
 
 impl PaletteSection {
     fn has_header(self) -> bool {
-        !matches!(self, Self::Suggested | Self::Providers)
+        self != Self::Providers
     }
 
     fn label(self) -> String {
         crate::i18n::translate(match self {
-            Self::Suggested => "command_palette.suggested",
+            Self::RecentTasks => "command_palette.recent_tasks",
             Self::Tasks => "command_palette.tasks",
             Self::Sessions => "command_palette.sessions",
             Self::Providers => "command_palette.providers",
@@ -96,8 +116,8 @@ impl PaletteSection {
 
     fn query_rank(self) -> usize {
         match self {
-            Self::Commands | Self::Suggested | Self::Sessions | Self::Providers => 0,
-            Self::Tasks => 1,
+            Self::Commands | Self::Sessions | Self::Providers => 0,
+            Self::RecentTasks | Self::Tasks => 1,
             Self::Settings => 2,
         }
     }
@@ -222,6 +242,15 @@ impl CommandPaletteItem {
 struct ScoredPaletteItem {
     score: u32,
     item: CommandPaletteItem,
+}
+
+fn recent_task_result_index(results: &[CommandPaletteItem], slot: usize) -> Option<usize> {
+    results
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item.section == PaletteSection::RecentTasks)
+        .nth(slot)
+        .map(|(index, _)| index)
 }
 
 fn next_selection_index(selected: usize, len: usize, delta: isize) -> Option<usize> {
@@ -740,14 +769,7 @@ impl Michelle {
         .detach();
     }
 
-    fn command_palette_commands(&self, searching: bool) -> Vec<CommandPaletteItem> {
-        let display_section = |suggested| {
-            if searching {
-                PaletteSection::Commands
-            } else {
-                suggested
-            }
-        };
+    fn command_palette_commands(&self) -> Vec<CommandPaletteItem> {
         let mut order = 0usize;
         let mut next = || {
             let current = order;
@@ -756,7 +778,7 @@ impl Michelle {
         };
         let mut commands = vec![
             CommandPaletteItem::command(
-                display_section(PaletteSection::Suggested),
+                PaletteSection::Commands,
                 tr!("command_palette.new_task"),
                 "pencil",
                 Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N")),
@@ -765,7 +787,7 @@ impl Michelle {
                 next(),
             ),
             CommandPaletteItem::command(
-                display_section(PaletteSection::Suggested),
+                PaletteSection::Commands,
                 tr!("command_palette.resume"),
                 "arrow.clockwise",
                 None,
@@ -774,7 +796,7 @@ impl Michelle {
                 next(),
             ),
             CommandPaletteItem::command(
-                display_section(PaletteSection::Suggested),
+                PaletteSection::Commands,
                 tr!("command_palette.open_project"),
                 "folder",
                 Some(crate::platform::primary_shortcut("⌘O", "Ctrl+O")),
@@ -789,7 +811,7 @@ impl Michelle {
             .is_some_and(|session| session.can_choose_model(session.provider));
         if can_choose_model {
             commands.push(CommandPaletteItem::command(
-                display_section(PaletteSection::Suggested),
+                PaletteSection::Commands,
                 tr!("command_palette.choose_model"),
                 "cpu",
                 Some(crate::platform::primary_shortcut("⌘/", "Ctrl+/")),
@@ -801,7 +823,7 @@ impl Michelle {
 
         if self.can_configure_model_traits() {
             commands.push(CommandPaletteItem::command(
-                display_section(PaletteSection::Suggested),
+                PaletteSection::Commands,
                 tr!("command_palette.model_reasoning"),
                 "brain",
                 Some(crate::platform::primary_shortcut("⌥⌘/", "Ctrl+Alt+/")),
@@ -952,7 +974,10 @@ impl Michelle {
         commands
     }
 
-    fn command_palette_task_candidates(&self) -> Vec<CommandPaletteItem> {
+    fn command_palette_task_items<'a>(
+        &self,
+        sessions: impl IntoIterator<Item = &'a AgentSession>,
+    ) -> Vec<CommandPaletteItem> {
         let projects = self
             .state
             .projects
@@ -967,12 +992,10 @@ impl Michelle {
                 )
             })
             .collect::<HashMap<_, _>>();
-        self.state
-            .sessions
-            .iter()
-            .filter(|session| session.has_started())
+        sessions
+            .into_iter()
             .enumerate()
-            .map(|(order, session)| {
+            .map(move |(order, session)| {
                 let (project, project_path) = projects
                     .get(&session.project_id)
                     .cloned()
@@ -1237,7 +1260,22 @@ impl Michelle {
         }
         let query = query.trim();
         if query.is_empty() {
-            self.command_palette.results = self.command_palette_commands(false);
+            let mut results = self.command_palette_commands();
+            let recent_tasks = self.recent_tasks();
+            if !recent_tasks.is_empty() {
+                let recent_items = self
+                    .command_palette_task_items(recent_tasks)
+                    .into_iter()
+                    .map(|mut item| {
+                        let (_, macos, other) = RECENT_TASK_SHORTCUTS[item.order];
+                        item.section = PaletteSection::RecentTasks;
+                        item.shortcut = Some(crate::platform::primary_shortcut(macos, other));
+                        item.content_match = None;
+                        item
+                    });
+                results.splice(0..0, recent_items);
+            }
+            self.command_palette.results = results;
             self.command_palette.selected = 0;
             self.command_palette.scroll.scroll_to_item(0);
             return;
@@ -1247,8 +1285,13 @@ impl Michelle {
         let message_matches_are_current =
             self.command_palette.message_matches_query.as_deref() == Some(query);
         let mut utf32 = Vec::new();
+        let candidates = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| session.has_started());
         let mut tasks = self
-            .command_palette_task_candidates()
+            .command_palette_task_items(candidates)
             .into_iter()
             .filter_map(|mut item| {
                 let metadata_score = pattern.score(
@@ -1286,7 +1329,7 @@ impl Michelle {
         tasks.truncate(MAX_TASK_RESULTS);
 
         let mut commands = self
-            .command_palette_commands(true)
+            .command_palette_commands()
             .into_iter()
             .filter_map(|item| {
                 pattern
@@ -2118,6 +2161,13 @@ impl Michelle {
                 .on_action(cx.listener(|this, _: &Confirm, window, cx| {
                     this.execute_command_palette_selection(None, window, cx)
                 }))
+                .on_action(cx.listener(|this, action: &OpenRecentTask, window, cx| {
+                    if let Some(index) =
+                        recent_task_result_index(&this.command_palette.results, action.0)
+                    {
+                        this.execute_command_palette_selection(Some(index), window, cx);
+                    }
+                }))
                 .on_action(cx.listener(|this, _: &Dismiss, window, cx| {
                     this.dismiss_command_palette(window, cx)
                 }))
@@ -2256,7 +2306,7 @@ mod tests {
     #[test]
     fn scroll_indexes_include_section_headers() {
         let sections = [
-            PaletteSection::Suggested,
+            PaletteSection::RecentTasks,
             PaletteSection::Providers,
             PaletteSection::Tasks,
             PaletteSection::Tasks,
@@ -2276,12 +2326,12 @@ mod tests {
             }
             selected + headers
         };
-        assert_eq!(scroll_index(0), 0);
-        assert_eq!(scroll_index(1), 1);
-        assert_eq!(scroll_index(2), 3);
-        assert_eq!(scroll_index(3), 4);
-        assert_eq!(scroll_index(4), 6);
-        assert_eq!(scroll_index(5), 8);
+        assert_eq!(scroll_index(0), 1);
+        assert_eq!(scroll_index(1), 2);
+        assert_eq!(scroll_index(2), 4);
+        assert_eq!(scroll_index(3), 5);
+        assert_eq!(scroll_index(4), 7);
+        assert_eq!(scroll_index(5), 9);
     }
 
     #[test]
@@ -2299,6 +2349,35 @@ mod tests {
     fn searched_commands_rank_before_tasks() {
         assert!(PaletteSection::Commands.query_rank() < PaletteSection::Tasks.query_rank());
         assert!(PaletteSection::Tasks.query_rank() < PaletteSection::Settings.query_rank());
+    }
+
+    #[test]
+    fn numeric_shortcuts_address_only_recent_chat_rows() {
+        let results = [
+            PaletteSection::RecentTasks,
+            PaletteSection::RecentTasks,
+            PaletteSection::Commands,
+            PaletteSection::Tasks,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(order, section)| {
+            CommandPaletteItem::command(
+                section,
+                String::new(),
+                "magnifyingglass",
+                None,
+                PaletteAction::NewTask,
+                "",
+                order,
+            )
+        })
+        .collect::<Vec<_>>();
+
+        assert_eq!(recent_task_result_index(&results, 0), Some(0));
+        assert_eq!(recent_task_result_index(&results, 1), Some(1));
+        assert_eq!(recent_task_result_index(&results, 2), None);
+        assert_eq!(recent_task_result_index(&results[2..], 0), None);
     }
 
     #[test]
@@ -2345,11 +2424,6 @@ mod tests {
             command_palette_results_height(&providers, false),
             UNLABELED_SECTION_TOP_MARGIN + RESULT_ROW_HEIGHT * 2.0 + RESULTS_BOTTOM_PADDING
         );
-        let suggested = vec![item(PaletteSection::Suggested, 0)];
-        assert_eq!(
-            command_palette_results_height(&suggested, false),
-            UNLABELED_SECTION_TOP_MARGIN + RESULT_ROW_HEIGHT + RESULTS_BOTTOM_PADDING
-        );
     }
 
     #[gpui::test]
@@ -2391,7 +2465,10 @@ mod tests {
         let viewport_height = RESULT_ROW_HEIGHT * 3.0;
         let card_height = viewport_height;
         let item_count = 12;
-        for section in [PaletteSection::Suggested, PaletteSection::Providers] {
+        for (section, top_margin) in [
+            (PaletteSection::Commands, 0.0),
+            (PaletteSection::Providers, UNLABELED_SECTION_TOP_MARGIN),
+        ] {
             let scroll = ScrollHandle::new();
             let (view, cx) = cx.add_window_view(|_, _| ResultsHarness {
                 scroll: scroll.clone(),
@@ -2411,10 +2488,7 @@ mod tests {
             let first = scroll.bounds_for_item(0).unwrap();
             let last = scroll.bounds_for_item(item_count - 1).unwrap();
             let visible_bottom = last.bottom() + scroll.offset().y;
-            assert_eq!(
-                first.top() - scroll.bounds().top(),
-                px(UNLABELED_SECTION_TOP_MARGIN)
-            );
+            assert_eq!(first.top() - scroll.bounds().top(), px(top_margin));
             assert_eq!(scroll.bounds().bottom(), px(card_height));
             assert_eq!(px(card_height) - visible_bottom, px(RESULTS_BOTTOM_PADDING));
             assert_eq!(

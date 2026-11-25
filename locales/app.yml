@@ -61,8 +61,8 @@ command_palette.resume_placeholder:
   en: Search terminal sessions…
 command_palette.resume_provider_placeholder:
   en: Select a provider…
-command_palette.suggested:
-  en: Suggested
+command_palette.recent_tasks:
+  en: Recent chats
 command_palette.tasks:
   en: Tasks
 command_palette.sessions:
