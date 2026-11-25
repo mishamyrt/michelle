@@ -2176,20 +2176,20 @@ impl Michelle {
                 .h(px(card_height))
                 .overflow_hidden()
                 .rounded(px(16.0))
-                .shadow(vec![
-                    gpui::BoxShadow::new(
-                        px(0.0),
-                        px(36.0),
-                        gpui::black().opacity(if theme.is_dark { 0.5 } else { 0.24 }),
-                    )
-                    .blur_radius(px(100.0)),
-                    gpui::BoxShadow::new(
-                        px(0.0),
-                        px(4.0),
-                        gpui::black().opacity(if theme.is_dark { 0.2 } else { 0.08 }),
-                    )
-                    .blur_radius(px(12.0)),
-                ])
+                .shadow(if theme.is_dark {
+                    // shortcut: A tighter blur hides long 8-bit bands until GPUI dithers shadows.
+                    vec![
+                        gpui::BoxShadow::new(px(0.0), px(10.0), gpui::black().opacity(0.4))
+                            .blur_radius(px(12.0)),
+                    ]
+                } else {
+                    vec![
+                        gpui::BoxShadow::new(px(0.0), px(36.0), gpui::black().opacity(0.24))
+                            .blur_radius(px(100.0)),
+                        gpui::BoxShadow::new(px(0.0), px(4.0), gpui::black().opacity(0.08))
+                            .blur_radius(px(12.0)),
+                    ]
+                })
                 .relative()
                 .flex()
                 .flex_col()
@@ -2198,7 +2198,7 @@ impl Michelle {
                     squircle()
                         .rounded(px(16.0))
                         .bg(theme.raised)
-                        .border(px(0.5))
+                        .border(px(1.0))
                         .border_color(theme.border_strong)
                         .border_inside()
                         .absolute_expand(),
