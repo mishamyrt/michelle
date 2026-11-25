@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1](https://github.com/mishamyrt/michelle/compare/v0.3.0..v0.3.1) - 2026-11-25
+
+### 🚀 Features
+
+- Align activity chevron with groups
+- Show last tasks at command panel
+
+### 🐛 Bug Fixes
+
+- Improve dark theme command palette
+
 ## [0.3.0](https://github.com/mishamyrt/michelle/compare/v0.2.1..v0.3.0) - 2026-11-24
 
 ### 🚀 Features
