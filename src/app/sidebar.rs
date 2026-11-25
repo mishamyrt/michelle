@@ -1628,7 +1628,6 @@ impl Michelle {
             SidebarCollection::Group(id) => Some(id),
             _ => None,
         };
-        let activity = collection == SidebarCollection::Activity;
         let group = id.and_then(|id| {
             self.state
                 .sidebar_project_groups
@@ -1694,11 +1693,10 @@ impl Michelle {
                     .invisible()
                     .group_hover(group_name.clone(), |style| style.visible())
                     .when(
-                        activity
-                            || (interactive
-                                && !renaming
-                                && window.last_input_was_keyboard()
-                                && menu.trigger_focus_handle().is_focused(window)),
+                        interactive
+                            && !renaming
+                            && window.last_input_was_keyboard()
+                            && menu.trigger_focus_handle().is_focused(window),
                         |icon| icon.visible(),
                     )
                     .when(collapsed, |icon| {
